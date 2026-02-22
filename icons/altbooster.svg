@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <style>
+      .glow { filter: drop-shadow(0 0 4px #3b9fd8) drop-shadow(0 0 8px #3b9fd8); }
+    </style>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#07101a"/>
+      <stop offset="100%" style="stop-color:#0b1c2e"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Фон -->
+  <rect width="128" height="128" rx="26" fill="url(#bg)"/>
+
+  <!-- Контуры зонта/глобуса -->
+  <g class="glow" fill="none" stroke="#3b9fd8" stroke-width="1.6" stroke-linecap="round">
+    <!-- Купол -->
+    <path d="M64 18 C34 18 16 36 16 55 L112 55 C112 36 94 18 64 18Z" opacity="0.7"/>
+    <!-- Вертикальные линии сетки -->
+    <line x1="64" y1="18" x2="64" y2="55" opacity="0.5"/>
+    <path d="M46 20 Q40 37 40 55" opacity="0.4"/>
+    <path d="M82 20 Q88 37 88 55" opacity="0.4"/>
+    <path d="M30 30 Q24 42 22 55" opacity="0.3"/>
+    <path d="M98 30 Q104 42 106 55" opacity="0.3"/>
+    <!-- Горизонтальные линии сетки -->
+    <path d="M22 42 Q64 36 106 42" opacity="0.4"/>
+    <path d="M16 55 L112 55" opacity="0.5"/>
+  </g>
+
+  <!-- Буква B — корпус (circuit-стиль) -->
+  <g class="glow" fill="none" stroke="#3b9fd8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Вертикальная линия B -->
+    <line x1="36" y1="54" x2="36" y2="100"/>
+    <!-- Верхняя полуокружность B -->
+    <path d="M36 54 L60 54 Q74 54 74 66 Q74 77 60 77 L36 77"/>
+    <!-- Нижняя полуокружность B (чуть шире) -->
+    <path d="M36 77 L63 77 Q80 77 80 89 Q80 100 63 100 L36 100"/>
+    <!-- Декоративные точки-узлы на углах (как на платах) -->
+    <circle cx="36" cy="54" r="2.5" fill="#3b9fd8"/>
+    <circle cx="36" cy="77" r="2.5" fill="#3b9fd8"/>
+    <circle cx="36" cy="100" r="2.5" fill="#3b9fd8"/>
+    <circle cx="60" cy="54" r="2" fill="#3b9fd8"/>
+    <circle cx="60" cy="77" r="2" fill="#3b9fd8"/>
+    <circle cx="63" cy="100" r="2" fill="#3b9fd8"/>
+  </g>
+
+  <!-- Микросхема внизу -->
+  <g class="glow" fill="none" stroke="#3b9fd8" stroke-width="1.4" stroke-linecap="round">
+    <rect x="50" y="105" width="28" height="16" rx="2" fill="#0b1c2e" stroke="#3b9fd8" stroke-width="1.4"/>
+    <!-- Ноги микросхемы -->
+    <line x1="55" y1="105" x2="55" y2="102"/>
+    <line x1="61" y1="105" x2="61" y2="102"/>
+    <line x1="67" y1="105" x2="67" y2="102"/>
+    <line x1="73" y1="105" x2="73" y2="102"/>
+    <line x1="55" y1="121" x2="55" y2="124"/>
+    <line x1="61" y1="121" x2="61" y2="124"/>
+    <line x1="67" y1="121" x2="67" y2="124"/>
+    <line x1="73" y1="121" x2="73" y2="124"/>
+    <!-- SSD надпись -->
+    <text x="64" y="117" font-family="monospace" font-size="6" fill="#3b9fd8"
+          text-anchor="middle" font-weight="bold">SSD</text>
+  </g>
+
+  <!-- Шестерёнка (маленькая, у нижней части B) -->
+  <g class="glow" transform="translate(72, 84)">
+    <circle cx="0" cy="0" r="7" fill="#07101a" stroke="#3b9fd8" stroke-width="1.4"/>
+    <circle cx="0" cy="0" r="3" fill="none" stroke="#3b9fd8" stroke-width="1.2"/>
+    <!-- Зубья -->
+    <g stroke="#3b9fd8" stroke-width="1.4" stroke-linecap="round">
+      <line x1="0" y1="-7" x2="0" y2="-10"/>
+      <line x1="0" y1="7" x2="0" y2="10"/>
+      <line x1="-7" y1="0" x2="-10" y2="0"/>
+      <line x1="7" y1="0" x2="10" y2="0"/>
+      <line x1="-4.9" y1="-4.9" x2="-7.1" y2="-7.1"/>
+      <line x1="4.9" y1="-4.9" x2="7.1" y2="-7.1"/>
+      <line x1="-4.9" y1="4.9" x2="-7.1" y2="7.1"/>
+      <line x1="4.9" y1="4.9" x2="7.1" y2="7.1"/>
+    </g>
+  </g>
+
+  <!-- Дорожки плат от B к микросхеме -->
+  <g class="glow" fill="none" stroke="#3b9fd8" stroke-width="1" stroke-linecap="round" opacity="0.6">
+    <path d="M50 100 L50 103 L53 103"/>
+    <path d="M78 95 L92 95 L92 103 L75 103"/>
+  </g>
+</svg>
