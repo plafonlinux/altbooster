@@ -56,7 +56,7 @@ sudo apt-get install python3-module-pygobject3 libgtk4-gir libadwaita-gir
 ```bash
 git clone https://github.com/plafonlinux/altbooster.git
 cd altbooster
-bash install.sh
+./install.sh
 ```
 
 ### 3. Запустить
@@ -69,7 +69,7 @@ altbooster
 ## Удаление
 
 ```bash
-bash uninstall.sh
+./uninstall.sh
 ```
 
 ## Структура проекта
