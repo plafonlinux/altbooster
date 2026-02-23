@@ -14,7 +14,7 @@
 </div>
 
 <div align="center">
-  <img src="pщreviewb.png" alt="Интерфейс ALT Booster" width="800">
+  <img src="previewb.png" alt="Интерфейс ALT Booster" width="800">
 </div>
 
 ---
