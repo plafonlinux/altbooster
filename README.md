@@ -81,7 +81,7 @@ sudo apt-get install python3-module-pygobject3 libgtk4-gir libadwaita-gir
 
 ```bash
 git clone https://github.com/plafonlinux/altbooster.git
-cd alt-booster
+cd altbooster
 ./install.sh
 ```
 
