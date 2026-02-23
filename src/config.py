@@ -133,7 +133,7 @@ TASKS: list[dict] = [
         "desc": "Дефрагментация всех Btrfs разделов",
         "cmd": [
             "bash", "-c",
-            'findmnt -t btrfs -n -o TARGET | while read mp; do'
+            'findmnt -lt btrfs -n -o TARGET | while read mp; do'
             '  echo ">>> $mp";'
             '  btrfs filesystem defragment -r -czstd "$mp" 2>&1'
             '    | grep -v "Text file busy" || true;'
@@ -147,7 +147,7 @@ TASKS: list[dict] = [
         "desc": "Проверка и исправление ошибок данных",
         "cmd": [
             "bash", "-c",
-            'findmnt -t btrfs -n -o TARGET | while read mp; do'
+            'findmnt -lt btrfs -n -o TARGET | while read mp; do'
             '  echo ">>> Scrub $mp";'
             '  btrfs scrub start -B "$mp";'
             ' done',
