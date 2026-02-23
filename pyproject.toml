@@ -1,0 +1,27 @@
+[project]
+name = "altbooster"
+version = "2.0.0"
+description = "Утилита настройки и обслуживания ALT Linux"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "PLAFON", url = "https://github.com/plafonlinux" }]
+requires-python = ">=3.11"
+
+# Внешних Python-зависимостей нет — только GTK4/Adwaita через систему
+dependencies = []
+
+[project.urls]
+Homepage   = "https://github.com/plafonlinux/altbooster"
+Repository = "https://github.com/plafonlinux/altbooster"
+Issues     = "https://github.com/plafonlinux/altbooster/issues"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]   # pycodestyle + pyflakes + isort
+ignore = ["E501"]                # длинные строки в bash-командах — допустимо
+
+[tool.ruff.lint.per-file-ignores]
+"src/config.py" = ["E501"]      # bash-команды в APPS неизбежно длинные
