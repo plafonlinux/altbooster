@@ -203,11 +203,30 @@ APPS: list[dict] = [
         {"id": "cassette",    "label": "Cassette",    "desc": "Неофициальный клиент Яндекс Музыки",
          "source": _flatpak("space.rirusha.Cassette")},
     ]},
+    {"group": "Браузеры", "items": [
+        {"id": "firefox",   "label": "Firefox",       "desc": "Браузер Mozilla Firefox",
+         "source": _flatpak("org.mozilla.firefox")},
+        {"id": "chrome",    "label": "Google Chrome", "desc": "Браузер Google Chrome",
+         "source": _flatpak("com.google.Chrome")},
+        {"id": "yandex",    "label": "Яндекс Браузер", "desc": "Официальный браузер от Яндекса",
+         "source": _flatpak("ru.yandex.Browser")},
+    ]},
     {"group": "Работа с документами", "items": [
         {"id": "libreoffice", "label": "LibreOffice", "desc": "Офисный пакет",
          "source": _flatpak("org.libreoffice.LibreOffice")},
         {"id": "onlyoffice",  "label": "OnlyOffice",  "desc": "Офисный пакет с совместимостью MS",
          "source": _flatpak("org.onlyoffice.desktopeditors")},
+        {"id": "brother_printer", "label": "Принтер Brother", "desc": "cups-browsed avahi-daemon — поддержка сети и AirPrint",
+         "source": {
+             "label": "APT",
+             "cmd": [
+                 "bash", "-c",
+                 "apt-get install -y cups-browsed avahi-daemon libnss-mdns sane sane-airscan"
+                 " && systemctl enable --now cups-browsed"
+                 " && systemctl enable --now avahi-daemon",
+             ],
+             "check": ("rpm", "cups-browsed"),
+         }},
     ]},
     {"group": "Мультимедиа", "items": [
         {"id": "obs", "label": "OBS Studio", "desc": "Запись и стриминг",
