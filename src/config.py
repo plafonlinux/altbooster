@@ -43,7 +43,7 @@ TASKS = [
     {"id": "flatpak",      "icon": "application-x-addon-symbolic",  "label": "Уборка Flatpak",  "desc": "Удаляет неиспользуемые runtime-библиотеки",       "cmd": ["flatpak", "uninstall", "--unused", "-y"]},
     {"id": "journal",      "icon": "document-open-recent-symbolic", "label": "Сжатие журналов", "desc": "journalctl --vacuum-time=14d",                    "cmd": ["journalctl", "--vacuum-time=14d"]},
     {"id": "btrfs_bal",    "icon": "drive-multidisk-symbolic",      "label": "Баланс Btrfs",    "desc": "btrfs balance -dusage=50 -musage=50 /",           "cmd": ["btrfs", "balance", "start", "-dusage=50", "-musage=50", "/"]},
-    {"id": "btrfs_defrag", "icon": "emblem-synchronizing-symbolic", "label": "Дефрагментация",  "desc": "btrfs filesystem defragment -r -czstd /",         "cmd": ["btrfs", "filesystem", "defragment", "-r", "-czstd", "/"]},
+    {"id": "btrfs_defrag", "icon": "emblem-synchronizing-symbolic", "label": "Дефрагментация",  "desc": "btrfs filesystem defragment -r -czstd /home",     "cmd": ["btrfs", "filesystem", "defragment", "-r", "-czstd", "/home"]},
     {"id": "trim",         "icon": "media-flash-symbolic",          "label": "SSD TRIM",        "desc": "fstrim -av — оптимизация блоков SSD",             "cmd": ["fstrim", "-av"]},
 ]
 

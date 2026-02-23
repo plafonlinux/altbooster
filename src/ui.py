@@ -133,7 +133,12 @@ class AppRow(Adw.ActionRow):
         self._installing = True; src = self._app["source"]; self._btn.set_sensitive(False); self._btn.set_label("…")
         self._prog.set_visible(True); self._prog.set_fraction(0.0); GLib.timeout_add(120, self._pulse)
         self._log(f"\n▶  Установка {self._app['label']} ({src['label']})...\n")
-        backend.run_privileged(src["cmd"], self._log, self._install_done)
+        # epm команды через run_epm (SUDO_ASKPASS), иначе зависают
+        cmd = src["cmd"]
+        if cmd and cmd[0] == "epm":
+            backend.run_epm(cmd, self._log, self._install_done)
+        else:
+            backend.run_privileged(cmd, self._log, self._install_done)
 
     def _on_uninstall(self, _):
         if self._installing: return
@@ -290,15 +295,30 @@ class SetupPage(Gtk.Box):
 
     def _on_epm(self, _):
         if backend.is_system_busy(): self._log("\n⚠  Система занята другим процессом обновления.\n"); return
-        self._epm_btn.set_sensitive(False); self._epm_btn.set_label("…"); self._log("\n▶  EPM: обновление системы...\n")
-        cmds = [["epm","update"],["epm","full-upgrade"],["apt-get","clean"]]
-        def ch(i):
-            if i >= len(cmds): GLib.idle_add(self._epm_fin, True); return
-            backend.run_privileged(cmds[i], self._log, lambda ok: ch(i+1) if ok else GLib.idle_add(self._epm_fin,False))
-        ch(0)
+        self._epm_btn.set_sensitive(False); self._epm_btn.set_label("…")
+        self._epm_done = False  # guard против двойного вызова
+        self._log("\n▶  EPM: обновление системы...\n")
+        def step2(ok):
+            if not ok: GLib.idle_add(self._epm_fin, False); return
+            self._log("\n▶  epm full-upgrade...\n")
+            backend.run_epm(["epm", "-y", "full-upgrade"], self._log,
+                lambda ok2: GLib.idle_add(self._epm_fin, True))
+        self._log("\n▶  epm update...\n")
+        backend.run_epm(["epm", "-y", "update"], self._log, step2)
 
     def _epm_fin(self, ok):
-        self._epm_st.set_label("✅" if ok else "❌"); self._epm_btn.set_label("Запустить"); self._epm_btn.set_sensitive(True); self._log(f"{'✔  EPM завершён!' if ok else '✘  Ошибка EPM'}\n")
+        if getattr(self, "_epm_done", False): return  # guard
+        self._epm_done = True
+        if ok:
+            self._epm_st.set_from_icon_name("object-select-symbolic")
+            self._epm_st.add_css_class("success")
+            self._log("\n✔  ALT Linux последней версии установлен!\n")
+        else:
+            self._epm_st.set_from_icon_name("dialog-error-symbolic")
+            self._epm_st.remove_css_class("success")
+            self._log("\n✘  Ошибка обновления\n")
+        self._epm_btn.set_label("Запустить")
+        self._epm_btn.set_sensitive(True)
 
 class AppsPage(Gtk.Box):
     def __init__(self, log_fn):
@@ -462,7 +482,7 @@ class DaVinciPage(Gtk.Box):
     def _on_install(self, _):
         if backend.is_system_busy(): self._log("\n⚠  Система занята. Попробуйте позже.\n"); return
         self._inst_btn.set_sensitive(False); self._inst_btn.set_label("…"); self._log("\n▶  Установка DaVinci Resolve...\n")
-        backend.run_privileged(["epm","play","davinci-resolve"], self._log, lambda ok: GLib.idle_add(self._inst_done, ok))
+        backend.run_epm(["epm","play","davinci-resolve"], self._log, lambda ok: GLib.idle_add(self._inst_done, ok))
 
     def _inst_done(self, ok): self._set_ui(ok); self._log(f"{'✔  DaVinci готов!' if ok else '✘  Ошибка установки'}\n")
 
