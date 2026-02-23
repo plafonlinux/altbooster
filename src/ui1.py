@@ -449,20 +449,13 @@ class DaVinciPage(Gtk.Box):
         backend.run_privileged(cmd, self._log, self._post_done)
 
     def _post_done(self, ok: bool):
+        self._post_st.set_label("✅" if ok else "❌")
+        self._post_btn.set_label("Повторить" if not ok else "Выполнено")
+        self._post_btn.set_sensitive(not ok)
         if ok:
-            self._post_st.set_from_icon_name("object-select-symbolic")
-            self._post_st.add_css_class("success")
-            self._post_btn.set_label("Выполнено")
-            self._post_btn.set_sensitive(False)
             self._post_btn.remove_css_class("destructive-action")
             self._post_btn.add_css_class("flat")
-            self._log("\n✔  Готово! Запустите DaVinci Resolve.\n")
-        else:
-            self._post_st.set_from_icon_name("dialog-error-symbolic")
-            self._post_st.remove_css_class("success")
-            self._post_btn.set_label("Повторить")
-            self._post_btn.set_sensitive(True)
-            self._log("\n✘  Ошибка PostInstall\n")
+        self._log("✔  Готово! Запустите DaVinci Resolve.\n" if ok else "✘  Ошибка PostInstall\n")
 
     def _pick_folder(self, row, key):
         dialog = Gtk.FileDialog(); dialog.set_title("Выберите папку")
