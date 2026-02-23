@@ -101,19 +101,26 @@ bash uninstall.sh
 ## Структура проекта
 
 ```
-alt-booster/
-├── src/
-│   ├── main.py           # Точка входа
-│   ├── ui.py             # Интерфейс (GTK4/Adwaita)
-│   ├── backend.py        # Команды и проверки
-│   └── config.py         # Конфиг, данные приложений
-├── icons/
-│   ├── altbooster.svg        # Иконка приложения
-│   ├── davinci-symbolic.svg  # Иконка DaVinci
-│   └── flathub-symbolic.svg  # Иконка Flathub
-├── install.sh            # Установщик
-├── uninstall.sh          # Деинсталлятор
-└── README.md
+altbooster/
+├── src/                        # Исходный код приложения
+│   ├── main.py                 # Точка входа (запуск интерфейса)
+│   ├── ui.py                   # Интерфейс (GTK4/Adwaita), лог, страницы
+│   ├── backend.py              # Системные вызовы, sudo, проверки lock
+│   └── config.py               # Данные приложений и настройки путей
+├── icons/                      # Графические ресурсы
+│   ├── altbooster.svg          # Основная иконка (вектор)
+│   ├── altbooster.png          # Основная иконка (растр для установщика)
+│   ├── davinci-symbolic.svg    # Монохромная иконка для вкладки DaVinci
+│   └── flathub-symbolic.svg    # Монохромная иконка для вкладки Flathub
+├── .gitignore                  # Исключение мусора (__pycache__) из Git
+├── pyproject.toml              # Описание проекта и зависимостей (PEP 621)
+├── LICENSE                     # Юридическая информация (MIT)
+├── README.md                   # Главная страница проекта на GitHub
+├── CHANGELOG.md                # История изменений по версиям
+├── CONTRIBUTING.md             # Инструкция для тех, кто хочет помочь кодом
+├── previewb.png                # Скриншот-превью для страницы репозитория
+├── install.sh                  # Скрипт установки в систему
+└── uninstall.sh                # Скрипт удаления
 ```
 
 ## Лицензия
