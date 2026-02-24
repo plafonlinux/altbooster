@@ -1,0 +1,92 @@
+{
+  "id": "appearance",
+  "title": "Внешний вид",
+  "icon": "preferences-desktop-wallpaper-symbolic",
+  "groups": [
+    {
+      "id": "icons",
+      "title": "Темы иконок",
+      "description": "Установка и переключение системных тем иконок",
+      "rows": [
+        {
+          "id": "papirus_install",
+          "type": "command_row",
+          "title": "Установить Papirus",
+          "subtitle": "epmi papirus-remix-icon-theme",
+          "icon": "preferences-desktop-theme-symbolic",
+          "button_label": "Установить",
+          "button_done_label": "Установлен",
+          "check": { "type": "rpm", "value": "papirus-remix-icon-theme" },
+          "action": { "type": "privileged", "cmd": ["apt-get", "install", "-y", "papirus-remix-icon-theme"] }
+        },
+        {
+          "id": "papirus_apply",
+          "type": "command_row",
+          "title": "Применить иконки Papirus",
+          "subtitle": "Papirus-Dark / Papirus — по текущей теме",
+          "icon": "preferences-desktop-wallpaper-symbolic",
+          "button_label": "Применить",
+          "button_style": "flat",
+          "check": { "type": "gsettings_contains", "schema": "org.gnome.desktop.interface", "key": "icon-theme", "value": "Papirus" },
+          "action": { "type": "builtin", "fn": "apply_papirus_icons" }
+        },
+        {
+          "id": "adwaita_apply",
+          "type": "command_row",
+          "title": "Стандартная тема иконок Adwaita",
+          "subtitle": "icon-theme: Adwaita  |  gtk-theme: Adwaita",
+          "icon": "preferences-desktop-theme-symbolic",
+          "button_label": "Применить",
+          "button_style": "flat",
+          "check": { "type": "gsettings_contains", "schema": "org.gnome.desktop.interface", "key": "icon-theme", "value": "Adwaita" },
+          "action": { "type": "builtin", "fn": "apply_adwaita_theme" }
+        }
+      ]
+    },
+    {
+      "id": "folders",
+      "title": "Цветные папки Papirus",
+      "description": "papirus-folders — выбор цвета папок",
+      "rows": [
+        {
+          "id": "folder_color",
+          "type": "dropdown_row",
+          "title": "Цвет папок",
+          "subtitle": "Выберите цвет и нажмите Применить",
+          "icon": "folder-symbolic",
+          "button_label": "Применить",
+          "state_key": "folder_color",
+          "options": ["adwaita","blue","bluegrey","breeze","cyan","darkcyan","green","grey","indigo","magenta","nordic","orange","palebrown","paleorange","pink","red","teal","violet","white","yellow","yaru"],
+          "action": { "type": "builtin", "fn": "apply_folder_color", "arg_from": "selected_option" }
+        },
+        {
+          "id": "folder_reset",
+          "type": "command_row",
+          "title": "Сбросить цвет папок",
+          "subtitle": "papirus-folders -D",
+          "icon": "edit-undo-symbolic",
+          "button_label": "Сбросить",
+          "button_style": "destructive-action",
+          "action": { "type": "builtin", "fn": "reset_folder_color" }
+        }
+      ]
+    },
+    {
+      "id": "wallpapers",
+      "title": "Обои от PLAFON",
+      "description": "Скачать обои с https://oboi.plafon.org",
+      "rows": [
+        {
+          "id": "open_wallpapers",
+          "type": "command_row",
+          "title": "Открыть сайт с обоями",
+          "subtitle": "https://oboi.plafon.org",
+          "icon": "image-x-generic-symbolic",
+          "button_label": "Открыть",
+          "button_style": "flat",
+          "action": { "type": "open_url", "url": "https://oboi.plafon.org" }
+        }
+      ]
+    }
+  ]
+}

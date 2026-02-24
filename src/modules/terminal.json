@@ -1,0 +1,176 @@
+{
+  "id": "terminal",
+  "title": "Терминал",
+  "icon": "utilities-terminal-symbolic",
+  "groups": [
+    {
+      "id": "ptyxis",
+      "title": "Ptyxis",
+      "description": "Современный терминал GNOME, заменяет gnome-terminal",
+      "rows": [
+        {
+          "id": "ptyxis_install",
+          "type": "command_row",
+          "title": "Установить Ptyxis",
+          "subtitle": "epmi ptyxis + удалить gnome-terminal",
+          "icon": "utilities-terminal-symbolic",
+          "button_label": "Установить",
+          "button_done_label": "Установлен",
+          "check": { "type": "which", "value": "ptyxis" },
+          "action": { "type": "privileged", "cmd": ["bash", "-c", "apt-get remove -y gnome-terminal 2>/dev/null || true && apt-get install -y ptyxis"] }
+        },
+        {
+          "id": "ptyxis_default",
+          "type": "command_row",
+          "title": "Ptyxis по умолчанию",
+          "subtitle": "xdg-mime default org.gnome.Ptyxis.desktop x-scheme-handler/terminal",
+          "icon": "starred-symbolic",
+          "button_label": "Применить",
+          "button_done_label": "Применено",
+          "button_style": "flat",
+          "check": { "type": "builtin", "fn": "check_ptyxis_default" },
+          "action": { "type": "builtin", "fn": "set_ptyxis_default" }
+        }
+      ]
+    },
+    {
+      "id": "shortcuts",
+      "title": "Горячие клавиши",
+      "description": "Шорткаты для открытия терминала",
+      "rows": [
+        {
+          "id": "shortcut_1",
+          "type": "command_row",
+          "title": "Terminal 1",
+          "subtitle": "Ctrl + Alt + T",
+          "icon": "input-keyboard-symbolic",
+          "button_label": "Назначить",
+          "button_done_label": "Назначен",
+          "check": { "type": "builtin", "fn": "check_shortcut_1" },
+          "action": { "type": "builtin", "fn": "set_shortcut_1" }
+        },
+        {
+          "id": "shortcut_2",
+          "type": "command_row",
+          "title": "Terminal 2",
+          "subtitle": "Super + Enter",
+          "icon": "input-keyboard-symbolic",
+          "button_label": "Назначить",
+          "button_done_label": "Назначен",
+          "check": { "type": "builtin", "fn": "check_shortcut_2" },
+          "action": { "type": "builtin", "fn": "set_shortcut_2" }
+        }
+      ]
+    },
+    {
+      "id": "zsh",
+      "title": "ZSH",
+      "description": "Устанавливает zsh + git + zplug, делает ZSH shell по умолчанию",
+      "rows": [
+        {
+          "id": "zsh_install",
+          "type": "command_row",
+          "title": "Установить git и zsh",
+          "subtitle": "apt-get install -y git zsh",
+          "icon": "utilities-terminal-symbolic",
+          "button_label": "Установить",
+          "button_done_label": "Установлен",
+          "check": { "type": "which", "value": "zsh" },
+          "action": { "type": "privileged", "cmd": ["apt-get", "install", "-y", "git", "zsh"] }
+        },
+        {
+          "id": "zplug_install",
+          "type": "command_row",
+          "title": "Установить zplug",
+          "subtitle": "git clone https://github.com/zplug/zplug ~/.zplug",
+          "icon": "utilities-terminal-symbolic",
+          "button_label": "Установить",
+          "button_done_label": "Установлен",
+          "check": { "type": "path", "value": "~/.zplug" },
+          "action": { "type": "builtin", "fn": "install_zplug" }
+        },
+        {
+          "id": "zsh_default",
+          "type": "command_row",
+          "title": "ZSH по умолчанию",
+          "subtitle": "chsh -s /bin/zsh",
+          "icon": "system-run-symbolic",
+          "button_label": "Применить",
+          "button_done_label": "Применено",
+          "check": { "type": "builtin", "fn": "check_zsh_default" },
+          "action": { "type": "builtin", "fn": "set_zsh_default" }
+        }
+      ]
+    },
+    {
+      "id": "fastfetch",
+      "title": "Fastfetch + шрифты",
+      "description": "Системная информация с иконками Nerd Fonts",
+      "rows": [
+        {
+          "id": "fastfetch_install",
+          "type": "command_row",
+          "title": "Установить Fastfetch",
+          "subtitle": "epmi fastfetch",
+          "icon": "dialog-information-symbolic",
+          "button_label": "Установить",
+          "button_done_label": "Установлен",
+          "check": { "type": "which", "value": "fastfetch" },
+          "action": { "type": "epm", "cmd": ["epm", "-i", "fastfetch"] }
+        },
+        {
+          "id": "firacode_install",
+          "type": "command_row",
+          "title": "Шрифт FiraCode Nerd Font",
+          "subtitle": "epmi fonts-ttf-fira-code-nerd",
+          "icon": "font-x-generic-symbolic",
+          "button_label": "Установить",
+          "button_done_label": "Установлен",
+          "check": { "type": "rpm", "value": "fonts-ttf-fira-code-nerd" },
+          "action": { "type": "epm", "cmd": ["epm", "-i", "fonts-ttf-fira-code-nerd"] }
+        },
+        {
+          "id": "font_apply",
+          "type": "command_row",
+          "title": "Применить шрифт в Ptyxis",
+          "subtitle": "FiraCode Nerd Font Regular 14",
+          "icon": "font-x-generic-symbolic",
+          "button_label": "Применить",
+          "button_done_label": "Применён",
+          "button_style": "flat",
+          "check": { "type": "builtin", "fn": "check_ptyxis_font" },
+          "action": { "type": "shell", "cmd": ["dconf", "write", "/org/gnome/Ptyxis/Profiles/default/font-name", "'FiraCode Nerd Font Regular 14'"] }
+        },
+        {
+          "id": "ffcfg_install",
+          "type": "command_row",
+          "title": "Конфиг plafonfetch.jsonc",
+          "subtitle": "Сохраняет в ~/.config/fastfetch/plafonfetch.jsonc",
+          "icon": "document-save-symbolic",
+          "button_label": "Установить",
+          "button_done_label": "Установлен",
+          "check": { "type": "path", "value": "~/.config/fastfetch/plafonfetch.jsonc" },
+          "action": { "type": "builtin", "fn": "install_fastfetch_config" }
+        }
+      ]
+    },
+    {
+      "id": "aliases",
+      "title": "Алиасы PLAFON",
+      "description": "Добавляет набор алиасов в ~/.zshrc",
+      "rows": [
+        {
+          "id": "aliases_add",
+          "type": "command_row",
+          "title": "Добавить алиасы в .zshrc",
+          "subtitle": "Алиасы для epm, flatpak, timeshift, DaVinci и др.",
+          "icon": "text-editor-symbolic",
+          "button_label": "Добавить",
+          "button_done_label": "Добавлены",
+          "check": { "type": "builtin", "fn": "check_zsh_aliases" },
+          "action": { "type": "builtin", "fn": "add_zsh_aliases" }
+        }
+      ]
+    }
+  ]
+}

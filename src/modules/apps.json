@@ -1,0 +1,566 @@
+{
+  "id": "apps",
+  "title": "Приложения",
+  "icon": "application-x-executable-symbolic",
+  "groups": [
+    {
+      "id": "общение",
+      "title": "Общение",
+      "items": [
+        {
+          "id": "telegram",
+          "label": "Telegram",
+          "desc": "Мессенджер",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.telegram.desktop"
+            ],
+            "check": [
+              "flatpak",
+              "org.telegram.desktop"
+            ]
+          }
+        },
+        {
+          "id": "thunderbird",
+          "label": "Thunderbird",
+          "desc": "Почтовый клиент",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.mozilla.Thunderbird"
+            ],
+            "check": [
+              "flatpak",
+              "org.mozilla.Thunderbird"
+            ]
+          }
+        },
+        {
+          "id": "aurynk",
+          "label": "Aurynk",
+          "desc": "Клиент для общения",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "io.github.IshuSinghSE.aurynk"
+            ],
+            "check": [
+              "flatpak",
+              "io.github.IshuSinghSE.aurynk"
+            ]
+          }
+        },
+        {
+          "id": "cassette",
+          "label": "Cassette",
+          "desc": "Неофициальный клиент Яндекс Музыки",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "space.rirusha.Cassette"
+            ],
+            "check": [
+              "flatpak",
+              "space.rirusha.Cassette"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "браузеры",
+      "title": "Браузеры",
+      "items": [
+        {
+          "id": "firefox",
+          "label": "Firefox",
+          "desc": "Браузер Mozilla Firefox",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.mozilla.firefox"
+            ],
+            "check": [
+              "flatpak",
+              "org.mozilla.firefox"
+            ]
+          }
+        },
+        {
+          "id": "chrome",
+          "label": "Google Chrome",
+          "desc": "Браузер Google Chrome",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.google.Chrome"
+            ],
+            "check": [
+              "flatpak",
+              "com.google.Chrome"
+            ]
+          }
+        },
+        {
+          "id": "yandex",
+          "label": "Яндекс Браузер",
+          "desc": "Официальный браузер от Яндекса",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "ru.yandex.Browser"
+            ],
+            "check": [
+              "flatpak",
+              "ru.yandex.Browser"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "работа_s_документами",
+      "title": "Работа с документами",
+      "items": [
+        {
+          "id": "libreoffice",
+          "label": "LibreOffice",
+          "desc": "Офисный пакет",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.libreoffice.LibreOffice"
+            ],
+            "check": [
+              "flatpak",
+              "org.libreoffice.LibreOffice"
+            ]
+          }
+        },
+        {
+          "id": "onlyoffice",
+          "label": "OnlyOffice",
+          "desc": "Офисный пакет с совместимостью MS",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.onlyoffice.desktopeditors"
+            ],
+            "check": [
+              "flatpak",
+              "org.onlyoffice.desktopeditors"
+            ]
+          }
+        },
+        {
+          "id": "brother_printer",
+          "label": "Принтер Brother",
+          "desc": "cups-browsed avahi-daemon — поддержка сети и AirPrint",
+          "source": {
+            "label": "APT",
+            "cmd": [
+              "bash",
+              "-c",
+              "apt-get install -y cups-browsed avahi-daemon libnss-mdns sane sane-airscan && systemctl enable --now cups-browsed && systemctl enable --now avahi-daemon"
+            ],
+            "check": [
+              "rpm",
+              "cups-browsed"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "мультимедиа",
+      "title": "Мультимедиа",
+      "items": [
+        {
+          "id": "obs",
+          "label": "OBS Studio",
+          "desc": "Запись и стриминг",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.obsproject.Studio",
+              "com.obsproject.Studio.Plugin.WaylandHotkeys"
+            ],
+            "check": [
+              "flatpak",
+              "com.obsproject.Studio"
+            ]
+          }
+        },
+        {
+          "id": "kdenlive",
+          "label": "KDENlive",
+          "desc": "Видеоредактор",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.kde.kdenlive"
+            ],
+            "check": [
+              "flatpak",
+              "org.kde.kdenlive"
+            ]
+          }
+        },
+        {
+          "id": "audacity",
+          "label": "Audacity",
+          "desc": "Аудиоредактор",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.audacityteam.Audacity"
+            ],
+            "check": [
+              "flatpak",
+              "org.audacityteam.Audacity"
+            ]
+          }
+        },
+        {
+          "id": "krita",
+          "label": "Krita",
+          "desc": "Растровый графический редактор",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.kde.krita"
+            ],
+            "check": [
+              "flatpak",
+              "org.kde.krita"
+            ]
+          }
+        },
+        {
+          "id": "inkscape",
+          "label": "Inkscape",
+          "desc": "Векторный редактор",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.inkscape.Inkscape"
+            ],
+            "check": [
+              "flatpak",
+              "org.inkscape.Inkscape"
+            ]
+          }
+        },
+        {
+          "id": "spotify",
+          "label": "Spotify",
+          "desc": "Музыкальный стриминг",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.spotify.Client"
+            ],
+            "check": [
+              "flatpak",
+              "com.spotify.Client"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "утилиты",
+      "title": "Утилиты",
+      "items": [
+        {
+          "id": "alacarte",
+          "label": "Alacarte",
+          "desc": "Редактор главного меню",
+          "source": {
+            "label": "EPM",
+            "cmd": [
+              "epm",
+              "-i",
+              "alacarte"
+            ],
+            "check": [
+              "rpm",
+              "alacarte"
+            ]
+          }
+        },
+        {
+          "id": "bitwarden",
+          "label": "Bitwarden",
+          "desc": "Менеджер паролей",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.bitwarden.desktop"
+            ],
+            "check": [
+              "flatpak",
+              "com.bitwarden.desktop"
+            ]
+          }
+        },
+        {
+          "id": "foliate",
+          "label": "Foliate",
+          "desc": "Читалка книг",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.github.johnfactotum.Foliate"
+            ],
+            "check": [
+              "flatpak",
+              "com.github.johnfactotum.Foliate"
+            ]
+          }
+        },
+        {
+          "id": "calibre",
+          "label": "Calibre",
+          "desc": "Управление библиотекой книг",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.calibre_ebook.calibre"
+            ],
+            "check": [
+              "flatpak",
+              "com.calibre_ebook.calibre"
+            ]
+          }
+        },
+        {
+          "id": "parabolic",
+          "label": "Parabolic",
+          "desc": "Загрузчик видео (YouTube и др.)",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.nickvision.tubeconverter"
+            ],
+            "check": [
+              "flatpak",
+              "org.nickvision.tubeconverter"
+            ]
+          }
+        },
+        {
+          "id": "resources",
+          "label": "Ресурсы",
+          "desc": "Мониторинг системных ресурсов",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "net.nokyan.Resources"
+            ],
+            "check": [
+              "flatpak",
+              "net.nokyan.Resources"
+            ]
+          }
+        },
+        {
+          "id": "protonplus",
+          "label": "Proton Plus",
+          "desc": "Менеджер версий Proton для Steam",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.vysp3r.ProtonPlus"
+            ],
+            "check": [
+              "flatpak",
+              "com.vysp3r.ProtonPlus"
+            ]
+          }
+        },
+        {
+          "id": "warehouse",
+          "label": "Warehouse",
+          "desc": "Управление Flatpak-приложениями",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "io.github.flattool.Warehouse"
+            ],
+            "check": [
+              "flatpak",
+              "io.github.flattool.Warehouse"
+            ]
+          }
+        },
+        {
+          "id": "flatseal",
+          "label": "Flatseal",
+          "desc": "Управление правами Flatpak",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.github.tchx84.Flatseal"
+            ],
+            "check": [
+              "flatpak",
+              "com.github.tchx84.Flatseal"
+            ]
+          }
+        },
+        {
+          "id": "monic",
+          "label": "Monic",
+          "desc": "Управление монитором (DDC/CI)",
+          "source": {
+            "label": "GitHub",
+            "cmd": [
+              "bash",
+              "-c",
+              "set -e; REAL_USER=$SUDO_USER; HOME_DIR=$(getent passwd $REAL_USER | cut -d: -f6); apt-get install -y python3-module-pip; mkdir -p /etc/modules-load.d; echo i2c-dev > /etc/modules-load.d/i2c-dev.conf; groupadd -f i2c; chown :i2c /dev/i2c-* 2>/dev/null || true; usermod -aG i2c $REAL_USER; echo 'KERNEL==\"i2c-[0-9]*\", GROUP=\"i2c\"' > /etc/udev/rules.d/10-i2c.rules; udevadm control --reload-rules; udevadm trigger; sudo -u $REAL_USER bash -c   'cd /tmp && rm -rf Monic   && git clone https://github.com/toxblh/Monic.git   && cd Monic && ./install.sh'; sudo -u $REAL_USER bash $HOME_DIR/.local/share/monitor-control/run_monitor_control.sh"
+            ],
+            "check": [
+              "path",
+              "~/.local/share/monitor-control/run_monitor_control.sh"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "диагностика",
+      "title": "Диагностика",
+      "items": [
+        {
+          "id": "furmark",
+          "label": "FurMark",
+          "desc": "Стресс-тест GPU",
+          "source": {
+            "label": "EPM",
+            "cmd": [
+              "epm",
+              "play",
+              "furmark"
+            ],
+            "check": [
+              "rpm",
+              "furmark"
+            ]
+          }
+        },
+        {
+          "id": "occt",
+          "label": "OCCT",
+          "desc": "Стресс-тест CPU/GPU/RAM",
+          "source": {
+            "label": "EPM",
+            "cmd": [
+              "epm",
+              "play",
+              "occt"
+            ],
+            "check": [
+              "rpm",
+              "OCCT"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
