@@ -16,6 +16,7 @@ ui.py — интерфейс GTK4 / Adwaita для ALT Booster.
 Вкладки «Внешний вид», «Терминал», «AMD Radeon» строятся через DynamicPage.
 """
 
+import shutil
 import ast
 import json
 import os
@@ -667,13 +668,16 @@ class SetupPage(Gtk.Box):
         if backend.is_system_busy():
             self._log("\n⚠  Система занята.\n"); return
         row.set_working()
-        self._log("\n▶  Оптимизация journald.conf...\n")
+        self._log("\n▶  Оптимизация журналов (создание drop-in конфига)...\n")
+        
+        # Используем безопасный путь через /etc/systemd/journald.conf.d/
         cmd = ["bash", "-c",
-               "sed -i 's/^#\\?SystemMaxUse=.*/SystemMaxUse=100M/' /etc/systemd/journald.conf"
-               " && sed -i 's/^#\\?Compress=.*/Compress=yes/' /etc/systemd/journald.conf"
-               " && systemctl restart systemd-journald"]
+               "mkdir -p /etc/systemd/journald.conf.d && "
+               "echo -e '[Journal]\\nSystemMaxUse=100M\\nCompress=yes' > /etc/systemd/journald.conf.d/99-altbooster.conf && "
+               "systemctl restart systemd-journald"]
+        
         backend.run_privileged(cmd, self._log,
-            lambda ok: (row.set_done(ok), self._log("✔  Лимиты применены!\n" if ok else "✘  Ошибка\n")))
+            lambda ok: (row.set_done(ok), self._log("✔  Лимиты применены через drop-in!\n" if ok else "✘  Ошибка\n")))
 
     def _on_scale(self, row):
         row.set_working()
@@ -829,6 +833,11 @@ class AppsPage(Gtk.Box):
                 src = dict(app["source"])
                 chk = src.get("check", [])
                 src["check"] = tuple(chk) if isinstance(chk, list) else chk
+                
+                # ИСПРАВЛЕНИЕ ISSUE #4 - Rirusha: Если нужен epm, а его нет — пропускаем отрисовку
+                if src.get("cmd") and src["cmd"][0] == "epm" and not shutil.which("epm"):
+                    continue
+                
                 app_n = dict(app, source=src)
 
                 row = AppRow(app_n, self._log, self._refresh_btn_all)
@@ -936,10 +945,30 @@ class AppsPage(Gtk.Box):
             self._btn_all.add_css_class("flat")
 
     def run_all_external(self, btn):
-        self._ext_btn = btn
-        btn.set_sensitive(False)
-        btn.set_label("⏳ Установка...")
-        self._run_all(None)
+        dialog = Adw.AlertDialog(
+            heading="Массовая установка приложений",
+            body="Эта кнопка запустит фоновую установку абсолютно всех программ из вкладки «Приложения».\n\nВы можете предварительно перейти на эту вкладку, чтобы удалить ненужный софт или добавить свои собственные программы (DEB, Flatpak, скрипты) через встроенный редактор.\n\nНачать массовую установку сейчас?"
+        )
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("install", "Установить всё")
+        
+        # Делаем кнопку установки акцентной (синей)
+        dialog.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("install")
+        dialog.set_close_response("cancel")
+
+        def _on_response(_d, response):
+            if response == "install":
+                self._ext_btn = btn
+                btn.set_sensitive(False)
+                btn.set_label("⏳ Установка...")
+                # Запускаем оригинальный процесс установки
+                self._run_all(None)
+
+        dialog.connect("response", _on_response)
+        
+        # Показываем окно поверх основного интерфейса
+        dialog.present(self.get_root())
 
     def _run_all(self, _):
         if self._busy: return
@@ -1058,36 +1087,43 @@ class DaVinciPage(Gtk.Box):
             _set_status_ok(self._inst_st); self._inst_btn.set_label("Установлен"); self._inst_btn.set_sensitive(False)
             self._inst_btn.remove_css_class("suggested-action"); self._inst_btn.add_css_class("flat")
         else:
-            _clear_status(self._inst_st); self._inst_btn.set_sensitive(True)
+            _clear_status(self._inst_st); self._inst_btn.set_sensitive(True); self._inst_btn.set_label("Установить")
 
     def _set_amd_ui(self, ok):
         if ok:
             _set_status_ok(self._amd_st); self._amd_btn.set_label("Установлено"); self._amd_btn.set_sensitive(False)
             self._amd_btn.remove_css_class("suggested-action"); self._amd_btn.add_css_class("flat")
         else:
-            _clear_status(self._amd_st); self._amd_btn.set_sensitive(True)
+            _clear_status(self._amd_st); self._amd_btn.set_sensitive(True); self._amd_btn.set_label("Установить")
 
     def _set_aac_ui(self, ok):
         if ok:
             _set_status_ok(self._aac_st); self._aac_btn.set_label("Установлен"); self._aac_btn.set_sensitive(False)
             self._aac_btn.remove_css_class("suggested-action"); self._aac_btn.add_css_class("flat")
         else:
-            _clear_status(self._aac_st); self._aac_btn.set_sensitive(True)
+            _clear_status(self._aac_st); self._aac_btn.set_sensitive(True); self._aac_btn.set_label("Установить")
 
     def _set_fl_ui(self, ok):
         if ok:
             _set_status_ok(self._fl_st); self._fl_btn.set_label("Установлен"); self._fl_btn.set_sensitive(False)
             self._fl_btn.remove_css_class("suggested-action"); self._fl_btn.add_css_class("flat")
         else:
-            _clear_status(self._fl_st); self._fl_btn.set_sensitive(True)
+            _clear_status(self._fl_st); self._fl_btn.set_sensitive(True); self._fl_btn.set_label("Установить")
 
     def _on_install(self, _):
         if backend.is_system_busy():
             self._log("\n⚠  Система занята.\n"); return
         self._inst_btn.set_sensitive(False); self._inst_btn.set_label("…")
         self._log("\n▶  Установка DaVinci Resolve...\n")
-        backend.run_epm(["epm", "play", "davinci-resolve"], self._log,
-            lambda ok: (self._set_install_ui(ok), self._log("✔  DaVinci готов!\n" if ok else "✘  Ошибка\n")))
+        
+        def on_done(ok):
+            self._set_install_ui(ok)
+            self._log("✔  DaVinci готов!\n" if ok else "✘  Ошибка\n")
+            # Возврат кнопки через 3 сек, если не установлена или произошла ошибка
+            if not ok:
+                GLib.timeout_add(3000, lambda: (self._inst_btn.set_sensitive(True), self._inst_btn.set_label("Установить"), False)[2])
+
+        backend.run_epm(["epm", "play", "davinci-resolve"], self._log, on_done)
 
     def _on_postinstall(self, _):
         self._post_btn.set_sensitive(False); self._post_btn.set_label("…")
@@ -1104,6 +1140,9 @@ class DaVinciPage(Gtk.Box):
         else:
             _set_status_error(self._post_st); self._post_btn.set_label("Повторить"); self._post_btn.set_sensitive(True)
             self._log("\n✘  Ошибка PostInstall\n")
+        
+        # Оживляем кнопку PostInstall через 3 сек
+        GLib.timeout_add(3000, lambda: (self._post_btn.set_sensitive(True), self._post_btn.set_label("Выполнить"), False)[2])
 
     def _on_amd_install(self, _):
         self._amd_btn.set_sensitive(False); self._amd_btn.set_label("…")
@@ -1120,6 +1159,7 @@ class DaVinciPage(Gtk.Box):
         def _worker():
             url = "https://github.com/Toxblh/davinci-linux-aac-codec/releases/latest/download/aac_encoder_plugin-linux-bundle.tar.gz"
             try:
+                import tempfile, urllib.request
                 with tempfile.TemporaryDirectory() as tmp:
                     arch = os.path.join(tmp, "aac.tar.gz")
                     urllib.request.urlretrieve(url, arch)
@@ -1161,23 +1201,33 @@ class DaVinciPage(Gtk.Box):
 
         def finish(ok):
             def _u():
-                btn.set_label("Готово" if ok else "Ошибка")
+                btn.set_label("✔ Готово" if ok else "✘ Ошибка")
                 if not ok: btn.set_sensitive(True)
                 else: btn.add_css_class("flat"); btn.remove_css_class("suggested-action")
+                
+                # Обновляем UI всех зависимых компонентов
                 if ok:
                     _set_status_ok(self._post_st); self._post_btn.set_label("Выполнено")
                     self._post_btn.set_sensitive(False); self._post_btn.remove_css_class("destructive-action"); self._post_btn.add_css_class("flat")
+                
                 threading.Thread(target=lambda: GLib.idle_add(self._set_amd_ui, subprocess.run(["rpm","-q","rocm-opencl-runtime"],capture_output=True).returncode==0), daemon=True).start()
                 threading.Thread(target=lambda: GLib.idle_add(self._set_fl_ui, backend.is_fairlight_installed()), daemon=True).start()
                 threading.Thread(target=lambda: GLib.idle_add(self._set_aac_ui, backend.is_aac_installed()), daemon=True).start()
+
+                # Оживляем главную кнопку пресета через 3 сек
+                GLib.timeout_add(3000, lambda: (btn.set_sensitive(True), btn.set_label("DaVinci Resolve Ready"), 
+                                                btn.add_css_class("suggested-action"), btn.remove_css_class("flat"), False)[4])
+
             GLib.idle_add(_u)
 
+        # Цепочка выполнения пресета (s1 -> s2 -> s3 -> s4 -> finish)
         def s4():
             if backend.is_aac_installed():
                 GLib.idle_add(self._log, "✔  AAC уже установлен.\n"); finish(True); return
             GLib.idle_add(self._log, "\n▶  [4/4] AAC...\n")
             url = "https://github.com/Toxblh/davinci-linux-aac-codec/releases/latest/download/aac_encoder_plugin-linux-bundle.tar.gz"
             try:
+                import tempfile, urllib.request
                 with tempfile.TemporaryDirectory() as tmp:
                     arch = os.path.join(tmp, "aac.tar.gz"); urllib.request.urlretrieve(url, arch)
                     backend.install_aac_codec(arch, self._log, lambda ok: GLib.idle_add(finish, ok))
