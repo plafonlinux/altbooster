@@ -26,6 +26,7 @@
           "subtitle": "Papirus-Dark / Papirus — по текущей теме",
           "icon": "preferences-desktop-wallpaper-symbolic",
           "button_label": "Применить",
+          "button_done_label": "Применено",
           "button_style": "flat",
           "check": { "type": "gsettings_contains", "schema": "org.gnome.desktop.interface", "key": "icon-theme", "value": "Papirus" },
           "action": { "type": "builtin", "fn": "apply_papirus_icons" }
@@ -37,6 +38,7 @@
           "subtitle": "icon-theme: Adwaita  |  gtk-theme: Adwaita",
           "icon": "preferences-desktop-theme-symbolic",
           "button_label": "Применить",
+          "button_done_label": "Применено",
           "button_style": "flat",
           "check": { "type": "gsettings_contains", "schema": "org.gnome.desktop.interface", "key": "icon-theme", "value": "Adwaita" },
           "action": { "type": "builtin", "fn": "apply_adwaita_theme" }
@@ -46,6 +48,7 @@
     {
       "id": "folders",
       "title": "Цветные папки Papirus",
+      "requires": "papirus-folders",
       "description": "papirus-folders — выбор цвета папок",
       "rows": [
         {

@@ -33,6 +33,7 @@ dynamic_page.py — универсальный движок Data-Driven UI дл�
 
 from __future__ import annotations
 
+import shutil
 import os
 import subprocess
 import threading
@@ -550,6 +551,10 @@ class ActionDispatcher:
 
         if on_done:
             GLib.idle_add(on_done, ok)
+        
+        # Обновляем всю страницу, если действие прошло успешно
+        if ok and hasattr(self._page, "refresh"):
+            self._page.refresh()
 
     def _sync(self, run_fn: Callable, cmd: list) -> bool:
         """Блокирует поток до завершения run_fn (через Event)."""
@@ -851,6 +856,10 @@ class DynamicPage(Gtk.Box):
 
     def _build(self, body: Gtk.Box) -> None:
         for group_data in self._page_data.get("groups", []):
+            # Проверяем зависимость для всей группы
+            if "requires" in group_data and not shutil.which(group_data["requires"]):
+                continue
+
             group = Adw.PreferencesGroup()
             group.set_title(group_data.get("title", ""))
             if group_data.get("description"):
@@ -858,6 +867,9 @@ class DynamicPage(Gtk.Box):
             body.append(group)
 
             for row_data in group_data.get("rows", []):
+                # Проверяем зависимость для конкретной строки
+                if "requires" in row_data and not shutil.which(row_data["requires"]):
+                    continue
                 row = self._factory.build(row_data)
                 group.add(row)
                 if hasattr(row, "_dp_check"):
@@ -894,6 +906,13 @@ class DynamicPage(Gtk.Box):
                 btn.set_sensitive(True)
                 if orig_label:
                     btn.set_label(orig_label)
+                # Возвращаем синий цвет и убираем прозрачность
+                btn.remove_css_class("flat")
+                btn.add_css_class("suggested-action")
+                
+    def refresh(self) -> None:
+        """Запускает фоновую перепроверку всех статусов на странице."""
+        threading.Thread(target=self._poll_checks, daemon=True).start()            
 
     def _show_reboot_dialog(self) -> None:
         dialog = Adw.AlertDialog(

@@ -31,14 +31,18 @@ def set_sudo_password(pw: str) -> None:
 
 
 def sudo_check(pw: str) -> bool:
-    """Проверяет правильность пароля без побочных эффектов."""
-    result = subprocess.run(
-        ["sudo", "-S", "-v"],
-        input=pw + "\n",
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0
+    """Реальная проверка пароля через вызов /bin/true от имени sudo"""
+    try:
+        # -k сбрасывает кэш sudo, чтобы пароль спросило честно
+        r = subprocess.run(
+            ["sudo", "-k", "-S", "/bin/true"],
+            input=pw + "\n",
+            capture_output=True,
+            text=True
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
 
 
 # ── Ожидание APT-блокировки ───────────────────────────────────────────────────
@@ -183,8 +187,12 @@ def gsettings_get(schema: str, key: str) -> str:
 # ── Проверки состояния системы ────────────────────────────────────────────────
 
 def is_sudo_enabled() -> bool:
-    result = subprocess.run(["control", "sudowheel"], capture_output=True, text=True)
-    return "enabled" in result.stdout.strip()
+    """Проверяет, включено ли правило sudowheel в ALT Linux"""
+    try:
+        r = subprocess.run(["control", "sudowheel"], capture_output=True, text=True)
+        return "enabled" in r.stdout
+    except Exception:
+        return False
 
 
 def is_flathub_enabled() -> bool:
