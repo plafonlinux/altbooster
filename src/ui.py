@@ -1427,7 +1427,7 @@ class PlafonWindow(Adw.ApplicationWindow):
     def _show_about(self, *_):
         d = Adw.AboutDialog()
         d.set_application_name("ALT Booster"); d.set_application_icon("altbooster")
-        d.set_developer_name("PLAFON"); d.set_version("3.0")
+        d.set_developer_name("PLAFON"); d.set_version("5.1-alpha")
         d.set_website("https://github.com/plafonlinux/altbooster")
         d.set_issue_url("https://github.com/plafonlinux/altbooster/issues")
         d.set_comments("Утилита настройки системы ALT Linux.\nGTK4 / Adwaita / Python 3 / Data-Driven UI")
