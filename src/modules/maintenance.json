@@ -1,0 +1,85 @@
+{
+  "id": "maintenance",
+  "title": "Обслуживание",
+  "icon": "emblem-system-symbolic",
+  "tasks": [
+    {
+      "id": "apt",
+      "icon": "user-trash-symbolic",
+      "label": "Очистка APT",
+      "desc": "apt-get clean — удаляет кэш пакетов",
+      "cmd": [
+        "apt-get",
+        "clean"
+      ]
+    },
+    {
+      "id": "flatpak",
+      "icon": "application-x-addon-symbolic",
+      "label": "Уборка Flatpak",
+      "desc": "Удаляет неиспользуемые runtime-библиотеки",
+      "cmd": [
+        "flatpak",
+        "uninstall",
+        "--unused",
+        "-y"
+      ]
+    },
+    {
+      "id": "journal",
+      "icon": "document-open-recent-symbolic",
+      "label": "Сжатие журналов",
+      "desc": "journalctl --vacuum-time=14d",
+      "cmd": [
+        "journalctl",
+        "--vacuum-time=14d"
+      ]
+    },
+    {
+      "id": "btrfs_bal",
+      "icon": "drive-multidisk-symbolic",
+      "label": "Баланс Btrfs",
+      "desc": "btrfs balance -dusage=50 -musage=50 /",
+      "cmd": [
+        "btrfs",
+        "balance",
+        "start",
+        "-dusage=50",
+        "-musage=50",
+        "/"
+      ]
+    },
+    {
+      "id": "btrfs_defrag",
+      "icon": "emblem-synchronizing-symbolic",
+      "label": "Дефрагментация",
+      "desc": "Дефрагментация всех Btrfs разделов",
+      "cmd": [
+        "bash",
+        "-c",
+        "findmnt -lt btrfs -n -o TARGET | while read mp; do  echo \">>> $mp\";  btrfs filesystem defragment -r -czstd \"$mp\" 2>&1    | grep -v \"Text file busy\" || true; done"
+      ]
+    },
+    {
+      "id": "btrfs_scrub",
+      "icon": "security-high-symbolic",
+      "label": "Scrub Btrfs",
+      "desc": "Проверка и исправление ошибок данных",
+      "cmd": [
+        "bash",
+        "-c",
+        "findmnt -lt btrfs -n -o TARGET | while read mp; do  echo \">>> Scrub $mp\";  btrfs scrub start -B \"$mp\"; done"
+      ]
+    },
+    {
+      "id": "trim",
+      "icon": "media-flash-symbolic",
+      "label": "SSD TRIM",
+      "desc": "fstrim -av — оптимизация блоков SSD",
+      "cmd": [
+        "fstrim",
+        "-av"
+      ]
+    }
+  ]
+}
