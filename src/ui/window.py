@@ -171,7 +171,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.set_application_name("ALT Booster")
         d.set_application_icon("altbooster")
         d.set_developer_name("PLAFON")
-        d.set_version("5.1-alpha")
+        d.set_version("5.2-beta")
         d.set_website("https://github.com/plafonlinux/altbooster")
         d.set_issue_url("https://github.com/plafonlinux/altbooster/issues")
         d.set_comments("Утилита настройки системы ALT Linux.\nGTK4 / Adwaita / Python 3 / Data-Driven UI")
