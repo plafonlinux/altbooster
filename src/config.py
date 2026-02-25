@@ -93,4 +93,3 @@ def is_btrfs() -> bool:
         return bool(result.stdout.strip())
     except OSError:
         return False
-

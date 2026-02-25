@@ -11,6 +11,7 @@ from gi.repository import Gio, Adw, GLib
 import config
 from ui import PlafonWindow
 
+
 class AltBoosterApp(Adw.Application):
     def __init__(self):
         super().__init__(

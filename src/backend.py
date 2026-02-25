@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from pathlib import Path
 from gi.repository import GLib
 
 
@@ -33,12 +34,11 @@ def set_sudo_password(pw: str) -> None:
 def sudo_check(pw: str) -> bool:
     """Реальная проверка пароля через вызов /bin/true от имени sudo"""
     try:
-        # -k сбрасывает кэш sudo, чтобы пароль спросило честно
         r = subprocess.run(
             ["sudo", "-k", "-S", "/bin/true"],
             input=pw + "\n",
             capture_output=True,
-            text=True
+            text=True,
         )
         return r.returncode == 0
     except Exception:
@@ -123,6 +123,20 @@ def run_privileged(cmd: list, on_line, on_done) -> None:
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def run_privileged_sync(cmd: list, on_line) -> bool:
+    """Блокирующая обёртка: ждёт завершения run_privileged и возвращает результат."""
+    event = threading.Event()
+    result = [False]
+
+    def _done(ok: bool) -> None:
+        result[0] = ok
+        event.set()
+
+    run_privileged(cmd, on_line, _done)
+    event.wait()
+    return result[0]
+
+
 def run_epm(cmd: list, on_line, on_done) -> None:
     """
     Запускает epm через sudo -A (пароль через SUDO_ASKPASS).
@@ -166,6 +180,20 @@ def run_epm(cmd: list, on_line, on_done) -> None:
                 pass
 
     threading.Thread(target=_worker, daemon=True).start()
+
+
+def run_epm_sync(cmd: list, on_line) -> bool:
+    """Блокирующая обёртка: ждёт завершения run_epm и возвращает результат."""
+    event = threading.Event()
+    result = [False]
+
+    def _done(ok: bool) -> None:
+        result[0] = ok
+        event.set()
+
+    run_epm(cmd, on_line, _done)
+    event.wait()
+    return result[0]
 
 
 # ── gsettings ─────────────────────────────────────────────────────────────────
@@ -215,15 +243,19 @@ def is_fstrim_enabled() -> bool:
 
 
 def is_journal_optimized() -> bool:
-    conf_path = "/etc/systemd/journald.conf"
-    if not os.path.exists(conf_path):
-        return False
-    try:
-        with open(conf_path) as f:
-            content = f.read()
-        return "SystemMaxUse=100M" in content and "Compress=yes" in content
-    except OSError:
-        return False
+    """Проверяет наличие оптимизации журналов — в основном файле или drop-in."""
+    paths = [
+        "/etc/systemd/journald.conf",
+        "/etc/systemd/journald.conf.d/99-altbooster.conf",
+    ]
+    for conf_path in paths:
+        try:
+            content = Path(conf_path).read_text()
+            if "SystemMaxUse=100M" in content:
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def is_system_busy() -> bool:
@@ -279,3 +311,13 @@ def is_fairlight_installed() -> bool:
     return subprocess.run(
         ["rpm", "-q", "alsa-plugins-pulse"], capture_output=True
     ).returncode == 0
+
+
+def install_aac_codec(archive_path: str, on_line, on_done) -> None:
+    """Распаковывает и копирует AAC кодек в /opt/resolve/IOPlugins/."""
+    cmd = [
+        "bash", "-c",
+        f"tar xzf '{archive_path}' -C /tmp && "
+        "cp -r /tmp/aac_encoder_plugin.dvcp.bundle /opt/resolve/IOPlugins/",
+    ]
+    run_privileged(cmd, on_line, on_done)
