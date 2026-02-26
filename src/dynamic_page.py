@@ -161,8 +161,19 @@ class ActionDispatcher:
                 fn_name = action.get("fn", "")
                 fn = BUILTIN_REGISTRY.get(fn_name)
                 if fn:
-                    effective_arg = arg if action.get("arg_from") == "selected_option" else None
-                    ok = bool(fn(page, effective_arg))
+                    # Создаем "безопасную" обертку, чтобы встроенные функции не роняли GTK
+                    class SafePage:
+                        def __init__(self, real_page):
+                            self._page = real_page
+                            
+                        def log(self, text):
+                            GLib.idle_add(self._page.log, text)
+                            
+                        def __getattr__(self, name):
+                            return getattr(self._page, name)
+                            
+                    safe_page = SafePage(page)
+                    ok = bool(fn(safe_page, arg))
                 else:
                     GLib.idle_add(page.log, f"\n✘  Неизвестная builtin: {fn_name}\n")
 

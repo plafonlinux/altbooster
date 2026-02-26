@@ -19,7 +19,8 @@ from widgets import (
 class SettingRow(Adw.ActionRow):
     """Строка настройки с кнопкой и индикатором статуса."""
 
-    def __init__(self, icon, title, subtitle, btn_label, on_activate, check_fn, state_key):
+    # ВАЖНО: Добавили аргумент done_label="Активировано" в конец
+    def __init__(self, icon, title, subtitle, btn_label, on_activate, check_fn, state_key, done_label="Активировано"):
         super().__init__()
         self.set_title(title)
         self.set_subtitle(subtitle)
@@ -27,6 +28,7 @@ class SettingRow(Adw.ActionRow):
         self._on_activate = on_activate
         self._state_key = state_key
         self._orig_label = btn_label
+        self._done_label = done_label  # Сохраняем кастомный текст для кнопки
 
         self.add_prefix(make_icon(icon))
         self._status = make_status_icon()
@@ -51,7 +53,7 @@ class SettingRow(Adw.ActionRow):
     def _set_ui(self, enabled):
         if enabled:
             set_status_ok(self._status)
-            self._btn.set_label("Активировано")
+            self._btn.set_label(self._done_label)  # Используем наш кастомный текст
             self._btn.set_sensitive(False)
             self._btn.remove_css_class("suggested-action")
             self._btn.add_css_class("flat")
@@ -127,16 +129,29 @@ class AppRow(Adw.ActionRow):
     def _set_installed_ui(self, installed):
         if installed:
             set_status_ok(self._status)
-            self._btn.set_visible(False)
             self._prog.set_visible(False)
+            
+            # Кнопка остается видимой, но становится неактивной с текстом "Установлено"
+            self._btn.set_visible(True)
+            self._btn.set_label("Установлено")
+            self._btn.set_sensitive(False)
+            self._btn.remove_css_class("suggested-action")
+            self._btn.add_css_class("flat")
+            
             self._trash_btn.set_visible(True)
             self._trash_btn.set_sensitive(True)
         else:
             clear_status(self._status)
+            
+            # Возвращаем исходный вид кнопки "Установить"
             self._btn.set_visible(True)
             self._btn.set_label("Установить")
             self._btn.set_sensitive(True)
+            self._btn.remove_css_class("flat")
+            self._btn.add_css_class("suggested-action")
+            
             self._trash_btn.set_visible(False)
+            
         if self._on_change:
             self._on_change()
 

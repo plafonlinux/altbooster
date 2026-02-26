@@ -21,6 +21,9 @@ from ui.maintenance_page import MaintenancePage
 class AltBoosterWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        # 1. Лог собирается самым первым
+        self._log_widget = self._build_log_panel()
+        
         self.set_title("ALT Booster")
         settings = self._load_settings()
         self.set_default_size(settings.get("width", 740), settings.get("height", 880))
@@ -47,8 +50,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._terminal = _dp("terminal")
         self._amd = _dp("amd")
 
-        self._setup.build_quick_actions(self._apps.run_all_external, self._davinci.run_ready_preset)
-
         for widget, name, title, icon in [
             (self._setup,      "setup",       "Начало",          "go-home-symbolic"),
             (self._apps,       "apps",        "Приложения",      "flathub-symbolic"),
@@ -62,8 +63,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             p.set_icon_name(icon)
 
         self._paned = Gtk.Paned.new(Gtk.Orientation.VERTICAL)
+        # Включаем обратно стандартный системный разделитель, чтобы можно было менять размер
+        self._paned.set_wide_handle(True)
         self._paned.set_start_child(self._stack)
-        self._paned.set_end_child(self._build_log_panel())
+        self._paned.set_end_child(self._log_widget)
         self._paned.set_vexpand(True)
         self._paned.set_position(settings.get("paned_pos", 720))
         root.append(self._paned)
@@ -71,24 +74,17 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def _build_header(self):
         header = Adw.HeaderBar()
         self._stack = Adw.ViewStack()
-        sw = Adw.ViewSwitcher()
-        sw.set_stack(self._stack)
+        sw = Adw.ViewSwitcher(); sw.set_stack(self._stack)
         header.set_title_widget(sw)
-
+        
         menu = Gio.Menu()
         menu.append("О приложении", "win.about")
         menu.append("Очистить лог", "win.clear_log")
-        menu.append("Сбросить настройки", "win.reset_state")
-        mb = Gtk.MenuButton()
-        mb.set_icon_name("open-menu-symbolic")
-        mb.set_menu_model(menu)
+        menu.append("Очистить кэш", "win.reset_state")
+        mb = Gtk.MenuButton(); mb.set_icon_name("open-menu-symbolic"); mb.set_menu_model(menu)
         header.pack_end(mb)
-
-        for name, cb in [
-            ("about", self._show_about),
-            ("clear_log", self._clear_log),
-            ("reset_state", self._reset_state),
-        ]:
+        
+        for name, cb in [("about", self._show_about), ("clear_log", self._clear_log), ("reset_state", self._reset_state)]:
             a = Gio.SimpleAction.new(name, None)
             a.connect("activate", cb)
             self.add_action(a)
@@ -96,42 +92,64 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         return header
 
     def _build_log_panel(self):
-        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        panel.set_margin_start(20)
-        panel.set_margin_end(20)
-        panel.set_margin_bottom(16)
-        panel.set_vexpand(True)
+        self._log_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        
+        # Плоский заголовок только с кнопкой справа
+        header = Gtk.CenterBox()
+        header.set_margin_top(6)
+        header.set_margin_bottom(6)
+        header.set_margin_start(12)
+        header.set_margin_end(12)
 
-        lbl = Gtk.Label(label="Лог выполнения")
-        lbl.set_halign(Gtk.Align.START)
-        lbl.add_css_class("heading")
-        panel.append(lbl)
+        self._log_drawer_btn = Gtk.Button()
+        self._log_drawer_btn.set_icon_name("pan-down-symbolic")
+        self._log_drawer_btn.add_css_class("flat")
+        self._log_drawer_btn.add_css_class("circular")
+        self._log_drawer_btn.set_tooltip_text("Свернуть терминал")
+        self._log_drawer_btn.connect("clicked", self._on_log_drawer_toggle)
 
-        frame = Gtk.Frame()
-        frame.add_css_class("card")
-        frame.set_margin_top(6)
-        frame.set_vexpand(True)
-        panel.append(frame)
+        right_box = Gtk.Box()
+        right_box.set_halign(Gtk.Align.END)
+        right_box.append(self._log_drawer_btn)
+        header.set_end_widget(right_box)
+        
+        # Убрали GestureDrag и центральную полоску (pill)
 
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_vexpand(True)
-        frame.set_child(scroll)
-
+        self._log_container.append(header)
+        
+        self._log_scroll = Gtk.ScrolledWindow()
+        self._log_scroll.set_vexpand(True)
+        self._log_scroll.set_min_content_height(50)
         self._tv = Gtk.TextView()
         self._tv.set_editable(False)
-        self._tv.set_cursor_visible(False)
         self._tv.set_monospace(True)
         self._tv.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        self._tv.set_margin_start(10)
-        self._tv.set_margin_end(10)
-        self._tv.set_margin_top(8)
-        self._tv.set_margin_bottom(8)
+        self._tv.set_left_margin(10)
+        self._tv.set_right_margin(10)
+        self._tv.set_top_margin(10)
+        self._tv.set_bottom_margin(10)
         self._buf = self._tv.get_buffer()
-        scroll.set_child(self._tv)
+        self._log_scroll.set_child(self._tv)
 
-        return panel
+        self._log_container.append(self._log_scroll)
+        return self._log_container
 
+    # Методы _on_drag_begin и _on_drag_update удалены
+        
+    def _on_log_drawer_toggle(self, btn):
+        if self._log_scroll.get_visible():
+            self._log_scroll.set_visible(False)
+            btn.set_icon_name("pan-up-symbolic")
+            btn.set_tooltip_text("Развернуть терминал")
+        else:
+            self._log_scroll.set_visible(True)
+            btn.set_icon_name("pan-down-symbolic")
+            btn.set_tooltip_text("Свернуть терминал")
+            
+            # Теперь лог ВСЕГДА будет открываться маленьким, не читая старую память
+            if hasattr(self, '_paned'):
+                self._paned.set_position(880)
+        
     # ── Пароль ───────────────────────────────────────────────────────────────
 
     def ask_password(self):
@@ -171,7 +189,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.set_application_name("ALT Booster")
         d.set_application_icon("altbooster")
         d.set_developer_name("PLAFON")
-        d.set_version("5.2-beta")
+        d.set_version("5.3-beta")
         d.set_website("https://github.com/plafonlinux/altbooster")
         d.set_issue_url("https://github.com/plafonlinux/altbooster/issues")
         d.set_comments("Утилита настройки системы ALT Linux.\nGTK4 / Adwaita / Python 3 / Data-Driven UI")
@@ -187,12 +205,12 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
     def _reset_state(self, *_):
         d = Adw.AlertDialog(
-            heading="Сбросить настройки?",
-            body="Все сохранённые статусы будут удалены.\n"
-                 "Утилита повторно проверит состояние при следующем запуске.",
+            heading="Очистить кэш?",
+            body="Все сохранённые статусы проверок будут удалены.\n"
+                 "Утилита заново опросит систему при следующем запуске.",
         )
         d.add_response("cancel", "Отмена")
-        d.add_response("reset", "Сбросить")
+        d.add_response("reset", "Очистить") # <--- Текст на красной кнопке
         d.set_response_appearance("reset", Adw.ResponseAppearance.DESTRUCTIVE)
         d.set_default_response("cancel")
         d.set_close_response("cancel")
@@ -200,14 +218,18 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         def _on_response(_d, r):
             if r == "reset":
                 config.reset_state()
-                self._log("🔄 Настройки сброшены.\n")
+                self._log("🔄 Кэш статусов очищен.\n") # <--- Текст в терминале
+                GLib.timeout_add(1500, self.close)
 
         d.connect("response", _on_response)
         d.present(self)
 
-    # ── Лог (фикс утечки TextMark) ──────────────────────────────────────────
+    # ── Лог ──────────────────────────────────────────
 
     def _log(self, text):
+        if hasattr(self, '_log_scroll') and not self._log_scroll.get_visible():
+            self._on_log_drawer_toggle(self._log_drawer_btn)
+
         end = self._buf.get_end_iter()
         self._buf.insert(end, text)
         end = self._buf.get_end_iter()
