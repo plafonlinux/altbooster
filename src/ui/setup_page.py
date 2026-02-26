@@ -22,57 +22,147 @@ class SetupPage(Gtk.Box):
         self._body = body
         self.append(scroll)
         self._build_system_group(body)
+        self._build_filemanager_group(body)
         self._build_keyboard_group(body)
+        
+    def _on_gnome_software_updates(self, row):
+        row.set_working()
+        self._log("\n▶  Оптимизация Центра приложений (отключение download-updates)...\n")
+        
+        def _do():
+            # Устанавливаем ключ в false
+            ok = backend.run_gsettings(["set", "org.gnome.software", "download-updates", "false"])
+            GLib.idle_add(row.set_done, ok)
+            GLib.idle_add(self._log, "✔  Автообновления отключены. Центр приложений теперь будет летать!\n" if ok else "✘  Ошибка применения настроек GNOME\n")
+            
+        threading.Thread(target=_do, daemon=True).start()    
+        
+    def _on_epm(self, row):
+        if backend.is_system_busy():
+            self._log("\n⚠  Система занята.\n")
+            return
+            
+        row.set_working()
+        self._log("\n▶  epm update...\n")
+        
+        def on_full_upgrade_done(ok):
+            # Всегда разблокируем кнопку, чтобы можно было обновляться снова
+            GLib.idle_add(row.set_done, False)
+            # Возвращаем исходный текст кнопки
+            GLib.idle_add(row._button.set_label, "Обновить")
+            
+            if ok:
+                self._log("\n✔  ALT Linux обновлён!\n")
+            else:
+                self._log("\n✘  Ошибка обновления\n")
+        
+        def on_update_done(ok):
+            if not ok: 
+                GLib.idle_add(row.set_done, False)
+                GLib.idle_add(row._button.set_label, "Обновить")
+                self._log("\n✘  Ошибка epm update\n")
+                return
+            self._log("\n▶  epm full-upgrade...\n")
+            backend.run_epm(["epm", "-y", "full-upgrade"], self._log, on_full_upgrade_done)
+            
+        backend.run_epm(["epm", "-y", "update"], self._log, on_update_done)    
 
-    def build_quick_actions(self, apps_cb, dv_cb):
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
-        box.set_halign(Gtk.Align.CENTER)
-        box.set_margin_bottom(14)
-
-        qa_apps = make_button("Установка всех приложений", width=240)
-        qa_apps.add_css_class("success")
-        qa_apps.connect("clicked", lambda _: apps_cb(qa_apps))
-        box.append(qa_apps)
-
-        qa_dv = make_button("DaVinci Resolve Ready", width=240)
-        qa_dv.connect("clicked", lambda _: dv_cb(qa_dv))
-        box.append(qa_dv)
-
-        self._epm_btn = make_button("Обновить систему (EPM)", width=240, style="destructive-action")
-        self._epm_btn.connect("clicked", self._on_epm)
-        self._epm_done = False
-        box.append(self._epm_btn)
-
-        self._body.prepend(box)
+    def _on_install_epm(self, row):
+        row.set_working()
+        self._log("\n▶ Установка EPM (eepm)...\n")
+        backend.run_privileged(["apt-get", "install", "-y", "eepm"], self._log, row.set_done)
 
     # ── Системные настройки ──────────────────────────────────────────────────
 
     def _build_system_group(self, body):
-        group = Adw.PreferencesGroup()
-        group.set_title("Система")
-        body.append(group)
+        # --- ГРУППА 1: ОБНОВЛЕНИЕ И ПАКЕТЫ ---
+        pkg_group = Adw.PreferencesGroup()
+        pkg_group.set_title("Обновление и пакеты")
+        body.append(pkg_group)
 
-        rows = [
-            ("security-high-symbolic", "Включить sudo",
-             "control sudowheel enabled", "Активировать",
-             self._on_sudo, backend.is_sudo_enabled, "setting_sudo"),
-            ("application-x-addon-symbolic", "Подключить Flathub",
-             "Устанавливает flatpak и flathub", "Подключить",
-             self._on_flathub, backend.is_flathub_enabled, "setting_flathub"),
-            ("media-flash-symbolic", "Автоматический TRIM",
-             "Включает еженедельную очистку блоков SSD", "Включить",
-             self._on_trim_timer, backend.is_fstrim_enabled, "setting_trim_auto"),
-            ("document-open-recent-symbolic", "Лимиты журналов",
-             "SystemMaxUse=100M и сжатие в journald.conf", "Настроить",
-             self._on_journal_limit, backend.is_journal_optimized, "setting_journal_opt"),
-            ("video-display-symbolic", "Дробное масштабирование",
-             "Включает scale-monitor-framebuffer", "Включить",
-             self._on_scale, backend.is_fractional_scaling_enabled, "setting_scale"),
+        pkg_rows = [
+            ("system-software-install-symbolic",   "Установить EPM",              "Пакетный менеджер eepm, необходим для утилиты", "Установить", self._on_install_epm, backend.is_epm_installed, "setting_epm_install", "Установлено"),
+            ("software-update-available-symbolic", "Обновить систему (EPM)",      "Выполняет epm update и epm full-upgrade",       "Обновить",    self._on_epm,         lambda: False,            "", "Обновлено"),
         ]
 
-        self._setting_rows = [SettingRow(*r) for r in rows]
-        for r in self._setting_rows:
+        self._r_epm_install, self._r_epm = [SettingRow(*r) for r in pkg_rows]
+        
+        for r in (self._r_epm_install, self._r_epm):
+            pkg_group.add(r)
+
+        # --- ГРУППА 2: СИСТЕМА ---
+        sys_group = Adw.PreferencesGroup()
+        sys_group.set_title("Система")
+        body.append(sys_group)
+        
+        sys_rows = [
+            ("security-high-symbolic",             "Включить sudo",               "control sudowheel enabled",                     "Активировать", self._on_sudo,           backend.is_sudo_enabled,               "setting_sudo", "Активировано"),
+            ("application-x-addon-symbolic",       "Подключить Flathub",          "Устанавливает flatpak и flathub",               "Включить",     self._on_flathub,        backend.is_flathub_enabled,            "setting_flathub", "Активировано"),
+            ("view-refresh-symbolic",    "Автообновление GNOME Software",      "Отключает фоновую загрузку в Центре приложений", "Отключить",    self._on_gnome_software_updates, lambda: backend.gsettings_get("org.gnome.software", "download-updates") == "false", "setting_gnome_software_updates", "Выключено"),
+            ("media-flash-symbolic",               "Автоматический TRIM",         "Включает еженедельную очистку блоков SSD",      "Включить",     self._on_trim_timer,           backend.is_fstrim_enabled,             "setting_trim_auto", "Активировано"),
+            ("document-open-recent-symbolic",      "Лимиты журналов",             "SystemMaxUse=100M и сжатие в journald.conf",    "Настроить",    self._on_journal_limit,  backend.is_journal_optimized,          "setting_journal_opt", "Активировано"),
+            ("video-display-symbolic",             "Дробное масштабирование",     "Включает scale-monitor-framebuffer",            "Включить",     self._on_scale,          backend.is_fractional_scaling_enabled, "setting_scale", "Активировано"),
+        ]
+        
+        self._r_sudo, self._r_flathub, self._r_gnome_sw, self._r_trim, self._r_journal, self._r_scale = [
+            SettingRow(*r) for r in sys_rows
+        ]
+        
+        for r in (
+            self._r_sudo, 
+            self._r_flathub, 
+            self._r_gnome_sw, 
+            self._r_trim, 
+            self._r_journal, 
+            self._r_scale
+        ):
+            sys_group.add(r)
+            
+    def _build_filemanager_group(self, body):
+        group = Adw.PreferencesGroup()
+        group.set_title("Файловый менеджер Nautilus")
+        body.append(group)
+        
+        def _check_nautilus():
+            try:
+                sort = backend.gsettings_get("org.gtk.gtk4.Settings.FileChooser", "sort-directories-first")
+                links = backend.gsettings_get("org.gnome.nautilus.preferences", "show-create-link")
+                return "true" in sort.lower() and "true" in links.lower()
+            except Exception:
+                return False
+
+        rows = [
+            ("system-file-manager-symbolic", "Настройки Nautilus", "Сортировка папок, создание ссылок, подписи файлов", "Применить", self._on_nautilus, _check_nautilus, "setting_nautilus", "Применены"),
+            ("drive-harddisk-symbolic", "Индикатор копирования", "Адекватный прогресс-бар копирования (vm.dirty)", "Исправить", self._on_vm_dirty, backend.is_vm_dirty_optimized, "setting_vm_dirty", "Исправлено"),
+        ]
+        
+        # Оставляем строго ДВЕ переменные!
+        self._r_naut, self._r_dirty = [
+            SettingRow(*r) for r in rows
+        ]
+        
+        # В цикле тоже оставляем только ДВЕ!
+        for r in (self._r_naut, self._r_dirty):
             group.add(r)
+
+    def _on_nautilus(self, row):
+        row.set_working()
+        self._log("\n▶  Применение настроек Nautilus...\n")
+        def _do():
+            ok1 = backend.run_gsettings(["set", "org.gtk.gtk4.Settings.FileChooser", "sort-directories-first", "true"])
+            ok2 = backend.run_gsettings(["set", "org.gnome.nautilus.icon-view", "captions", "['size', 'date_modified', 'none']"])
+            ok3 = backend.run_gsettings(["set", "org.gnome.nautilus.preferences", "show-create-link", "true"])
+            ok4 = backend.run_gsettings(["set", "org.gnome.nautilus.preferences", "show-delete-permanently", "true"])
+            ok = ok1 and ok2 and ok3 and ok4
+            GLib.idle_add(row.set_done, ok)
+            GLib.idle_add(self._log, "✔  Настройки Nautilus применены!\n" if ok else "✘  Ошибка\n")
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _on_vm_dirty(self, row):
+        row.set_working()
+        self._log("\n▶  Настройка кэша копирования (vm.dirty)...\n")
+        backend.apply_vm_dirty(self._log,
+            lambda ok: (row.set_done(ok), self._log("✔  Кэш копирования исправлен!\n" if ok else "✘  Ошибка\n")))
 
     # ── Раскладка клавиатуры ─────────────────────────────────────────────────
 
@@ -91,8 +181,14 @@ class SetupPage(Gtk.Box):
             "Переключение раскладки кнопкой CapsLock", "Включить",
             self._on_capslock, None, "setting_kbd_capslock",
         )
+        self._r_ctrl = SettingRow(
+            "input-keyboard-symbolic", "Ctrl + Shift",
+            "Переключение раскладки по Ctrl+Shift", "Включить",
+            self._on_ctrlshift, None, "setting_kbd_ctrlshift",
+        )
         group.add(self._r_alt)
         group.add(self._r_caps)
+        group.add(self._r_ctrl)
         threading.Thread(target=self._detect_kbd_mode, daemon=True).start()
 
     # ── Обработчики системных настроек ───────────────────────────────────────
@@ -182,19 +278,33 @@ class SetupPage(Gtk.Box):
         if mode == "altshift":
             GLib.idle_add(self._r_alt._set_ui, True)
             GLib.idle_add(self._r_caps._set_ui, False)
+            GLib.idle_add(self._r_ctrl._set_ui, False)
             return
         if mode == "capslock":
             GLib.idle_add(self._r_caps._set_ui, True)
             GLib.idle_add(self._r_alt._set_ui, False)
+            GLib.idle_add(self._r_ctrl._set_ui, False)
             return
+        if mode == "ctrlshift":
+            GLib.idle_add(self._r_ctrl._set_ui, True)
+            GLib.idle_add(self._r_alt._set_ui, False)
+            GLib.idle_add(self._r_caps._set_ui, False)
+            return
+            
         value = backend.gsettings_get(config.GSETTINGS_KEYBINDINGS, "switch-input-source")
         is_caps = "Caps" in value
-        is_alt = "Alt_L" in value or "Shift>Alt" in value
+        is_ctrl = "Control" in value
+        is_alt = "Alt" in value and not is_ctrl
+        
         if is_caps:
             config.state_set("setting_kbd_mode", "capslock")
+        elif is_ctrl:
+            config.state_set("setting_kbd_mode", "ctrlshift")
         elif is_alt:
             config.state_set("setting_kbd_mode", "altshift")
+            
         GLib.idle_add(self._r_caps._set_ui, is_caps)
+        GLib.idle_add(self._r_ctrl._set_ui, is_ctrl)
         GLib.idle_add(self._r_alt._set_ui, is_alt)
 
     def _on_altshift(self, row):
@@ -210,6 +320,7 @@ class SetupPage(Gtk.Box):
                 config.state_set("setting_kbd_mode", "altshift")
             GLib.idle_add(row.set_done, ok)
             GLib.idle_add(self._r_caps._set_ui, False)
+            GLib.idle_add(self._r_ctrl._set_ui, False)
             GLib.idle_add(self._log, "✔  Alt+Shift готов!\n" if ok else "✘  Ошибка\n")
 
         threading.Thread(target=_do, daemon=True).start()
@@ -227,40 +338,25 @@ class SetupPage(Gtk.Box):
                 config.state_set("setting_kbd_mode", "capslock")
             GLib.idle_add(row.set_done, ok)
             GLib.idle_add(self._r_alt._set_ui, False)
+            GLib.idle_add(self._r_ctrl._set_ui, False)
             GLib.idle_add(self._log, "✔  CapsLock готов!\n" if ok else "✘  Ошибка\n")
 
         threading.Thread(target=_do, daemon=True).start()
 
-    # ── EPM обновление ───────────────────────────────────────────────────────
+    def _on_ctrlshift(self, row):
+        row.set_working()
+        self._log("\n▶  Настройка Ctrl+Shift...\n")
 
-    def _on_epm(self, _):
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
-        self._epm_done = False
-        self._epm_btn.set_sensitive(False)
-        self._epm_btn.set_label("⏳ Обновление...")
-        self._log("\n▶  epm update...\n")
+        def _do():
+            ok = (
+                backend.run_gsettings(["set", config.GSETTINGS_KEYBINDINGS, "switch-input-source", "['<Shift>Control_L']"])
+                and backend.run_gsettings(["set", config.GSETTINGS_KEYBINDINGS, "switch-input-source-backward", "['<Control>Shift_L']"])
+            )
+            if ok:
+                config.state_set("setting_kbd_mode", "ctrlshift")
+            GLib.idle_add(row.set_done, ok)
+            GLib.idle_add(self._r_alt._set_ui, False)
+            GLib.idle_add(self._r_caps._set_ui, False)
+            GLib.idle_add(self._log, "✔  Ctrl+Shift готов!\n" if ok else "✘  Ошибка\n")
 
-        def on_update_done(ok):
-            if not ok:
-                self._epm_fin(False)
-                return
-            self._log("\n▶  epm full-upgrade...\n")
-            backend.run_epm(["epm", "-y", "full-upgrade"], self._log, self._epm_fin)
-
-        backend.run_epm(["epm", "-y", "update"], self._log, on_update_done)
-
-    def _epm_fin(self, ok):
-        if self._epm_done:
-            return
-        self._epm_done = True
-        if ok:
-            self._log("\n✔  ALT Linux обновлён!\n")
-            self._epm_btn.set_label("Обновлено")
-            self._epm_btn.remove_css_class("destructive-action")
-            self._epm_btn.add_css_class("flat")
-        else:
-            self._log("\n✘  Ошибка обновления\n")
-            self._epm_btn.set_label("Повторить обновление")
-            self._epm_btn.set_sensitive(True)
+        threading.Thread(target=_do, daemon=True).start()
