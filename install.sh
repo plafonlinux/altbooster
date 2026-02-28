@@ -26,14 +26,18 @@ step() { echo -ne "  ${YELLOW}▶${NC} $1... "; }
 ok()   { echo -e "${GREEN}✔${NC}"; }
 fail() { echo -e "${RED}✘ $1${NC}"; exit 1; }
 
-# Проверка зависимостей
+# Установка зависимостей
 step "Проверка зависимостей"
 MISSING=()
 python3 -c "import gi; gi.require_version('Gtk','4.0'); from gi.repository import Gtk" 2>/dev/null \
-    || MISSING+=("python3-module-pygobject3 libgtk4-gir")
+    || MISSING+=("python3-module-pygobject3" "libgtk4-gir")
 python3 -c "import gi; gi.require_version('Adw','1'); from gi.repository import Adw" 2>/dev/null \
     || MISSING+=("libadwaita-gir")
-[[ ${#MISSING[@]} -gt 0 ]] && fail "Установите: sudo apt-get install ${MISSING[*]}"
+if [[ ${#MISSING[@]} -gt 0 ]]; then
+    echo ""
+    echo -e "  ${YELLOW}Устанавливаю зависимости: ${MISSING[*]}${NC}"
+    apt-get install -y "${MISSING[@]}" || fail "Не удалось установить зависимости"
+fi
 ok
 
 # Файлы приложения

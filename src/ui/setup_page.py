@@ -148,20 +148,18 @@ class SetupPage(Gtk.Box):
         
         sys_rows = [
             ("security-high-symbolic",             "Включить sudo",               "control sudowheel enabled",                     "Активировать", self._on_sudo,           backend.is_sudo_enabled,               "setting_sudo", "Активировано", self._on_sudo_undo, "Отключить"),
-            ("application-x-addon-symbolic",       "Подключить Flathub",          "Устанавливает flatpak и flathub",               "Включить",     self._on_flathub,        backend.is_flathub_enabled,            "setting_flathub", "Активировано", self._on_flathub_undo, "Удалить"),
             ("view-refresh-symbolic",    "Автообновление GNOME Software",      "Отключает фоновую загрузку в Центре приложений", "Отключить",    self._on_gnome_software_updates, lambda: backend.gsettings_get("org.gnome.software", "download-updates") == "false", "setting_gnome_software_updates", "Выключено", self._on_gnome_software_updates_undo, "Включить"),
             ("media-flash-symbolic",               "Автоматический TRIM",         "Включает еженедельную очистку блоков SSD",      "Включить",     self._on_trim_timer,           backend.is_fstrim_enabled,             "setting_trim_auto", "Активировано", self._on_trim_timer_undo, "Отключить"),
             ("document-open-recent-symbolic",      "Лимиты журналов",             "SystemMaxUse=100M и сжатие в journald.conf",    "Настроить",    self._on_journal_limit,  backend.is_journal_optimized,          "setting_journal_opt", "Активировано", self._on_journal_limit_undo, "Сбросить"),
             ("video-display-symbolic",             "Дробное масштабирование",     "Включает scale-monitor-framebuffer",            "Включить",     self._on_scale,          backend.is_fractional_scaling_enabled, "setting_scale", "Активировано", self._on_scale_undo, "Отключить"),
         ]
         
-        self._r_sudo, self._r_flathub, self._r_gnome_sw, self._r_trim, self._r_journal, self._r_scale = [
+        self._r_sudo, self._r_gnome_sw, self._r_trim, self._r_journal, self._r_scale = [
             SettingRow(*r) for r in sys_rows
         ]
         
         for r in (
             self._r_sudo, 
-            self._r_flathub, 
             self._r_gnome_sw, 
             self._r_trim, 
             self._r_journal, 
@@ -278,37 +276,6 @@ class SetupPage(Gtk.Box):
             ["control", "sudowheel", "disabled"],
             lambda _: None,
             lambda ok: (row.set_undo_done(ok), self._log("✔  sudo отключён!\n" if ok else "✘  Ошибка\n")),
-        )
-
-    def _on_flathub(self, row):
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
-        row.set_working()
-        self._log("\n▶  Установка Flatpak и Flathub...\n")
-
-        def step2(ok):
-            if not ok:
-                row.set_done(False)
-                return
-            backend.run_privileged(
-                ["apt-get", "install", "-y", "flatpak-repo-flathub"],
-                self._log,
-                lambda ok2: (row.set_done(ok2), self._log("✔  Flathub готов!\n" if ok2 else "✘  Ошибка\n")),
-            )
-
-        backend.run_privileged(["apt-get", "install", "-y", "flatpak"], self._log, step2)
-
-    def _on_flathub_undo(self, row):
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
-        row.set_working()
-        self._log("\n▶  Удаление Flatpak и Flathub...\n")
-        backend.run_privileged(
-            ["apt-get", "remove", "-y", "flatpak", "flatpak-repo-flathub"],
-            self._log,
-            lambda ok: (row.set_undo_done(ok), self._log("✔  Flatpak удалён!\n" if ok else "✘  Ошибка\n")),
         )
 
     def _on_trim_timer(self, row):

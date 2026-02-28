@@ -3,9 +3,12 @@
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
+import urllib.parse
+import urllib.request
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -14,7 +17,10 @@ from gi.repository import Adw, GLib, Gtk
 
 import backend
 import config
-from widgets import make_button, make_scrolled_page
+from widgets import (
+    make_button, make_scrolled_page,
+    make_status_icon, set_status_ok, set_status_error, clear_status, make_suffix_box,
+)
 from ui.common import load_module, _MODULES_DIR
 from ui.dialogs import AppEditDialog
 from ui.rows import AppRow
@@ -43,10 +49,49 @@ class AppsPage(Gtk.Box):
         self._btn_all.add_css_class("success")
         self._btn_all.connect("clicked", self._on_install_all_clicked)
 
+        # Выбор приоритета источника
+        self._prio_combo = Gtk.DropDown()
+        self._prio_combo.set_model(Gtk.StringList.new(["Flathub", "EPM", "RPM"]))
+        self._prio_combo.set_selected(0) # Default Flathub
+        self._prio_combo.set_tooltip_text("Приоритетный источник для массовой установки")
+        self._prio_combo.set_valign(Gtk.Align.CENTER)
+        self._prio_combo.set_margin_start(10)
+
         start_box = Gtk.Box()
         start_box.set_halign(Gtk.Align.START)
         start_box.append(self._btn_all)
+        start_box.append(self._prio_combo)
         self._btns_box.set_start_widget(start_box)
+
+        # Поиск пакетов (Center)
+        self._pkg_search_groups = []
+        search_box = Gtk.Box(spacing=6)
+        search_box.set_halign(Gtk.Align.CENTER)
+
+        self._branch_combo = Gtk.DropDown()
+        self._branch_combo.set_model(Gtk.StringList.new(["p11", "Sisyphus", "epm play", "Flathub"]))
+        self._epm_play_cache = None
+        self._branch_combo.set_selected(0)
+        self._branch_combo.set_valign(Gtk.Align.CENTER)
+        self._branch_combo.set_tooltip_text("Источник для поиска пакетов")
+        search_box.append(self._branch_combo)
+
+        self._search_entry = Gtk.Entry()
+        self._search_entry.set_placeholder_text("Поиск пакетов ALT...")
+        self._search_entry.set_width_chars(22)
+        self._search_entry.set_valign(Gtk.Align.CENTER)
+        self._search_entry.connect("activate", self._on_pkg_search)
+        self._search_entry.connect("notify::text", self._on_search_text_changed)
+        search_box.append(self._search_entry)
+
+        self._search_status = make_status_icon()
+        search_box.append(self._search_status)
+
+        self._search_btn = make_button("Найти", width=90)
+        self._search_btn.connect("clicked", self._on_pkg_search)
+        search_box.append(self._search_btn)
+
+        self._btns_box.set_center_widget(search_box)
 
         self._btn_reset = Gtk.Button(label="Вернуть стандартный список")
         self._btn_reset.set_tooltip_text("Сбросить список к стандартному (обновить)")
@@ -62,6 +107,303 @@ class AppsPage(Gtk.Box):
         self._load_and_build()
         GLib.idle_add(self._refresh_btn_all)
 
+    def _on_search_text_changed(self, entry, _):
+        if not entry.get_text():
+            self._clear_pkg_search_results()
+
+    def _on_pkg_search(self, *_):
+        text = self._search_entry.get_text().strip()
+        if not text:
+            return
+        self._search_btn.set_sensitive(False)
+        self._search_btn.set_label("Поиск...")
+        clear_status(self._search_status)
+        self._clear_pkg_search_results()
+        branch_map = {0: "p11", 1: "sisyphus", 2: "epm_play", 3: "flathub"}
+        branch = branch_map.get(self._branch_combo.get_selected(), "p11")
+        threading.Thread(target=self._do_pkg_search, args=(text, branch), daemon=True).start()
+
+    def _fetch_from_source(self, query, branch):
+        if branch == "flathub":
+            return self._fetch_flathub(query)
+        if branch == "epm_play":
+            return self._search_epm_play(query)
+        params = urllib.parse.urlencode({"name": query, "branch": branch})
+        url = f"https://rdb.altlinux.org/api/site/find_packages?{params}"
+        req = urllib.request.Request(url, headers={"User-Agent": "ALTBooster/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        results = []
+        for pkg in data.get("packages", []):
+            versions = pkg.get("versions", [])
+            version = versions[0].get("version", "") if versions else ""
+            results.append({
+                "display_name": pkg.get("name", ""),
+                "install_id": pkg.get("name", ""),
+                "summary": pkg.get("summary") or "",
+                "version": version,
+                "install_type": "epm",
+            })
+        return results
+
+    def _check_installed(self, install_id, install_type):
+        try:
+            if install_type == "flatpak":
+                r = subprocess.run(["flatpak", "info", install_id], capture_output=True, timeout=5)
+            else:
+                r = subprocess.run(["rpm", "-q", install_id], capture_output=True, timeout=5)
+            return r.returncode == 0
+        except Exception:
+            return False
+
+    def _do_pkg_search(self, query, branch):
+        try:
+            primary = self._fetch_from_source(query, branch)
+            for pkg in primary:
+                pkg["installed"] = self._check_installed(pkg["install_id"], pkg["install_type"])
+            if primary:
+                GLib.idle_add(self._display_pkg_results, [(branch, primary)], False)
+            else:
+                GLib.idle_add(self._log, "ℹ Не найдено, ищу в других источниках...\n")
+                all_branches = ["p11", "sisyphus", "epm_play", "flathub"]
+                fallback = []
+                for ob in all_branches:
+                    if ob == branch:
+                        continue
+                    try:
+                        r = self._fetch_from_source(query, ob)
+                        for pkg in r:
+                            pkg["installed"] = self._check_installed(pkg["install_id"], pkg["install_type"])
+                        if r:
+                            fallback.append((ob, r))
+                    except Exception:
+                        pass
+                GLib.idle_add(self._display_pkg_results, fallback, True)
+        except Exception as e:
+            GLib.idle_add(self._log, f"✘ Ошибка поиска пакетов: {e}\n")
+            GLib.idle_add(set_status_error, self._search_status)
+        GLib.idle_add(self._search_btn.set_label, "Найти")
+        GLib.idle_add(self._search_btn.set_sensitive, True)
+
+    def _fetch_flathub(self, query):
+        body = json.dumps({"query": query, "locale": "ru"}).encode()
+        req = urllib.request.Request(
+            "https://flathub.org/api/v2/search",
+            data=body,
+            headers={"User-Agent": "ALTBooster/1.0", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        return [
+            {
+                "display_name": hit.get("name") or hit.get("app_id", ""),
+                "install_id": hit.get("app_id", ""),
+                "summary": hit.get("summary") or "",
+                "version": "",
+                "install_type": "flatpak",
+            }
+            for hit in data.get("hits", [])
+        ]
+
+    def _load_epm_play_list(self):
+        try:
+            r = subprocess.run(["epm", "play"], capture_output=True, text=True, timeout=30)
+            apps = []
+            for line in r.stdout.splitlines():
+                line = line.strip()
+                if not line or " - " not in line:
+                    continue
+                name, _, desc = line.partition(" - ")
+                name = name.strip()
+                desc = desc.strip()
+                if name:
+                    apps.append((name, desc))
+            return apps
+        except Exception:
+            return []
+
+    def _search_epm_play(self, query):
+        if self._epm_play_cache is None:
+            self._epm_play_cache = self._load_epm_play_list()
+        q = query.lower()
+        return [
+            {
+                "display_name": name,
+                "install_id": name,
+                "summary": desc,
+                "version": "",
+                "install_type": "epm_play",
+            }
+            for name, desc in self._epm_play_cache
+            if q in name.lower() or q in desc.lower()
+        ]
+
+    def _display_pkg_results(self, branch_results_list, is_fallback=False):
+        if not branch_results_list:
+            set_status_error(self._search_status)
+            self._log("ℹ Пакеты не найдены ни в одном источнике.\n")
+            return
+        set_status_ok(self._search_status)
+        label_map = {"flathub": "Flathub", "p11": "p11", "sisyphus": "Sisyphus", "epm_play": "epm play"}
+        title_prefix = "Найдено в" if is_fallback else "Результаты в"
+        prev = self._btns_box
+        for branch, results in branch_results_list:
+            label = label_map.get(branch, branch)
+            group = Adw.PreferencesGroup()
+            group.set_title(f"{title_prefix} {label} ({len(results)})")
+            self._body.insert_child_after(group, prev)
+            self._pkg_search_groups.append(group)
+            prev = group
+            for pkg in results:
+                display_name = pkg["display_name"]
+                install_id = pkg["install_id"]
+                summary = pkg.get("summary", "")[:120]
+                version = pkg.get("version", "")
+                install_type = pkg.get("install_type", "epm")
+                installed = pkg.get("installed", False)
+                if version and summary:
+                    subtitle = f"v{version} — {summary}"
+                elif summary:
+                    subtitle = summary
+                elif install_type == "flatpak":
+                    subtitle = install_id
+                else:
+                    subtitle = version
+                row = Adw.ActionRow()
+                row.set_title(display_name)
+                if subtitle:
+                    row.set_subtitle(subtitle)
+                status = make_status_icon()
+                if installed:
+                    set_status_ok(status)
+                    inst_btn = make_button("Установлено", width=110)
+                    inst_btn.set_sensitive(False)
+                    inst_btn.add_css_class("flat")
+                    row.add_suffix(make_suffix_box(status, inst_btn))
+                else:
+                    in_list = self._is_in_list(install_id)
+                    add_btn = Gtk.Button(label="В списке" if in_list else "Добавить")
+                    add_btn.add_css_class("flat")
+                    add_btn.add_css_class("pill")
+                    add_btn.set_valign(Gtk.Align.CENTER)
+                    if in_list:
+                        add_btn.set_sensitive(False)
+                    else:
+                        add_btn.connect(
+                            "clicked",
+                            lambda _, p=pkg, b=add_btn: self._add_pkg_to_list(p, b),
+                        )
+                    inst_btn = make_button("Установить", width=100)
+                    inst_btn.connect(
+                        "clicked",
+                        lambda _, iid=install_id, itype=install_type, b=inst_btn, s=status:
+                            self._install_pkg(iid, itype, b, s),
+                    )
+                    row.add_suffix(make_suffix_box(status, add_btn, inst_btn))
+                group.add(row)
+
+    def _clear_pkg_search_results(self):
+        for group in self._pkg_search_groups:
+            try:
+                self._body.remove(group)
+            except Exception:
+                pass
+        self._pkg_search_groups = []
+        clear_status(self._search_status)
+
+    def _is_in_list(self, install_id):
+        """Проверяет, есть ли пакет с таким install_id уже в apps.json."""
+        for g in self._data.get("groups", []):
+            for item in g.get("items", []):
+                for src in item.get("sources", []):
+                    if install_id in src.get("cmd", []):
+                        return True
+                # старый формат source (не sources)
+                src = item.get("source")
+                if src and install_id in src.get("cmd", []):
+                    return True
+        return False
+
+    def _add_pkg_to_list(self, pkg, btn_add):
+        """Добавляет пакет из поиска в apps.json без установки."""
+        display_name = pkg["display_name"]
+        install_id = pkg["install_id"]
+        install_type = pkg["install_type"]
+        summary = pkg.get("summary", "")[:100]
+
+        if install_type == "flatpak":
+            source = {
+                "label": "Flathub",
+                "cmd": ["flatpak", "install", "-y", "flathub", install_id],
+                "check": ["flatpak", install_id],
+            }
+        elif install_type == "epm_play":
+            source = {
+                "label": "EPM play",
+                "cmd": ["epm", "play", install_id],
+                "check": ["rpm", install_id],
+            }
+        else:
+            source = {
+                "label": "EPM install",
+                "cmd": ["epm", "-i", "-y", install_id],
+                "check": ["rpm", install_id],
+            }
+
+        item_id = install_id.replace(".", "_").replace("-", "_").replace(" ", "_").lower()
+        item = {
+            "id": item_id,
+            "label": display_name,
+            "desc": summary,
+            "sources": [source],
+        }
+
+        gs = self._data.get("groups", [])
+        if not gs:
+            self._log("⚠ Нет групп для добавления.\n")
+            return
+
+        group = gs[0]
+        items = group.setdefault("items", [])
+        ids = {it.get("id") for it in items}
+        if item_id in ids:
+            item = dict(item, id=item_id + "_2")
+        items.append(item)
+        self._write_json()
+
+        btn_add.set_label("В списке")
+        btn_add.set_sensitive(False)
+        self._log(f"✔ {display_name} добавлен в список (группа «{group.get('title', '')}»)\n")
+
+    def _install_pkg(self, pkg_id, install_type, btn, status):
+        if backend.is_system_busy():
+            self._log("\n⚠  Система занята.\n")
+            return
+        btn.set_sensitive(False)
+        btn.set_label("…")
+        self._log(f"\n▶  Установка {pkg_id}...\n")
+        done_cb = lambda ok: self._pkg_install_done(ok, pkg_id, btn, status)
+        if install_type == "flatpak":
+            backend.run_privileged(
+                ["flatpak", "install", "flathub", "-y", pkg_id],
+                self._log, done_cb,
+            )
+        elif install_type == "epm_play":
+            backend.run_epm(["epm", "play", pkg_id], self._log, done_cb)
+        else:
+            backend.run_epm(["epm", "install", "-y", pkg_id], self._log, done_cb)
+
+    def _pkg_install_done(self, ok, pkg_id, btn, status):
+        if ok:
+            set_status_ok(status)
+            btn.set_label("Установлено")
+            self._log(f"✔  {pkg_id} установлен!\n")
+        else:
+            set_status_error(status)
+            btn.set_label("Повторить")
+            btn.set_sensitive(True)
+            self._log(f"✘  Ошибка установки {pkg_id}\n")
+
     def _clear_body(self):
         """Очищает все виджеты со страницы, кроме панели кнопок."""
         child = self._body.get_first_child()
@@ -71,6 +413,7 @@ class AppsPage(Gtk.Box):
                 self._body.remove(child)
             child = nxt
         self._rows.clear()
+        self._pkg_search_groups = []
 
     def _load_and_build(self):
         self._clear_body()
@@ -126,15 +469,19 @@ class AppsPage(Gtk.Box):
             exp.add_suffix(add_btn)
 
             for app in gdata.get("items", []):
-                src = dict(app["source"])
-                chk = src.get("check", [])
-                src["check"] = tuple(chk) if isinstance(chk, list) else chk
+                # Нормализация для AppRow
+                sources = []
+                if "sources" in app:
+                    sources = app["sources"]
+                elif "source" in app:
+                    sources = [app["source"]]
+                
+                # Валидация источников (tuple check)
+                for s in sources:
+                    chk = s.get("check", [])
+                    s["check"] = tuple(chk) if isinstance(chk, list) else chk
 
-                # Пропускаем epm-приложения если epm недоступен
-                if src.get("cmd") and src["cmd"][0] == "epm" and not shutil.which("epm"):
-                    continue
-
-                app_n = dict(app, source=src)
+                app_n = dict(app, sources=sources)
                 row = AppRow(app_n, self._log, self._refresh_btn_all)
                 self._rows.append(row)
                 exp.add_row(row)
@@ -388,11 +735,32 @@ class AppsPage(Gtk.Box):
         threading.Thread(target=self._worker, daemon=True).start()
 
     def _worker(self):
+        # Определяем приоритет
+        prio_idx = self._prio_combo.get_selected()
+        prio_map = {0: "Flathub", 1: "EPM", 2: "APT"} # RPM ~ APT/EPM install
+        prio_label = prio_map.get(prio_idx, "Flathub")
+
         for row in (r for r in self._rows if not r.is_installed()):
             # Ждем, пока предыдущая установка (если была) сбросит флаг
             while row._installing:
                 time.sleep(0.5)
+            
+            # Выбираем источник в строке согласно приоритету
+            best_idx = 0
+            for i, src in enumerate(row._sources):
+                lbl = src.get("label", "")
+                # Простой поиск подстроки
+                if prio_label in lbl:
+                    best_idx = i
+                    break
+                # EPM play / EPM install считаем за EPM
+                if prio_label == "EPM" and "EPM" in lbl:
+                    best_idx = i
+                    break
+            
+            GLib.idle_add(row._source_dropdown.set_selected, best_idx)
             GLib.idle_add(row._on_install)
+            
             # Даем время на запуск установки в основном потоке
             time.sleep(1.0)
             while row._installing:

@@ -136,10 +136,20 @@ class AppRow(Adw.ActionRow):
     def __init__(self, app, log_fn, on_change_cb):
         super().__init__()
         self._app = app
+        
+        # Нормализация источников: всегда работаем со списком
+        if "sources" in app:
+            self._sources = app["sources"]
+        elif "source" in app:
+            self._sources = [app["source"]]
+        else:
+            self._sources = []
+
         self._log = log_fn
         self._on_change = on_change_cb
         self._installing = False
         self._state_key = f"app_{app['id']}"
+        self._installed_source_index = -1
 
         self.set_title(app["label"])
         self.set_subtitle(app["desc"])
@@ -165,6 +175,18 @@ class AppRow(Adw.ActionRow):
         suffix = Gtk.Box(spacing=8)
         suffix.set_valign(Gtk.Align.CENTER)
         suffix.append(self._prog)
+
+        # Выпадающий список источников (если их > 1)
+        self._source_dropdown = Gtk.DropDown()
+        self._source_dropdown.set_valign(Gtk.Align.CENTER)
+        self._source_dropdown.set_visible(len(self._sources) > 1)
+        
+        model = Gtk.StringList()
+        for s in self._sources:
+            model.append(s.get("label", "Source"))
+        self._source_dropdown.set_model(model)
+        suffix.append(self._source_dropdown)
+
         suffix.append(self._btn)
         suffix.append(self._trash_btn)
         self.add_suffix(suffix)
@@ -175,7 +197,17 @@ class AppRow(Adw.ActionRow):
         return config.state_get(self._state_key) is True
 
     def _check(self):
-        installed = backend.check_app_installed(self._app["source"])
+        # Проверяем все источники
+        installed = False
+        installed_idx = -1
+        
+        for i, src in enumerate(self._sources):
+            if backend.check_app_installed(src):
+                installed = True
+                installed_idx = i
+                break
+        
+        self._installed_source_index = installed_idx
         config.state_set(self._state_key, installed)
         GLib.idle_add(self._set_installed_ui, installed)
 
@@ -193,6 +225,11 @@ class AppRow(Adw.ActionRow):
             
             self._trash_btn.set_visible(True)
             self._trash_btn.set_sensitive(True)
+            
+            # Если установлено, выбираем установленный источник в дропдауне и блокируем его
+            if self._installed_source_index >= 0:
+                self._source_dropdown.set_selected(self._installed_source_index)
+            self._source_dropdown.set_sensitive(False)
         else:
             clear_status(self._status)
             
@@ -204,6 +241,7 @@ class AppRow(Adw.ActionRow):
             self._btn.add_css_class("suggested-action")
             
             self._trash_btn.set_visible(False)
+            self._source_dropdown.set_sensitive(True)
             
         if self._on_change:
             self._on_change()
@@ -214,16 +252,32 @@ class AppRow(Adw.ActionRow):
         if backend.is_system_busy():
             self._log("\n⚠  Система занята. Подождите...\n")
             return
+            
+        # Определяем источник: выбранный в дропдауне
+        idx = self._source_dropdown.get_selected()
+        if idx < 0 or idx >= len(self._sources):
+            idx = 0
+        
+        if not self._sources:
+             self._log("\n✘  Нет источников установки для этого приложения.\n")
+             return
+
+        src = self._sources[idx]
+
         self._installing = True
-        src = self._app["source"]
         self._btn.set_sensitive(False)
+        self._source_dropdown.set_sensitive(False)
         self._btn.set_label("…")
         self._prog.set_visible(True)
         self._prog.set_fraction(0.0)
         GLib.timeout_add(120, self._pulse)
         self._log(f"\n▶  Установка {self._app['label']} ({src['label']})...\n")
-        cmd = src["cmd"]
+        
+        cmd = list(src["cmd"])
         if cmd and cmd[0] == "epm":
+            # Автоматически добавляем -y для epm install/remove
+            if len(cmd) > 1 and cmd[1] in ("install", "-i", "remove", "-e") and "-y" not in cmd:
+                cmd.insert(2, "-y")
             backend.run_epm(cmd, self._log, self._install_done)
         else:
             backend.run_privileged(cmd, self._log, self._install_done)
@@ -234,22 +288,46 @@ class AppRow(Adw.ActionRow):
         if backend.is_system_busy():
             self._log("\n⚠  Система занята.\n")
             return
+            
+        # Удаляем то, что установлено
+        idx = self._installed_source_index
+        if idx < 0:
+            # Если не знаем что установлено, берем текущий выбор
+            idx = self._source_dropdown.get_selected()
+        
+        if idx < 0 or idx >= len(self._sources):
+            idx = 0
+            
+        if not self._sources:
+             return
+
+        src = self._sources[idx]
+
         self._installing = True
         self._trash_btn.set_sensitive(False)
         self._prog.set_visible(True)
         self._prog.set_fraction(0.0)
         GLib.timeout_add(120, self._pulse)
-        kind, pkg = self._app["source"]["check"]
+        
+        kind, pkg = src["check"]
         if kind == "flatpak":
             cmd = ["flatpak", "uninstall", "-y", pkg]
         elif kind == "rpm":
-            cmd = ["epm", "-e", pkg]
+            cmd = ["epm", "-e", "-y", pkg]
         else:
-            cmd = [
-                "rm", "-rf",
-                os.path.expanduser("~/.local/share/monitor-control"),
-                os.path.expanduser("~/Monic"),
-            ]
+            # Fallback для кастомных скриптов
+            if "monitor-control" in str(src):
+                cmd = [
+                    "rm", "-rf",
+                    os.path.expanduser("~/.local/share/monitor-control"),
+                    os.path.expanduser("~/Monic"),
+                ]
+            else:
+                self._log("⚠ Неизвестный метод удаления для этого источника. Попробуйте удалить вручную.\n")
+                self._installing = False
+                self._set_installed_ui(True)
+                return
+
         self._log(f"\n▶  Удаление {self._app['label']}...\n")
         backend.run_privileged(cmd, self._log, self._uninstall_done)
 
@@ -265,10 +343,13 @@ class AppRow(Adw.ActionRow):
         if ok:
             self._log(f"✔  {self._app['label']} установлен!\n")
             config.state_set(self._state_key, True)
+            # Обновляем индекс установленного источника
+            self._installed_source_index = self._source_dropdown.get_selected()
             self._set_installed_ui(True)
         else:
             self._log(f"✘  Ошибка установки {self._app['label']}\n")
             self._btn.set_sensitive(True)
+            self._source_dropdown.set_sensitive(True)
             self._btn.set_label("Повторить")
 
     def _uninstall_done(self, ok):
@@ -277,6 +358,7 @@ class AppRow(Adw.ActionRow):
         if ok:
             self._log(f"✔  {self._app['label']} удалён!\n")
             config.state_set(self._state_key, False)
+            self._installed_source_index = -1
             self._set_installed_ui(False)
         else:
             self._log(f"✘  Ошибка удаления {self._app['label']}\n")
@@ -286,7 +368,7 @@ class AppRow(Adw.ActionRow):
 class TaskRow(Adw.ActionRow):
     """Строка задачи обслуживания с прогрессом."""
 
-    def __init__(self, task, on_log, on_progress):
+    def __init__(self, task, on_log, on_progress, btn_label="Запустить"):
         super().__init__()
         self._task = task
         self._on_log = on_log
@@ -303,7 +385,7 @@ class TaskRow(Adw.ActionRow):
         self._prog.set_valign(Gtk.Align.CENTER)
         self._status = make_status_icon()
         self._status.set_size_request(22, -1)
-        self._btn = make_button("Запустить", width=110)
+        self._btn = make_button(btn_label, width=110)
         self._btn.connect("clicked", lambda _: self.start())
 
         right = Gtk.Box(spacing=10)
@@ -316,12 +398,21 @@ class TaskRow(Adw.ActionRow):
         if "check" in task:
             threading.Thread(target=self._initial_check, daemon=True).start()
 
+    def refresh_check(self):
+        if "check" in self._task:
+            threading.Thread(target=self._initial_check, daemon=True).start()
+
     def _initial_check(self):
         check = self._task["check"]
         ok = False
         if check.get("type") == "path":
             path = os.path.expanduser(check["value"])
-            ok = os.path.exists(path)
+            if os.path.exists(path):
+                ok = True
+            elif backend.get_sudo_password():
+                # Если прав нет, пробуем через sudo (для системных путей)
+                if backend.run_privileged_sync(["test", "-e", path], lambda _: None):
+                    ok = True
         
         if ok:
             GLib.idle_add(self._mark_done_init)
@@ -391,6 +482,14 @@ class TaskRow(Adw.ActionRow):
             set_status_ok(self._status)
             self._btn.remove_css_class("suggested-action")
             self._btn.add_css_class("flat")
+            
+            # Если у задачи есть проверка (это фикс/настройка), то после успеха блокируем кнопку
+            if "check" in self._task:
+                self._btn.set_label("Применено")
+                self._btn.set_sensitive(False)
+                self._on_log(f"✔  Готово: {self._task['label']}\n")
+                self._on_progress()
+                return
         else:
             set_status_error(self._status)
         self._btn.set_label("Повтор")

@@ -18,7 +18,7 @@ from widgets import (
     set_status_ok, set_status_error, clear_status
 )
 from ui.common import load_module
-from ui.rows import TaskRow
+from ui.rows import TaskRow, SettingRow
 
 
 class CacheTaskRow(Adw.ExpanderRow):
@@ -212,12 +212,21 @@ class MaintenancePage(Gtk.Box):
 
         try:
             data = load_module("maintenance")
-            tasks = data.get("tasks", [])
+            all_tasks = data.get("tasks", [])
         except (OSError, json.JSONDecodeError):
-            tasks = []
+            all_tasks = []
 
-        self._build_header(body, len(tasks))
-        self._build_tasks(body, tasks)
+        flatpak_ids = ["flatpak", "flatpak_home"]
+        fix_ids = ["fix_gdm_usb", "fix_gsconnect", "disable_tracker"]
+
+        flatpak_tasks = [t for t in all_tasks if t["id"] in flatpak_ids]
+        fix_tasks = [t for t in all_tasks if t["id"] in fix_ids]
+        other_tasks = [t for t in all_tasks if t["id"] not in flatpak_ids and t["id"] not in fix_ids]
+
+        self._build_header(body, len(all_tasks) + 1) # +1 для CacheTaskRow
+        self._build_tasks(body, other_tasks)
+        self._build_flatpak_group(body, flatpak_tasks)
+        self._build_fixes_group(body, fix_tasks)
 
     def _build_header(self, body, total):
         container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
@@ -242,6 +251,67 @@ class MaintenancePage(Gtk.Box):
         self._btn_all.set_halign(Gtk.Align.CENTER)
         self._btn_all.connect("clicked", self._run_all)
         body.append(self._btn_all)
+
+    def _build_flatpak_group(self, body, tasks):
+        group = Adw.PreferencesGroup()
+        group.set_title("Flatpak и Flathub")
+        group.set_description("Управление подсистемой Flatpak")
+        body.append(group)
+
+        # 1. Подключить Flathub
+        row = SettingRow(
+            "application-x-addon-symbolic",       "Подключить Flathub",          "Устанавливает flatpak и flathub",               "Включить",     self._on_flathub,        backend.is_flathub_enabled,            "setting_flathub", "Активировано", self._on_flathub_undo, "Удалить"
+        )
+        group.add(row)
+
+        # 2. Задачи (Уборка, Доступ к Home)
+        for task in tasks:
+            row = TaskRow(task, self._log, self._update_progress)
+            self._rows.append(row)
+            group.add(row)
+
+    def _build_fixes_group(self, body, tasks):
+        if not tasks:
+            return
+        group = Adw.PreferencesGroup()
+        group.set_title("Различные баги и фиксы")
+        body.append(group)
+
+        for task in tasks:
+            row = TaskRow(task, self._log, self._update_progress, btn_label="Применить")
+            self._rows.append(row)
+            group.add(row)
+
+    def _on_flathub(self, row):
+        if backend.is_system_busy():
+            self._log("\n⚠  Система занята.\n")
+            return
+        row.set_working()
+        self._log("\n▶  Установка Flatpak и Flathub...\n")
+
+        def step2(ok):
+            if not ok:
+                row.set_done(False)
+                return
+            backend.run_privileged(
+                ["apt-get", "install", "-y", "flatpak-repo-flathub"],
+                self._log,
+                lambda ok2: (row.set_done(ok2), self._log("✔  Flathub готов!\n" if ok2 else "✘  Ошибка\n")),
+            )
+
+        backend.run_privileged(["apt-get", "install", "-y", "flatpak"], self._log, step2)
+
+    def _on_flathub_undo(self, row):
+        if backend.is_system_busy():
+            self._log("\n⚠  Система занята.\n")
+            return
+        row.set_working()
+        self._log("\n▶  Удаление Flatpak и Flathub...\n")
+        backend.run_privileged(
+            ["apt-get", "remove", "-y", "flatpak", "flatpak-repo-flathub"],
+            self._log,
+            lambda ok: (row.set_undo_done(ok), self._log("✔  Flatpak удалён!\n" if ok else "✘  Ошибка\n")),
+        )
 
     def _build_tasks(self, body, tasks):
         # Отдельная группа для очистки кэша
@@ -271,6 +341,11 @@ class MaintenancePage(Gtk.Box):
         self._btn_all.set_sensitive(sensitive)
         for r in self._rows:
             r._btn.set_sensitive(sensitive)
+
+    def refresh_checks(self):
+        for row in self._rows:
+            if isinstance(row, TaskRow):
+                row.refresh_check()
 
     def _run_all(self, _):
         if self._busy:
