@@ -49,18 +49,9 @@ class AppsPage(Gtk.Box):
         self._btn_all.add_css_class("success")
         self._btn_all.connect("clicked", self._on_install_all_clicked)
 
-        # Выбор приоритета источника
-        self._prio_combo = Gtk.DropDown()
-        self._prio_combo.set_model(Gtk.StringList.new(["Flathub", "EPM", "RPM"]))
-        self._prio_combo.set_selected(0) # Default Flathub
-        self._prio_combo.set_tooltip_text("Приоритетный источник для массовой установки")
-        self._prio_combo.set_valign(Gtk.Align.CENTER)
-        self._prio_combo.set_margin_start(10)
-
         start_box = Gtk.Box()
         start_box.set_halign(Gtk.Align.START)
         start_box.append(self._btn_all)
-        start_box.append(self._prio_combo)
         self._btns_box.set_start_widget(start_box)
 
         # Поиск пакетов (Center)
@@ -143,6 +134,7 @@ class AppsPage(Gtk.Box):
                 "summary": pkg.get("summary") or "",
                 "version": version,
                 "install_type": "epm",
+                "branch": branch,
             })
         return results
 
@@ -157,31 +149,33 @@ class AppsPage(Gtk.Box):
             return False
 
     def _do_pkg_search(self, query, branch):
+        primary = []
         try:
             primary = self._fetch_from_source(query, branch)
             for pkg in primary:
                 pkg["installed"] = self._check_installed(pkg["install_id"], pkg["install_type"])
-            if primary:
-                GLib.idle_add(self._display_pkg_results, [(branch, primary)], False)
-            else:
-                GLib.idle_add(self._log, "ℹ Не найдено, ищу в других источниках...\n")
-                all_branches = ["p11", "sisyphus", "epm_play", "flathub"]
-                fallback = []
-                for ob in all_branches:
-                    if ob == branch:
-                        continue
-                    try:
-                        r = self._fetch_from_source(query, ob)
-                        for pkg in r:
-                            pkg["installed"] = self._check_installed(pkg["install_id"], pkg["install_type"])
-                        if r:
-                            fallback.append((ob, r))
-                    except Exception:
-                        pass
-                GLib.idle_add(self._display_pkg_results, fallback, True)
-        except Exception as e:
-            GLib.idle_add(self._log, f"✘ Ошибка поиска пакетов: {e}\n")
-            GLib.idle_add(set_status_error, self._search_status)
+        except Exception:
+            pass
+
+        if primary:
+            GLib.idle_add(self._display_pkg_results, [(branch, primary)], False)
+        else:
+            GLib.idle_add(self._log, "ℹ Не найдено в выбранном источнике, ищу в других...\n")
+            all_branches = ["p11", "sisyphus", "epm_play", "flathub"]
+            fallback = []
+            for ob in all_branches:
+                if ob == branch:
+                    continue
+                try:
+                    r = self._fetch_from_source(query, ob)
+                    for pkg in r:
+                        pkg["installed"] = self._check_installed(pkg["install_id"], pkg["install_type"])
+                    if r:
+                        fallback.append((ob, r))
+                except Exception:
+                    pass
+            GLib.idle_add(self._display_pkg_results, fallback, True)
+
         GLib.idle_add(self._search_btn.set_label, "Найти")
         GLib.idle_add(self._search_btn.set_sensitive, True)
 
@@ -201,6 +195,7 @@ class AppsPage(Gtk.Box):
                 "summary": hit.get("summary") or "",
                 "version": "",
                 "install_type": "flatpak",
+                "branch": "flathub",
             }
             for hit in data.get("hits", [])
         ]
@@ -233,6 +228,7 @@ class AppsPage(Gtk.Box):
                 "summary": desc,
                 "version": "",
                 "install_type": "epm_play",
+                "branch": "epm_play",
             }
             for name, desc in self._epm_play_cache
             if q in name.lower() or q in desc.lower()
@@ -244,7 +240,7 @@ class AppsPage(Gtk.Box):
             self._log("ℹ Пакеты не найдены ни в одном источнике.\n")
             return
         set_status_ok(self._search_status)
-        label_map = {"flathub": "Flathub", "p11": "p11", "sisyphus": "Sisyphus", "epm_play": "epm play"}
+        label_map = {"flathub": "Flathub", "p11": "p11", "sisyphus": "Sisyphus", "epm_play": "EPM Play"}
         title_prefix = "Найдено в" if is_fallback else "Результаты в"
         prev = self._btns_box
         for branch, results in branch_results_list:
@@ -313,8 +309,11 @@ class AppsPage(Gtk.Box):
 
     def _is_in_list(self, install_id):
         """Проверяет, есть ли пакет с таким install_id уже в apps.json."""
+        # Проверяем по ID приложения или по команде установки
         for g in self._data.get("groups", []):
             for item in g.get("items", []):
+                if item.get("id") == install_id.replace(".", "_").replace("-", "_").replace(" ", "_").lower():
+                    return True
                 for src in item.get("sources", []):
                     if install_id in src.get("cmd", []):
                         return True
@@ -329,7 +328,19 @@ class AppsPage(Gtk.Box):
         display_name = pkg["display_name"]
         install_id = pkg["install_id"]
         install_type = pkg["install_type"]
+        branch = pkg.get("branch")
         summary = pkg.get("summary", "")[:100]
+
+        # Хаки для конкретных пакетов (переопределение типа установки)
+        lid = install_id.lower()
+        if lid in ("furmark", "occt", "yandex-browser", "chrome", "google-chrome-stable"):
+            install_type = "epm_play"
+            branch = "epm_play"
+        elif lid in ("firefox", "yandex-browser-stable"):
+            install_type = "epm"
+            # Если вдруг ветка не определена (или пришла не из p11/sisyphus), ставим p11 для метки
+            if branch not in ("p11", "Sisyphus"):
+                branch = "p11"
 
         if install_type == "flatpak":
             source = {
@@ -339,41 +350,64 @@ class AppsPage(Gtk.Box):
             }
         elif install_type == "epm_play":
             source = {
-                "label": "EPM play",
+                "label": "EPM Play",
                 "cmd": ["epm", "play", install_id],
                 "check": ["rpm", install_id],
             }
         else:
+            # Для epm install используем название ветки
+            label = branch if branch in ["p11", "Sisyphus"] else "EPM install"
             source = {
-                "label": "EPM install",
+                "label": label,
                 "cmd": ["epm", "-i", "-y", install_id],
                 "check": ["rpm", install_id],
             }
 
         item_id = install_id.replace(".", "_").replace("-", "_").replace(" ", "_").lower()
-        item = {
-            "id": item_id,
-            "label": display_name,
-            "desc": summary,
-            "sources": [source],
-        }
 
         gs = self._data.get("groups", [])
         if not gs:
             self._log("⚠ Нет групп для добавления.\n")
             return
 
-        group = gs[0]
-        items = group.setdefault("items", [])
-        ids = {it.get("id") for it in items}
-        if item_id in ids:
-            item = dict(item, id=item_id + "_2")
-        items.append(item)
-        self._write_json()
-
-        btn_add.set_label("В списке")
+        # Ищем, существует ли уже такое приложение
+        target_item = None
+        for g in gs:
+            for it in g.get("items", []):
+                if it.get("id") == item_id:
+                    target_item = it
+                    break
+            if target_item:
+                break
+        
+        if target_item:
+            # Если есть — добавляем источник к нему
+            if "sources" not in target_item:
+                target_item["sources"] = [target_item["source"]] if "source" in target_item else []
+                if "source" in target_item: del target_item["source"]
+            
+            # Проверяем дубликаты источников
+            exists = any(s.get("label") == source["label"] and s.get("cmd") == source["cmd"] for s in target_item["sources"])
+            if not exists:
+                target_item["sources"].append(source)
+                self._log(f"✔ Источник «{source['label']}» добавлен к «{target_item['label']}»\n")
+                self._write_json()
+                GLib.idle_add(self._load_and_build) # Перезагружаем UI, чтобы обновить бейджики
+            else:
+                self._log(f"ℹ Источник уже существует у «{target_item['label']}»\n")
+            
+            btn_add.set_label("Обновлено")
+        else:
+            # Если нет — создаем новое
+            item = {"id": item_id, "label": display_name, "desc": summary, "sources": [source]}
+            gs[0].setdefault("items", []).append(item)
+            self._write_json()
+            GLib.idle_add(self._load_and_build)
+            
+            btn_add.set_label("Добавлено")
+            self._log(f"✔ {display_name} добавлен в список\n")
+            
         btn_add.set_sensitive(False)
-        self._log(f"✔ {display_name} добавлен в список (группа «{group.get('title', '')}»)\n")
 
     def _install_pkg(self, pkg_id, install_type, btn, status):
         if backend.is_system_busy():
@@ -735,30 +769,11 @@ class AppsPage(Gtk.Box):
         threading.Thread(target=self._worker, daemon=True).start()
 
     def _worker(self):
-        # Определяем приоритет
-        prio_idx = self._prio_combo.get_selected()
-        prio_map = {0: "Flathub", 1: "EPM", 2: "APT"} # RPM ~ APT/EPM install
-        prio_label = prio_map.get(prio_idx, "Flathub")
-
         for row in (r for r in self._rows if not r.is_installed()):
             # Ждем, пока предыдущая установка (если была) сбросит флаг
             while row._installing:
                 time.sleep(0.5)
             
-            # Выбираем источник в строке согласно приоритету
-            best_idx = 0
-            for i, src in enumerate(row._sources):
-                lbl = src.get("label", "")
-                # Простой поиск подстроки
-                if prio_label in lbl:
-                    best_idx = i
-                    break
-                # EPM play / EPM install считаем за EPM
-                if prio_label == "EPM" and "EPM" in lbl:
-                    best_idx = i
-                    break
-            
-            GLib.idle_add(row._source_dropdown.set_selected, best_idx)
             GLib.idle_add(row._on_install)
             
             # Даем время на запуск установки в основном потоке

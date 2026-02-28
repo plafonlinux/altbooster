@@ -93,20 +93,35 @@
           "id": "firefox",
           "label": "Firefox",
           "desc": "Браузер Mozilla Firefox",
-          "source": {
-            "label": "Flathub",
-            "cmd": [
-              "flatpak",
-              "install",
-              "-y",
-              "flathub",
-              "org.mozilla.firefox"
-            ],
-            "check": [
-              "flatpak",
-              "org.mozilla.firefox"
-            ]
-          }
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.mozilla.firefox"
+              ],
+              "check": [
+                "flatpak",
+                "org.mozilla.firefox"
+              ]
+            },
+            {
+              "label": "EPM install",
+              "cmd": [
+                "epm",
+                "-i",
+                "-y",
+                "firefox"
+              ],
+              "check": [
+                "rpm",
+                "firefox"
+              ]
+            }
+          ]
         },
         {
           "id": "chrome",
@@ -131,20 +146,47 @@
           "id": "yandex",
           "label": "Яндекс Браузер",
           "desc": "Официальный браузер от Яндекса",
-          "source": {
-            "label": "Flathub",
-            "cmd": [
-              "flatpak",
-              "install",
-              "-y",
-              "flathub",
-              "ru.yandex.Browser"
-            ],
-            "check": [
-              "flatpak",
-              "ru.yandex.Browser"
-            ]
-          }
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "ru.yandex.Browser"
+              ],
+              "check": [
+                "flatpak",
+                "ru.yandex.Browser"
+              ]
+            },
+            {
+              "label": "EPM play",
+              "cmd": [
+                "epm",
+                "play",
+                "yandex-browser"
+              ],
+              "check": [
+                "rpm",
+                "yandex-browser"
+              ]
+            },
+            {
+              "label": "EPM install",
+              "cmd": [
+                "epm",
+                "-i",
+                "-y",
+                "yandex-browser-stable"
+              ],
+              "check": [
+                "rpm",
+                "yandex-browser-stable"
+              ]
+            }
+          ]
         }
       ]
     },
@@ -237,20 +279,34 @@
           "id": "kdenlive",
           "label": "KDENlive",
           "desc": "Видеоредактор",
-          "source": {
-            "label": "Flathub",
-            "cmd": [
-              "flatpak",
-              "install",
-              "-y",
-              "flathub",
-              "org.kde.kdenlive"
-            ],
-            "check": [
-              "flatpak",
-              "org.kde.kdenlive"
-            ]
-          }
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.kde.kdenlive"
+              ],
+              "check": [
+                "flatpak",
+                "org.kde.kdenlive"
+              ]
+            },
+            {
+              "label": "EPM install",
+              "cmd": [
+                "epm",
+                "-i",
+                "kdenlive"
+              ],
+              "check": [
+                "rpm",
+                "kdenlive"
+              ]
+            }
+          ]
         },
         {
           "id": "audacity",
@@ -549,25 +605,27 @@
           "id": "furmark",
           "label": "FurMark",
           "desc": "Стресс-тест GPU",
-          "source": {
-            "label": "EPM",
-            "cmd": [
-              "epm",
-              "play",
-              "furmark"
-            ],
-            "check": [
-              "rpm",
-              "furmark"
-            ]
-          }
+          "sources": [
+            {
+              "label": "EPM play",
+              "cmd": [
+                "epm",
+                "play",
+                "furmark"
+              ],
+              "check": [
+                "rpm",
+                "furmark"
+              ]
+            }
+          ]
         },
         {
           "id": "occt",
           "label": "OCCT",
           "desc": "Стресс-тест CPU/GPU/RAM",
           "source": {
-            "label": "EPM",
+            "label": "EPM Play",
             "cmd": [
               "epm",
               "play",
@@ -575,7 +633,7 @@
             ],
             "check": [
               "rpm",
-              "OCCT"
+              "occt"
             ]
           }
         }

@@ -150,6 +150,7 @@ class AppRow(Adw.ActionRow):
         self._installing = False
         self._state_key = f"app_{app['id']}"
         self._installed_source_index = -1
+        self._selected_source_index = 0
 
         self.set_title(app["label"])
         self.set_subtitle(app["desc"])
@@ -176,21 +177,16 @@ class AppRow(Adw.ActionRow):
         suffix.set_valign(Gtk.Align.CENTER)
         suffix.append(self._prog)
 
-        # Выпадающий список источников (если их > 1)
-        self._source_dropdown = Gtk.DropDown()
-        self._source_dropdown.set_valign(Gtk.Align.CENTER)
-        self._source_dropdown.set_visible(len(self._sources) > 1)
-        
-        model = Gtk.StringList()
-        for s in self._sources:
-            model.append(s.get("label", "Source"))
-        self._source_dropdown.set_model(model)
-        suffix.append(self._source_dropdown)
+        # Контейнер для бейджиков источников
+        self._badges_box = Gtk.Box(spacing=4)
+        self._badges_box.set_valign(Gtk.Align.CENTER)
+        suffix.append(self._badges_box)
 
         suffix.append(self._btn)
         suffix.append(self._trash_btn)
         self.add_suffix(suffix)
 
+        self._update_badges()
         threading.Thread(target=self._check, daemon=True).start()
 
     def is_installed(self):
@@ -211,7 +207,51 @@ class AppRow(Adw.ActionRow):
         config.state_set(self._state_key, installed)
         GLib.idle_add(self._set_installed_ui, installed)
 
+    def _update_badges(self):
+        # Очищаем старые бейджики
+        child = self._badges_box.get_first_child()
+        while child:
+            next_child = child.get_next_sibling()
+            self._badges_box.remove(child)
+            child = next_child
+
+        if self.is_installed():
+            # Если установлено: показываем только один зеленый бейдж
+            idx = self._installed_source_index
+            if idx >= 0 and idx < len(self._sources):
+                src = self._sources[idx]
+                label = src.get("label", "Source")
+            else:
+                label = "Установлено"
+                
+            btn = Gtk.Button(label=label)
+            btn.add_css_class("success") # Зеленый
+            btn.add_css_class("pill")    # Скругленный
+            btn.set_sensitive(False)     # Неактивный (просто индикатор)
+            self._badges_box.append(btn)
+        else:
+            # Если не установлено: показываем все варианты
+            # Если вариант всего один, можно показать его для информации или скрыть.
+            # Покажем всегда, чтобы было видно, откуда будет установка.
+            for i, src in enumerate(self._sources):
+                btn = Gtk.Button(label=src.get("label", "Source"))
+                btn.add_css_class("pill")
+                if i == self._selected_source_index:
+                    btn.add_css_class("suggested-action") # Синий (выбран)
+                else:
+                    btn.add_css_class("flat") # Бледный (не выбран)
+                
+                btn.connect("clicked", lambda b, idx=i: self.set_selected_source(idx))
+                self._badges_box.append(btn)
+
+    def set_selected_source(self, idx):
+        if idx < 0 or idx >= len(self._sources):
+            return
+        self._selected_source_index = idx
+        self._update_badges()
+
     def _set_installed_ui(self, installed):
+        self._update_badges()
         if installed:
             set_status_ok(self._status)
             self._prog.set_visible(False)
@@ -225,11 +265,6 @@ class AppRow(Adw.ActionRow):
             
             self._trash_btn.set_visible(True)
             self._trash_btn.set_sensitive(True)
-            
-            # Если установлено, выбираем установленный источник в дропдауне и блокируем его
-            if self._installed_source_index >= 0:
-                self._source_dropdown.set_selected(self._installed_source_index)
-            self._source_dropdown.set_sensitive(False)
         else:
             clear_status(self._status)
             
@@ -241,7 +276,6 @@ class AppRow(Adw.ActionRow):
             self._btn.add_css_class("suggested-action")
             
             self._trash_btn.set_visible(False)
-            self._source_dropdown.set_sensitive(True)
             
         if self._on_change:
             self._on_change()
@@ -254,7 +288,7 @@ class AppRow(Adw.ActionRow):
             return
             
         # Определяем источник: выбранный в дропдауне
-        idx = self._source_dropdown.get_selected()
+        idx = self._selected_source_index
         if idx < 0 or idx >= len(self._sources):
             idx = 0
         
@@ -266,7 +300,7 @@ class AppRow(Adw.ActionRow):
 
         self._installing = True
         self._btn.set_sensitive(False)
-        self._source_dropdown.set_sensitive(False)
+        self._badges_box.set_sensitive(False)
         self._btn.set_label("…")
         self._prog.set_visible(True)
         self._prog.set_fraction(0.0)
@@ -274,13 +308,43 @@ class AppRow(Adw.ActionRow):
         self._log(f"\n▶  Установка {self._app['label']} ({src['label']})...\n")
         
         cmd = list(src["cmd"])
+        is_epm = False
         if cmd and cmd[0] == "epm":
+            is_epm = True
             # Автоматически добавляем -y для epm install/remove
             if len(cmd) > 1 and cmd[1] in ("install", "-i", "remove", "-e") and "-y" not in cmd:
                 cmd.insert(2, "-y")
-            backend.run_epm(cmd, self._log, self._install_done)
+
+        # Логика повторной попытки при 404 (устаревшие индексы)
+        self._install_needs_update = False
+        def _log_wrapper(text):
+            if ("404" in text and "Not Found" in text) or "Unable to fetch some archives" in text:
+                self._install_needs_update = True
+            self._log(text)
+
+        def _on_update_done(ok):
+            if not ok:
+                self._log("✘  Не удалось обновить индексы. Прерываю.\n")
+                self._install_done(False)
+                return
+            self._log(f"\n▶  Повторная попытка установки {self._app['label']}...\n")
+            # При повторе используем обычный логгер
+            if is_epm:
+                backend.run_epm(cmd, self._log, self._install_done)
+            else:
+                backend.run_privileged(cmd, self._log, self._install_done)
+
+        def _first_attempt_done(ok):
+            if not ok and self._install_needs_update:
+                self._log("\n⚠  Обнаружены устаревшие индексы. Выполняю обновление (apt-get update)...\n")
+                backend.run_privileged(["apt-get", "update"], self._log, _on_update_done)
+            else:
+                self._install_done(ok)
+
+        if is_epm:
+            backend.run_epm(cmd, _log_wrapper, _first_attempt_done)
         else:
-            backend.run_privileged(cmd, self._log, self._install_done)
+            backend.run_privileged(cmd, _log_wrapper, _first_attempt_done)
 
     def _on_uninstall(self, _):
         if self._installing:
@@ -293,7 +357,7 @@ class AppRow(Adw.ActionRow):
         idx = self._installed_source_index
         if idx < 0:
             # Если не знаем что установлено, берем текущий выбор
-            idx = self._source_dropdown.get_selected()
+            idx = self._selected_source_index
         
         if idx < 0 or idx >= len(self._sources):
             idx = 0
@@ -311,8 +375,12 @@ class AppRow(Adw.ActionRow):
         
         kind, pkg = src["check"]
         if kind == "flatpak":
+            if isinstance(pkg, str):
+                pkg = pkg.strip().split()[0]
             cmd = ["flatpak", "uninstall", "-y", pkg]
         elif kind == "rpm":
+            if isinstance(pkg, str):
+                pkg = pkg.strip().split()[0]
             cmd = ["epm", "-e", "-y", pkg]
         else:
             # Fallback для кастомных скриптов
@@ -329,7 +397,10 @@ class AppRow(Adw.ActionRow):
                 return
 
         self._log(f"\n▶  Удаление {self._app['label']}...\n")
-        backend.run_privileged(cmd, self._log, self._uninstall_done)
+        if cmd and cmd[0] == "epm":
+            backend.run_epm(cmd, self._log, self._uninstall_done)
+        else:
+            backend.run_privileged(cmd, self._log, self._uninstall_done)
 
     def _pulse(self):
         if self._installing:
@@ -344,12 +415,12 @@ class AppRow(Adw.ActionRow):
             self._log(f"✔  {self._app['label']} установлен!\n")
             config.state_set(self._state_key, True)
             # Обновляем индекс установленного источника
-            self._installed_source_index = self._source_dropdown.get_selected()
+            self._installed_source_index = self._selected_source_index
             self._set_installed_ui(True)
         else:
             self._log(f"✘  Ошибка установки {self._app['label']}\n")
             self._btn.set_sensitive(True)
-            self._source_dropdown.set_sensitive(True)
+            self._badges_box.set_sensitive(True)
             self._btn.set_label("Повторить")
 
     def _uninstall_done(self, ok):
