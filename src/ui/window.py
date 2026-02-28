@@ -89,13 +89,20 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         header.set_title_widget(sw)
         
         menu = Gio.Menu()
+        menu.append("Проверить обновления", "win.check_update")
         menu.append("О приложении", "win.about")
         menu.append("Очистить лог", "win.clear_log")
         menu.append("Очистить кэш", "win.reset_state")
         mb = Gtk.MenuButton(); mb.set_icon_name("open-menu-symbolic"); mb.set_menu_model(menu)
         header.pack_end(mb)
         
-        for name, cb in [("about", self._show_about), ("clear_log", self._clear_log), ("reset_state", self._reset_state)]:
+        actions = [
+            ("check_update", self._check_for_updates),
+            ("about", self._show_about),
+            ("clear_log", self._clear_log),
+            ("reset_state", self._reset_state),
+        ]
+        for name, cb in actions:
             a = Gio.SimpleAction.new(name, None)
             a.connect("activate", cb)
             self.add_action(a)
@@ -219,6 +226,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         return False
 
     # ── Меню ─────────────────────────────────────────────────────────────────
+
+    def _check_for_updates(self, *_):
+        """Переключается на вкладку «Начало» и запускает проверку обновлений."""
+        self._stack.set_visible_child_name("setup")
+        self._setup.check_for_updates(manual=True)
 
     def _show_about(self, *_):
         d = Adw.AboutDialog()
