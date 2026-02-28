@@ -65,6 +65,11 @@ RECOMMENDED = [
         "Rounded Window Corners Reborn",
         "Скругление углов окон и мониторов",
     ),
+    (
+        "pipewire-settings@tuxor1337",
+        "Pipewire Settings",
+        "Настройка частоты и буфера звука",
+    ),
 ]
 
 _USER_EXT_DIR   = Path.home() / ".local" / "share" / "gnome-shell" / "extensions"
@@ -427,6 +432,23 @@ class ExtensionsPage(Gtk.Box):
     def _on_install_ext(self, uuid, btn, status, install_id=None):
         btn.set_sensitive(False)
         btn.set_label("…")
+        
+        # Поддержка установки через EPM (для системных пакетов)
+        if install_id and install_id.startswith("epm:"):
+            pkg = install_id[4:]
+            self._log(f"\n▶  Установка {pkg} (EPM)...\n")
+            def _done(ok):
+                if ok:
+                    GLib.idle_add(self._log, "✔  Установлено!\n")
+                    GLib.idle_add(self._refresh_installed)
+                else:
+                    GLib.idle_add(self._log, f"✘  Ошибка установки {pkg}\n")
+                    GLib.idle_add(set_status_error, status)
+                    GLib.idle_add(btn.set_label, "Повторить")
+                    GLib.idle_add(btn.set_sensitive, True)
+            backend.run_epm(["epm", "-i", "-y", pkg], self._log, _done)
+            return
+
         self._log(f"\n▶  Установка {uuid}...\n")
 
         def _do():

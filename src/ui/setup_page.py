@@ -183,15 +183,14 @@ class SetupPage(Gtk.Box):
         rows = [
             ("system-file-manager-symbolic", "Настройки Nautilus", "Сортировка папок, создание ссылок, подписи файлов", "Применить", self._on_nautilus, _check_nautilus, "setting_nautilus", "Применены", self._on_nautilus_undo, "Сбросить"),
             ("drive-harddisk-symbolic", "Индикатор копирования", "Адекватный прогресс-бар копирования (vm.dirty)", "Исправить", self._on_vm_dirty, backend.is_vm_dirty_optimized, "setting_vm_dirty", "Исправлено", self._on_vm_dirty_undo, "Сбросить"),
+            ("security-high-symbolic", "Запуск от администратора", "Пункт «Открыть как администратор» (nautilus-admin)", "Установить", self._on_install_nautilus_admin, lambda: backend.check_app_installed({"check": ["rpm", "nautilus-admin-gtk4"]}), "app_nautilus_admin", "Установлено", self._on_remove_nautilus_admin, "Удалить", "user-trash-symbolic"),
         ]
         
-        # Оставляем строго ДВЕ переменные!
-        self._r_naut, self._r_dirty = [
+        self._r_naut, self._r_dirty, self._r_naut_admin = [
             SettingRow(*r) for r in rows
         ]
         
-        # В цикле тоже оставляем только ДВЕ!
-        for r in (self._r_naut, self._r_dirty):
+        for r in (self._r_naut, self._r_dirty, self._r_naut_admin):
             group.add(r)
 
     def _on_nautilus(self, row):
@@ -230,6 +229,24 @@ class SetupPage(Gtk.Box):
         row.set_working()
         self._log("\n▶  Сброс настроек vm.dirty...\n")
         backend.run_privileged(["rm", "-f", "/etc/sysctl.d/99-altbooster.conf"], self._log, lambda ok: (row.set_undo_done(ok), self._log("✔  Настройки сброшены (требуется перезагрузка для эффекта)\n" if ok else "✘  Ошибка\n")))
+
+    def _on_install_nautilus_admin(self, row):
+        row.set_working()
+        self._log("\n▶  Установка nautilus-admin-gtk4...\n")
+        def _done(ok):
+            row.set_done(ok)
+            if ok:
+                self._log("✔  Установлено! Перезапускаю Nautilus...\n")
+                subprocess.run(["nautilus", "-q"])
+        backend.run_privileged(["apt-get", "install", "-y", "nautilus-admin-gtk4"], self._log, _done)
+
+    def _on_remove_nautilus_admin(self, row):
+        row.set_working()
+        self._log("\n▶  Удаление nautilus-admin-gtk4...\n")
+        def _done(ok):
+            row.set_undo_done(ok)
+            if ok: subprocess.run(["nautilus", "-q"])
+        backend.run_privileged(["apt-get", "remove", "-y", "nautilus-admin-gtk4"], self._log, _done)
 
     # ── Раскладка клавиатуры ─────────────────────────────────────────────────
 
