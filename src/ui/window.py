@@ -105,6 +105,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def _build_log_panel(self):
         self._last_log_line = ""
         self._progress_nesting = 0
+        self._on_cancel_cb = None
         self._log_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
         sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
