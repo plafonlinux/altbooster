@@ -19,7 +19,7 @@ CONFIG_DIR  = Path.home() / ".config" / "altbooster"
 CONFIG_FILE = CONFIG_DIR / "window.json"
 STATE_FILE  = CONFIG_DIR / "state.json"
 
-VERSION = "2.1.0"
+VERSION = "5.5"
 
 
 # ── Пути к кэшу DaVinci Resolve по умолчанию ─────────────────────────────────

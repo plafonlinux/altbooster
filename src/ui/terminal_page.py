@@ -195,14 +195,22 @@ class TerminalPage(Gtk.Box):
     def _on_install_ptyxis(self, row):
         row.set_working()
         self._log("\n▶  Установка Ptyxis...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка Ptyxis...")
         # Удаляем gnome-terminal (игнорируя ошибки, если его нет) и ставим ptyxis
         cmd = ["bash", "-c", "apt-get remove -y gnome-terminal 2>/dev/null || true && apt-get install -y ptyxis"]
-        backend.run_privileged(cmd, self._log, row.set_done)
+        def _done(ok):
+            row.set_done(ok)
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
+        backend.run_privileged(cmd, self._log, _done)
 
     def _on_remove_ptyxis(self, row):
         row.set_working()
         self._log("\n▶  Удаление Ptyxis...\n")
-        backend.run_privileged(["apt-get", "remove", "-y", "ptyxis"], self._log, row.set_undo_done)
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление Ptyxis...")
+        backend.run_privileged(["apt-get", "remove", "-y", "ptyxis"], self._log, 
+            lambda ok: (row.set_undo_done(ok), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
 
     def _check_ptyxis_default(self):
         try:
@@ -217,20 +225,26 @@ class TerminalPage(Gtk.Box):
     def _on_ptyxis_default(self, row):
         row.set_working()
         self._log("\n▶  Назначение Ptyxis терминалом по умолчанию...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Настройка терминала по умолчанию...")
         def _do():
             subprocess.run(["xdg-mime", "default", "org.gnome.Ptyxis.desktop", "x-scheme-handler/terminal"])
             ok = self._check_ptyxis_default()
             GLib.idle_add(row.set_done, ok)
             GLib.idle_add(self._log, "✔  Готово!\n" if ok else "✘  Ошибка\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
         threading.Thread(target=_do, daemon=True).start()
 
     def _on_ptyxis_default_undo(self, row):
         row.set_working()
         self._log("\n▶  Сброс терминала по умолчанию (gnome-terminal)...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Сброс терминала по умолчанию...")
         def _do():
             subprocess.run(["xdg-mime", "default", "org.gnome.Terminal.desktop", "x-scheme-handler/terminal"])
             GLib.idle_add(row.set_undo_done, True)
             GLib.idle_add(self._log, "✔  Сброшено\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()
 
     # ── Горячие клавиши ──────────────────────────────────────────────────────
@@ -288,6 +302,8 @@ class TerminalPage(Gtk.Box):
     def _set_shortcut(self, row, uid, name, cmd, binding, alt_binding=None):
         row.set_working()
         self._log(f"\n▶  Настройка шортката {name}...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress(f"Настройка шортката {name}...")
         def _do():
             path = f"/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/{uid}/"
             schema = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:" + path
@@ -307,11 +323,14 @@ class TerminalPage(Gtk.Box):
             
             GLib.idle_add(row.set_done, True)
             GLib.idle_add(self._log, "✔  Шорткат назначен\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()
 
     def _remove_shortcut(self, row, uid):
         row.set_working()
         self._log(f"\n▶  Удаление шортката...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление шортката...")
         def _do():
             path = f"/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/{uid}/"
             current = self._get_custom_bindings()
@@ -328,6 +347,7 @@ class TerminalPage(Gtk.Box):
 
             GLib.idle_add(row.set_undo_done, True)
             GLib.idle_add(self._log, "✔  Шорткат удалён\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()
 
     # ── ZSH ──────────────────────────────────────────────────────────────────
@@ -371,30 +391,42 @@ class TerminalPage(Gtk.Box):
     def _on_install_zsh(self, row):
         row.set_working()
         self._log("\n▶  Установка git и zsh...\n")
-        backend.run_privileged(["apt-get", "install", "-y", "git", "zsh"], self._log, row.set_done)
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка ZSH...")
+        backend.run_privileged(["apt-get", "install", "-y", "git", "zsh"], self._log, 
+            lambda ok: (row.set_done(ok), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
 
     def _on_remove_zsh(self, row):
         row.set_working()
         self._log("\n▶  Удаление zsh...\n")
-        backend.run_privileged(["apt-get", "remove", "-y", "zsh"], self._log, row.set_undo_done)
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление ZSH...")
+        backend.run_privileged(["apt-get", "remove", "-y", "zsh"], self._log, 
+            lambda ok: (row.set_undo_done(ok), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
 
     def _on_install_zplug(self, row):
         row.set_working()
         self._log("\n▶  Установка zplug...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка zplug...")
         def _do():
             r = subprocess.run(["git", "clone", "https://github.com/zplug/zplug", os.path.expanduser("~/.zplug")], capture_output=True, text=True)
             ok = r.returncode == 0
             GLib.idle_add(row.set_done, ok)
             GLib.idle_add(self._log, "✔  zplug установлен!\n" if ok else f"✘  Ошибка: {r.stderr}\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
         threading.Thread(target=_do, daemon=True).start()
 
     def _on_remove_zplug(self, row):
         row.set_working()
         self._log("\n▶  Удаление zplug...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление zplug...")
         def _do():
             shutil.rmtree(os.path.expanduser("~/.zplug"), ignore_errors=True)
             GLib.idle_add(row.set_undo_done, True)
             GLib.idle_add(self._log, "✔  zplug удалён\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()
 
     def _check_zsh_default(self):
@@ -403,14 +435,20 @@ class TerminalPage(Gtk.Box):
     def _on_zsh_default(self, row):
         row.set_working()
         self._log("\n▶  Установка ZSH по умолчанию...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка ZSH по умолчанию...")
         user = os.environ.get("USER")
-        backend.run_privileged(["chsh", "-s", "/bin/zsh", user], self._log, row.set_done)
+        backend.run_privileged(["chsh", "-s", "/bin/zsh", user], self._log, 
+            lambda ok: (row.set_done(ok), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
 
     def _on_zsh_default_undo(self, row):
         row.set_working()
         self._log("\n▶  Возврат Bash по умолчанию...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Возврат Bash по умолчанию...")
         user = os.environ.get("USER")
-        backend.run_privileged(["chsh", "-s", "/bin/bash", user], self._log, row.set_undo_done)
+        backend.run_privileged(["chsh", "-s", "/bin/bash", user], self._log, 
+            lambda ok: (row.set_undo_done(ok), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
 
     # ── Fastfetch ────────────────────────────────────────────────────────────
 
@@ -463,22 +501,34 @@ class TerminalPage(Gtk.Box):
     def _on_install_fastfetch(self, row):
         row.set_working()
         self._log("\n▶  Установка Fastfetch...\n")
-        backend.run_epm(["epm", "-i", "fastfetch"], self._log, row.set_done)
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка Fastfetch...")
+        backend.run_epm(["epm", "-i", "fastfetch"], self._log, 
+            lambda ok: (row.set_done(ok), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
 
     def _on_remove_fastfetch(self, row):
         row.set_working()
         self._log("\n▶  Удаление Fastfetch...\n")
-        backend.run_epm(["epm", "-e", "fastfetch"], self._log, row.set_undo_done)
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление Fastfetch...")
+        backend.run_epm(["epm", "-e", "fastfetch"], self._log, 
+            lambda ok: (row.set_undo_done(ok), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
 
     def _on_install_font(self, row):
         row.set_working()
         self._log("\n▶  Установка шрифта...\n")
-        backend.run_epm(["epm", "-i", "fonts-ttf-fira-code-nerd"], self._log, row.set_done)
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка шрифта...")
+        backend.run_epm(["epm", "-i", "fonts-ttf-fira-code-nerd"], self._log, 
+            lambda ok: (row.set_done(ok), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
 
     def _on_remove_font(self, row):
         row.set_working()
         self._log("\n▶  Удаление шрифта...\n")
-        backend.run_epm(["epm", "-e", "fonts-ttf-fira-code-nerd"], self._log, row.set_undo_done)
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление шрифта...")
+        backend.run_epm(["epm", "-e", "fonts-ttf-fira-code-nerd"], self._log, 
+            lambda ok: (row.set_undo_done(ok), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
 
     def _check_ptyxis_font(self):
         try:
@@ -490,41 +540,53 @@ class TerminalPage(Gtk.Box):
     def _on_apply_font(self, row):
         row.set_working()
         self._log("\n▶  Применение шрифта в Ptyxis...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Применение шрифта...")
         def _do():
             subprocess.run(["dconf", "write", "/org/gnome/Ptyxis/Profiles/default/font-name", "'FiraCode Nerd Font Regular 14'"])
             GLib.idle_add(row.set_done, True)
             GLib.idle_add(self._log, "✔  Шрифт применён\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()
 
     def _on_apply_font_undo(self, row):
         row.set_working()
         self._log("\n▶  Сброс шрифта в Ptyxis...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Сброс шрифта...")
         def _do():
             subprocess.run(["dconf", "reset", "/org/gnome/Ptyxis/Profiles/default/font-name"])
             GLib.idle_add(row.set_undo_done, True)
             GLib.idle_add(self._log, "✔  Шрифт сброшен\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()
 
     def _on_install_ff_config(self, row):
         row.set_working()
         self._log("\n▶  Создание конфига Fastfetch...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Создание конфига Fastfetch...")
         def _do():
             p = Path(os.path.expanduser("~/.config/fastfetch/plafonfetch.jsonc"))
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(_FASTFETCH_CONFIG, encoding="utf-8")
             GLib.idle_add(row.set_done, True)
             GLib.idle_add(self._log, "✔  Конфиг создан\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()
 
     def _on_remove_ff_config(self, row):
         row.set_working()
         self._log("\n▶  Удаление конфига Fastfetch...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление конфига Fastfetch...")
         def _do():
             p = Path(os.path.expanduser("~/.config/fastfetch/plafonfetch.jsonc"))
             if p.exists():
                 p.unlink()
             GLib.idle_add(row.set_undo_done, True)
             GLib.idle_add(self._log, "✔  Конфиг удалён\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()
 
     # ── Алиасы ───────────────────────────────────────────────────────────────
@@ -607,6 +669,8 @@ class TerminalPage(Gtk.Box):
     def _do_add_aliases(self, row, text):
         row.set_working()
         self._log("\n▶  Добавление алиасов в .zshrc...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Добавление алиасов...")
         def _do():
             p = Path(os.path.expanduser("~/.zshrc"))
             content = p.read_text(encoding="utf-8") if p.exists() else ""
@@ -628,11 +692,14 @@ class TerminalPage(Gtk.Box):
                     f.write(final_text)
             GLib.idle_add(row.set_done, True)
             GLib.idle_add(self._log, "✔  Алиасы добавлены\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()
 
     def _on_remove_aliases(self, row):
         row.set_working()
         self._log("\n▶  Удаление алиасов из .zshrc...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление алиасов...")
         def _do():
             p = Path(os.path.expanduser("~/.zshrc"))
             if p.exists():
@@ -655,4 +722,5 @@ class TerminalPage(Gtk.Box):
                     p.write_text(new_content, encoding="utf-8")
             GLib.idle_add(row.set_undo_done, True)
             GLib.idle_add(self._log, "✔  Алиасы удалены\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()

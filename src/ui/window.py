@@ -34,11 +34,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             icon_theme = "alt-workstation"
         Gtk.Settings.get_default().set_property("gtk-icon-theme-name", icon_theme)
 
-        if not hasattr(self, '_on_log_drawer_toggle'):
-            print("!!! ОШИБКА: Метод _on_log_drawer_toggle не найден. Файлы могут быть устаревшими. Переустановите приложение. !!!")
-
         # 1. Лог собирается самым первым
-        self._log_hide_timer_id = None
+        self._pulse_timer_id = None
         self._log_widget = self._build_log_panel()
         
         self.set_title("ALT Booster")
@@ -111,28 +108,42 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
         self._log_container.append(sep)
 
-        # Плоский заголовок только с кнопкой справа
-        header = Gtk.CenterBox()
-        header.set_margin_top(6)
-        header.set_margin_bottom(6)
-        header.set_margin_start(12)
-        header.set_margin_end(12)
+        # 1. Статус
+        self._status_label = Gtk.Label(label="Готов к работе")
+        self._status_label.set_halign(Gtk.Align.START)
+        self._status_label.set_margin_start(12)
+        self._status_label.set_margin_top(12)
+        self._status_label.set_margin_bottom(6)
+        self._status_label.add_css_class("heading")
+        self._log_container.append(self._status_label)
 
-        self._log_drawer_btn = Gtk.Button()
-        self._log_drawer_btn.set_icon_name("pan-up-symbolic")
-        self._log_drawer_btn.add_css_class("flat")
-        self._log_drawer_btn.add_css_class("circular")
-        self._log_drawer_btn.set_tooltip_text("Развернуть терминал")
-        self._log_drawer_btn.connect("clicked", self._on_log_drawer_toggle)
+        # 2. Прогресс-бар + Кнопка Стоп
+        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        hbox.set_margin_start(12)
+        hbox.set_margin_end(12)
+        hbox.set_margin_bottom(12)
 
-        right_box = Gtk.Box()
-        right_box.set_halign(Gtk.Align.END)
-        right_box.append(self._log_drawer_btn)
-        header.set_end_widget(right_box)
-        
-        # Убрали GestureDrag и центральную полоску (pill)
+        self._progressbar = Gtk.ProgressBar()
+        self._progressbar.set_hexpand(True)
+        self._progressbar.set_valign(Gtk.Align.CENTER)
+        hbox.append(self._progressbar)
 
-        self._log_container.append(header)
+        self._stop_btn = Gtk.Button(icon_name="media-playback-stop-symbolic")
+        self._stop_btn.add_css_class("flat")
+        self._stop_btn.add_css_class("circular")
+        self._stop_btn.set_tooltip_text("Отменить")
+        self._stop_btn.set_sensitive(False)
+        self._stop_btn.set_visible(False)
+        self._stop_btn.connect("clicked", self._on_stop_clicked)
+        hbox.append(self._stop_btn)
+
+        self._log_container.append(hbox)
+
+        # 3. Спойлер с логом
+        self._log_expander = Gtk.Expander(label="Лог терминала")
+        self._log_expander.set_margin_start(12)
+        self._log_expander.set_margin_end(12)
+        self._log_expander.set_margin_bottom(12)
         
         self._log_scroll = Gtk.ScrolledWindow()
         self._log_scroll.set_vexpand(False)
@@ -149,25 +160,12 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._buf = self._tv.get_buffer()
         self._log_scroll.set_child(self._tv)
 
-        self._log_scroll.set_visible(False)
-        self._log_container.append(self._log_scroll)
+        self._log_scroll.set_visible(True)
+        self._log_expander.set_child(self._log_scroll)
+        self._log_container.append(self._log_expander)
+        
         return self._log_container
 
-    # Методы _on_drag_begin и _on_drag_update удалены
-        
-    def _on_log_drawer_toggle(self, btn):
-        if self._log_hide_timer_id:
-            GLib.source_remove(self._log_hide_timer_id)
-            self._log_hide_timer_id = None
-        if self._log_scroll.get_visible():
-            self._log_scroll.set_visible(False)
-            btn.set_icon_name("pan-up-symbolic")
-            btn.set_tooltip_text("Развернуть терминал")
-        else:
-            self._log_scroll.set_visible(True)
-            btn.set_icon_name("pan-down-symbolic")
-            btn.set_tooltip_text("Свернуть терминал")
-        
     # ── Пароль ───────────────────────────────────────────────────────────────
 
     def ask_password(self):
@@ -224,7 +222,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.set_application_name("ALT Booster")
         d.set_application_icon("altbooster")
         d.set_developer_name("PLAFON")
-        d.set_version("5.5")
+        d.set_version(config.VERSION)
         d.set_issue_url("https://github.com/plafonlinux/altbooster/issues")
         d.set_comments("ALT Booster для ALT Linux\nGTK4 / Adwaita / Python 3 / Data-Driven UI")
         d.set_license_type(Gtk.License.MIT_X11)
@@ -262,9 +260,62 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
     # ── Лог ──────────────────────────────────────────
 
-    _LOG_AUTO_HIDE_MS = 4000  # скрыть через N мс после последнего сообщения
+    def start_progress(self, message: str, on_cancel=None):
+        self._on_cancel_cb = on_cancel
+        def _do():
+            self._status_label.set_label(message)
+            self._progressbar.set_fraction(0.0)
+            self._stop_btn.set_sensitive(bool(on_cancel))
+            self._stop_btn.set_visible(bool(on_cancel))
+            if self._pulse_timer_id:
+                GLib.source_remove(self._pulse_timer_id)
+            self._pulse_timer_id = GLib.timeout_add(100, self._pulse_progress)
+        GLib.idle_add(_do)
+
+    def _on_stop_clicked(self, _):
+        if not self._on_cancel_cb:
+            return
+
+        dialog = Adw.AlertDialog(
+            heading="Остановить операцию?",
+            body="Текущий процесс будет прерван. Это может привести к незавершенным изменениям.",
+        )
+        dialog.add_response("cancel", "Нет")
+        dialog.add_response("stop", "Да, остановить")
+        dialog.set_response_appearance("stop", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        def _on_response(_d, response):
+            if response == "stop":
+                if self._on_cancel_cb:
+                    self._status_label.set_label("Отмена...")
+                    self._stop_btn.set_sensitive(False)
+                    self._on_cancel_cb()
+
+        dialog.connect("response", _on_response)
+        dialog.present(self)
+
+    def _pulse_progress(self):
+        self._progressbar.pulse()
+        return True
+
+    def stop_progress(self, success: bool = True):
+        def _do():
+            if self._pulse_timer_id:
+                GLib.source_remove(self._pulse_timer_id)
+                self._pulse_timer_id = None
+            self._progressbar.set_fraction(1.0)
+            self._status_label.set_label("✔ Готово" if success else "✘ Ошибка")
+            self._stop_btn.set_sensitive(False)
+            self._stop_btn.set_visible(False)
+            self._on_cancel_cb = None
+        GLib.idle_add(_do)
 
     def _log(self, text):
+        GLib.idle_add(self._log_internal, text)
+
+    def _log_internal(self, text):
         end = self._buf.get_end_iter()
         self._buf.insert(end, text)
         end = self._buf.get_end_iter()
@@ -274,20 +325,3 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         else:
             self._buf.move_mark(mark, end)
         self._tv.scroll_mark_onscreen(mark)
-        self._log_auto_show()
-
-    def _log_auto_show(self):
-        if not self._log_scroll.get_visible():
-            self._log_scroll.set_visible(True)
-            self._log_drawer_btn.set_icon_name("pan-down-symbolic")
-            self._log_drawer_btn.set_tooltip_text("Свернуть терминал")
-        if hasattr(self, "_log_hide_timer_id") and self._log_hide_timer_id:
-            GLib.source_remove(self._log_hide_timer_id)
-        self._log_hide_timer_id = GLib.timeout_add(self._LOG_AUTO_HIDE_MS, self._log_auto_hide)
-
-    def _log_auto_hide(self):
-        self._log_hide_timer_id = None
-        self._log_scroll.set_visible(False)
-        self._log_drawer_btn.set_icon_name("pan-up-symbolic")
-        self._log_drawer_btn.set_tooltip_text("Развернуть терминал")
-        return False

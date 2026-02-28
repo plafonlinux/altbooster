@@ -98,27 +98,43 @@ class AppearancePage(Gtk.Box):
     def _on_install_icons(self, row):
         row.set_working()
         self._log("\n▶  Установка papirus-remix-icon-theme...\n")
-        backend.run_privileged(["apt-get", "install", "-y", "papirus-remix-icon-theme"], self._log, row.set_done)
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка иконок Papirus...")
+        def _done(ok):
+            row.set_done(ok)
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
+        backend.run_privileged(["apt-get", "install", "-y", "papirus-remix-icon-theme"], self._log, _done)
 
     def _on_remove_icons(self, row):
         row.set_working()
         self._log("\n▶  Удаление papirus-remix-icon-theme...\n")
-        backend.run_privileged(["apt-get", "remove", "-y", "papirus-remix-icon-theme"], self._log, row.set_undo_done)
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление иконок Papirus...")
+        def _done(ok):
+            row.set_undo_done(ok)
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
+        backend.run_privileged(["apt-get", "remove", "-y", "papirus-remix-icon-theme"], self._log, _done)
 
     def _on_install_folders(self, row):
         row.set_working()
         self._log("\n▶  Установка papirus-folders...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка papirus-folders...")
         def _done(ok):
             row.set_done(ok)
             self._refresh_deps()
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
         backend.run_privileged(["apt-get", "install", "-y", "papirus-folders"], self._log, _done)
 
     def _on_remove_folders(self, row):
         row.set_working()
         self._log("\n▶  Удаление papirus-folders...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление papirus-folders...")
         def _done(ok):
             row.set_undo_done(ok)
             self._refresh_deps()
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
         backend.run_privileged(["apt-get", "remove", "-y", "papirus-folders"], self._log, _done)
 
     def _on_color_selected(self, combo, _pspec):
@@ -127,12 +143,15 @@ class AppearancePage(Gtk.Box):
             return
         color = self._colors[idx]
         self._log(f"\n▶  Применение цвета папок: {color}...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress(f"Применение цвета: {color}...")
         
         def _do():
             cmd = ["papirus-folders", "-C", color, "--theme", "Papirus"]
             
             # papirus-folders требует прав root для записи в /usr/share/icons
-            backend.run_privileged(cmd, self._log, lambda ok: self._log("✔  Цвет применён!\n" if ok else "✘  Ошибка\n"))
+            backend.run_privileged(cmd, self._log, 
+                lambda ok: (self._log("✔  Цвет применён!\n" if ok else "✘  Ошибка\n"), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
             
         threading.Thread(target=_do, daemon=True).start()
 
@@ -161,6 +180,8 @@ class AppearancePage(Gtk.Box):
     def _apply_theme(self, row, theme_name):
         row.set_working()
         self._log(f"\n▶  Применение темы иконок: {theme_name}...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress(f"Применение темы: {theme_name}...")
         ok = backend.run_gsettings(["set", "org.gnome.desktop.interface", "icon-theme", theme_name])
         row.set_done(ok)
         
@@ -170,6 +191,7 @@ class AppearancePage(Gtk.Box):
                 r._refresh()
         
         self._log("✔  Тема применена!\n" if ok else "✘  Ошибка\n")
+        if hasattr(win, "stop_progress"): win.stop_progress(ok)
 
     # ── Обои ─────────────────────────────────────────────────────────────────
 

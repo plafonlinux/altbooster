@@ -283,9 +283,6 @@ class AppRow(Adw.ActionRow):
     def _on_install(self, _=None):
         if self._installing or self.is_installed():
             return
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята. Подождите...\n")
-            return
             
         # Определяем источник: выбранный в дропдауне
         idx = self._selected_source_index
@@ -307,6 +304,9 @@ class AppRow(Adw.ActionRow):
         GLib.timeout_add(120, self._pulse)
         self._log(f"\n▶  Установка {self._app['label']} ({src['label']})...\n")
         
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress(f"Установка {self._app['label']}...")
+
         cmd = list(src["cmd"])
         is_epm = False
         if cmd and cmd[0] == "epm":
@@ -348,9 +348,6 @@ class AppRow(Adw.ActionRow):
 
     def _on_uninstall(self, _):
         if self._installing:
-            return
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
             return
             
         # Удаляем то, что установлено
@@ -397,6 +394,9 @@ class AppRow(Adw.ActionRow):
                 return
 
         self._log(f"\n▶  Удаление {self._app['label']}...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress(f"Удаление {self._app['label']}...")
+
         if cmd and cmd[0] == "epm":
             backend.run_epm(cmd, self._log, self._uninstall_done)
         else:
@@ -411,6 +411,8 @@ class AppRow(Adw.ActionRow):
     def _install_done(self, ok):
         self._installing = False
         self._prog.set_visible(False)
+        win = self.get_root()
+        if hasattr(win, "stop_progress"): win.stop_progress(ok)
         if ok:
             self._log(f"✔  {self._app['label']} установлен!\n")
             config.state_set(self._state_key, True)
@@ -426,6 +428,8 @@ class AppRow(Adw.ActionRow):
     def _uninstall_done(self, ok):
         self._installing = False
         self._prog.set_visible(False)
+        win = self.get_root()
+        if hasattr(win, "stop_progress"): win.stop_progress(ok)
         if ok:
             self._log(f"✔  {self._app['label']} удалён!\n")
             config.state_set(self._state_key, False)
@@ -512,6 +516,8 @@ class TaskRow(Adw.ActionRow):
 
         if self._task.get("type") == "user":
             self._on_log(f"\n▶  {self._task['label']}...\n")
+            win = self.get_root()
+            if hasattr(win, "start_progress"): win.start_progress(f"Выполнение: {self._task['label']}...")
             GLib.timeout_add(110, self._pulse)
             threading.Thread(target=self._run_user, args=(cmd,), daemon=True).start()
             return
@@ -523,6 +529,8 @@ class TaskRow(Adw.ActionRow):
                 "-mindepth", "1", "-delete",
             ]
         self._on_log(f"\n▶  {self._task['label']}...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress(f"Выполнение: {self._task['label']}...")
         GLib.timeout_add(110, self._pulse)
         backend.run_privileged(cmd, self._on_log, self._finish)
 
@@ -549,6 +557,8 @@ class TaskRow(Adw.ActionRow):
         self._running = False
         self.result = ok
         self._prog.set_fraction(1.0 if ok else 0.0)
+        win = self.get_root()
+        if hasattr(win, "stop_progress"): win.stop_progress(ok)
         if ok:
             set_status_ok(self._status)
             self._btn.remove_css_class("suggested-action")

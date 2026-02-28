@@ -163,6 +163,10 @@ class CacheTaskRow(Adw.ExpanderRow):
         cmd_str = "shopt -s nullglob; rm -rf " + " ".join(targets)
         self._log(f"\n▶  Очистка кэша ({len(targets)} путей)...\n")
         
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress("Очистка кэша...")
+        
         GLib.timeout_add(110, self._pulse)
         threading.Thread(target=self._run, args=(["bash", "-c", cmd_str],), daemon=True).start()
 
@@ -196,6 +200,11 @@ class CacheTaskRow(Adw.ExpanderRow):
         self._btn.set_label("Повтор")
         self._btn.set_sensitive(True)
         self._log(f"{'✔  Кэш очищен' if ok else '✘  Ошибка очистки'}\n")
+        
+        win = self.get_root()
+        if hasattr(win, "stop_progress"):
+            win.stop_progress(ok)
+            
         if self._on_progress:
             self._on_progress()
 
@@ -283,11 +292,10 @@ class MaintenancePage(Gtk.Box):
             group.add(row)
 
     def _on_flathub(self, row):
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
         row.set_working()
         self._log("\n▶  Установка Flatpak и Flathub...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка Flatpak...")
 
         def step2(ok):
             if not ok:
@@ -296,21 +304,20 @@ class MaintenancePage(Gtk.Box):
             backend.run_privileged(
                 ["apt-get", "install", "-y", "flatpak-repo-flathub"],
                 self._log,
-                lambda ok2: (row.set_done(ok2), self._log("✔  Flathub готов!\n" if ok2 else "✘  Ошибка\n")),
+                lambda ok2: (row.set_done(ok2), self._log("✔  Flathub готов!\n" if ok2 else "✘  Ошибка\n"), win.stop_progress(ok2) if hasattr(win, "stop_progress") else None),
             )
 
         backend.run_privileged(["apt-get", "install", "-y", "flatpak"], self._log, step2)
 
     def _on_flathub_undo(self, row):
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
         row.set_working()
         self._log("\n▶  Удаление Flatpak и Flathub...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление Flatpak...")
         backend.run_privileged(
             ["apt-get", "remove", "-y", "flatpak", "flatpak-repo-flathub"],
             self._log,
-            lambda ok: (row.set_undo_done(ok), self._log("✔  Flatpak удалён!\n" if ok else "✘  Ошибка\n")),
+            lambda ok: (row.set_undo_done(ok), self._log("✔  Flatpak удалён!\n" if ok else "✘  Ошибка\n"), win.stop_progress(ok) if hasattr(win, "stop_progress") else None),
         )
 
     def _build_tasks(self, body, tasks):
@@ -350,16 +357,25 @@ class MaintenancePage(Gtk.Box):
     def _run_all(self, _):
         if self._busy:
             return
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
         self._busy = True
+        self._cancel_tasks = False
         self._btn_all.set_sensitive(False)
         self._btn_all.set_label("⏳  Выполняется...")
+        
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress("Выполнение задач обслуживания...", self._cancel_tasks_fn)
+            
         threading.Thread(target=self._worker, daemon=True).start()
+
+    def _cancel_tasks_fn(self):
+        self._cancel_tasks = True
+        self._log("\n⚠  Запрос отмены. Остановка после текущей задачи...\n")
 
     def _worker(self):
         for row in self._rows:
+            if self._cancel_tasks:
+                break
             GLib.idle_add(row.start)
             while row._running or row.result is None:
                 time.sleep(0.2)
@@ -369,6 +385,12 @@ class MaintenancePage(Gtk.Box):
         self._busy = False
         self._btn_all.set_sensitive(True)
         self._btn_all.set_label("Запустить все задачи")
+        
+        win = self.get_root()
+        if hasattr(win, "stop_progress"):
+            ok = not getattr(self, "_cancel_tasks", False)
+            win.stop_progress(ok)
+            
         self._log("\n✔  Готово!\n")
 
     def _update_progress(self):
