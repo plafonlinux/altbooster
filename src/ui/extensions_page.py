@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import time
 import threading
 import urllib.parse
 import urllib.request
@@ -28,34 +29,40 @@ RECOMMENDED = [
         "appindicatorsupport@rgcjonas.gmail.com",
         "AppIndicator and KStatusNotifierItem",
         "Поддержка системных лотков приложений в панели",
+        "615",
     ),
     (
         "Vitals@CoreCoding.com",
         "Vitals",
         "Мониторинг CPU, RAM и температуры в верхней панели",
+        "1460",
     ),
     (
         "just-perfection-desktop@just-perfection",
         "Just Perfection",
         "Тонкая настройка элементов интерфейса GNOME Shell",
+        "3843",
     ),
     (
         "dash-to-dock@micxgx.gmail.com",
         "Dash to Dock",
         "Dock как постоянная панель задач",
+        "307",
     ),
     (
         "dash-to-panel@jderose9.github.com",
         "Dash to Panel",
         "Полноценная панель задач в стиле Windows",
+        "1160",
     ),
     (
         "blur-my-shell@aunetx",
         "Blur my Shell",
         "Эффект размытия для элементов интерфейса",
+        "3193",
     ),
     (
-        "auto-accent-colour@fthx",
+        "auto-accent-colour@Wartybix",
         "Auto Accent Colour",
         "Автоматический цвет акцента под обои",
         "7502",
@@ -64,11 +71,13 @@ RECOMMENDED = [
         "rounded-window-corners@yilozt",
         "Rounded Window Corners Reborn",
         "Скругление углов окон и мониторов",
+        "5237",
     ),
     (
         "pipewire-settings@tuxor1337",
         "Pipewire Settings",
         "Настройка частоты и буфера звука",
+        "7699",
     ),
 ]
 
@@ -329,6 +338,9 @@ class ExtensionsPage(Gtk.Box):
         return group
 
     def _load_installed(self):
+        # Небольшая задержка, чтобы файловая система успела обновиться после установки
+        time.sleep(1.0)
+        
         user_exts   = _read_extensions_from(_USER_EXT_DIR)
         system_exts = _read_extensions_from(_SYSTEM_EXT_DIR)
         enabled     = _get_enabled_uuids()
@@ -441,6 +453,8 @@ class ExtensionsPage(Gtk.Box):
         if install_id and install_id.startswith("epm:"):
             pkg = install_id[4:]
             self._log(f"\n▶  Установка {pkg} (EPM)...\n")
+            win = self.get_root()
+            if hasattr(win, "start_progress"): win.start_progress(f"Установка {pkg}...")
             def _done(ok):
                 if ok:
                     GLib.idle_add(self._log, "✔  Установлено!\n")
@@ -450,10 +464,13 @@ class ExtensionsPage(Gtk.Box):
                     GLib.idle_add(set_status_error, status)
                     GLib.idle_add(btn.set_label, "Повторить")
                     GLib.idle_add(btn.set_sensitive, True)
+                if hasattr(win, "stop_progress"): win.stop_progress(ok)
             backend.run_epm(["epm", "-i", "-y", pkg], self._log, _done)
             return
 
         self._log(f"\n▶  Установка {uuid}...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress(f"Установка расширения...")
 
         def _do():
             gext = _gext_path()
@@ -468,6 +485,7 @@ class ExtensionsPage(Gtk.Box):
                     GLib.idle_add(set_status_error, status)
                     GLib.idle_add(btn.set_label, "Повторить")
                     GLib.idle_add(btn.set_sensitive, True)
+                    if hasattr(win, "stop_progress"): win.stop_progress(False)
                     return
                 GLib.idle_add(self._log, "✔  gext установлен!\n")
                 gext = _gext_path() or "gext"
@@ -486,12 +504,15 @@ class ExtensionsPage(Gtk.Box):
                 GLib.idle_add(set_status_error, status)
                 GLib.idle_add(btn.set_label, "Повторить")
                 GLib.idle_add(btn.set_sensitive, True)
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
 
         threading.Thread(target=_do, daemon=True).start()
 
     def _toggle_extension(self, uuid: str, state: bool, switch: Gtk.Switch) -> None:
         """Включает или выключает расширение через gnome-extensions."""
         cmd = ["gnome-extensions", "enable" if state else "disable", uuid]
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress(f"{'Включение' if state else 'Отключение'} расширения...")
 
         def _do():
             r = subprocess.run(cmd, capture_output=True, text=True)
@@ -502,6 +523,7 @@ class ExtensionsPage(Gtk.Box):
                 GLib.idle_add(self._log, f"✔  {uuid.split('@')[0]} {action}\n")
             else:
                 GLib.idle_add(self._log, f"✘  Ошибка: {r.stderr.strip()}\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
 
         threading.Thread(target=_do, daemon=True).start()
 
@@ -536,6 +558,8 @@ class ExtensionsPage(Gtk.Box):
     def _do_delete_ext(self, uuid: str) -> None:
         """Удаляет пользовательское расширение (shutil.rmtree)."""
         self._log(f"\n▶  Удаление {uuid}...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress(f"Удаление расширения...")
 
         def _do():
             try:
@@ -557,8 +581,10 @@ class ExtensionsPage(Gtk.Box):
                     GLib.idle_add(self._log, "ℹ  Папка расширения не найдена (возможно, уже удалено).\n")
 
                 GLib.idle_add(self._refresh_installed)
+                if hasattr(win, "stop_progress"): win.stop_progress(True)
             except Exception as e:
                 GLib.idle_add(self._log, f"✘  Ошибка удаления: {e}\n")
+                if hasattr(win, "stop_progress"): win.stop_progress(False)
 
         threading.Thread(target=_do, daemon=True).start()
 
@@ -566,6 +592,8 @@ class ExtensionsPage(Gtk.Box):
         """Удаляет системное расширение с проверкой RPM-зависимостей."""
         ext_path = _SYSTEM_EXT_DIR / uuid
         self._log(f"\n▶  Проверка зависимостей для {uuid}...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress(f"Удаление системного расширения...")
 
         def _do():
             # Определяем, принадлежит ли директория RPM-пакету
@@ -596,6 +624,7 @@ class ExtensionsPage(Gtk.Box):
                         + "\n".join(f"    • {d}" for d in deps_out.splitlines())
                         + "\n",
                     )
+                    if hasattr(win, "stop_progress"): win.stop_progress(False)
                     return
 
                 # Зависимостей нет — удаляем пакет через rpm -e
@@ -611,6 +640,7 @@ class ExtensionsPage(Gtk.Box):
                 GLib.idle_add(self._refresh_installed)
             else:
                 GLib.idle_add(self._log, "✘  Ошибка удаления\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
 
         threading.Thread(target=_do, daemon=True).start()
 

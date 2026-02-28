@@ -302,14 +302,13 @@ class DaVinciPage(Gtk.Box):
     def _on_install_from_file(self, _):
         if not self._dv_installer_path:
             return
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
         self._dv_inst_from_file_btn.set_sensitive(False)
         self._dv_inst_from_file_btn.set_label("…")
         clear_status(self._dv_file_st)
         name = os.path.basename(self._dv_installer_path)
         self._log(f"\n▶  Установка DaVinci Resolve из {name}...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress(f"Установка DaVinci Resolve...")
         threading.Thread(target=self._do_install_from_file, daemon=True).start()
 
     def _do_install_from_file(self):
@@ -356,12 +355,16 @@ class DaVinciPage(Gtk.Box):
                 self._dv_inst_from_file_btn.set_label("Повторить")
                 self._dv_inst_from_file_btn.set_sensitive(True)
                 self._log("✘  Ошибка установки. Проверьте лог.\n")
+            win = self.get_root()
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
         GLib.idle_add(_done)
 
     def _on_postinstall(self, _):
         self._post_btn.set_sensitive(False)
         self._post_btn.set_label("…")
         self._log("\n▶  PostInstall...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("PostInstall...")
         backend.run_privileged(_POSTINSTALL_CMD, self._log, self._post_done)
 
     def _post_done(self, ok):
@@ -377,28 +380,32 @@ class DaVinciPage(Gtk.Box):
             self._post_btn.set_label("Повторить")
             self._post_btn.set_sensitive(True)
             self._log("\n✘  Ошибка PostInstall\n")
+        win = self.get_root()
+        if hasattr(win, "stop_progress"): win.stop_progress(ok)
         self._reset_btn_later(self._post_btn, "Выполнить")
 
     def _on_amd_install(self, _):
         self._amd_btn.set_sensitive(False)
         self._amd_btn.set_label("…")
         self._log("\n▶  Установка AMD ROCm...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка AMD ROCm...")
         backend.run_privileged(
             _ROCM_PKGS, self._log,
             lambda ok: (
                 config.state_set("amd_rocm", ok),
                 self._set_amd_ui(ok),
                 self._log("✔  AMD ROCm!\n" if ok else "✘  Ошибка\n"),
+                win.stop_progress(ok) if hasattr(win, "stop_progress") else None
             ),
         )
 
     def _on_aac_install(self, _):
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
         self._aac_btn.set_sensitive(False)
         self._aac_btn.set_label("…")
         self._log("\n▶  Установка AAC кодека...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка AAC кодека...")
 
         def _worker():
             try:
@@ -407,12 +414,16 @@ class DaVinciPage(Gtk.Box):
                     urllib.request.urlretrieve(_AAC_URL, arch)
                     backend.install_aac_codec(
                         arch, self._log,
-                        lambda ok: GLib.idle_add(self._set_aac_ui, ok),
+                        lambda ok: (
+                            GLib.idle_add(self._set_aac_ui, ok),
+                            GLib.idle_add(win.stop_progress, ok) if hasattr(win, "stop_progress") else None
+                        )
                     )
             except Exception as e:
                 GLib.idle_add(self._log, f"✘  {e}\n")
                 GLib.idle_add(self._aac_btn.set_label, "Повторить")
                 GLib.idle_add(self._aac_btn.set_sensitive, True)
+                if hasattr(win, "stop_progress"): GLib.idle_add(win.stop_progress, False)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -420,21 +431,22 @@ class DaVinciPage(Gtk.Box):
         self._fl_btn.set_sensitive(False)
         self._fl_btn.set_label("…")
         self._log("\n▶  Fairlight...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка Fairlight...")
         backend.run_privileged(
             ["apt-get", "install", "-y", "alsa-plugins-pulse"],
             self._log,
-            lambda ok: (self._set_fl_ui(ok), self._log("✔  Fairlight!\n" if ok else "✘  Ошибка\n")),
+            lambda ok: (self._set_fl_ui(ok), self._log("✔  Fairlight!\n" if ok else "✘  Ошибка\n"), win.stop_progress(ok) if hasattr(win, "stop_progress") else None),
         )
 
     # ── Пресет «DaVinci Resolve Ready» ───────────────────────────────────────
 
     def run_ready_preset(self, btn):
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
         btn.set_sensitive(False)
         btn.set_label("⏳ Выполняется...")
         self._log("\n▶  DaVinci Resolve Ready...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("DaVinci Resolve Ready...")
 
         steps = [
             ("PostInstall", _POSTINSTALL_CMD, "privileged", None),
@@ -490,6 +502,7 @@ class DaVinciPage(Gtk.Box):
                     daemon=True,
                 ).start()
                 self._reset_btn_later(btn, "DaVinci Resolve Ready")
+                if hasattr(win, "stop_progress"): win.stop_progress(all_ok)
 
             GLib.idle_add(_finish)
 

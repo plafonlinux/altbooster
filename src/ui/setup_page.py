@@ -1,8 +1,11 @@
 """Вкладка «Начало» — системные настройки и раскладка клавиатуры."""
 
 import ast
+import os
+import shutil
 import subprocess
 import threading
+from pathlib import Path
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -51,58 +54,114 @@ class SetupPage(Gtk.Box):
         row.set_subtitle("Рекомендуется обновить приложение")
         row.add_prefix(Gtk.Image.new_from_icon_name("software-update-available-symbolic"))
 
-        btn = make_button("Скачать")
-        btn.add_css_class("suggested-action")
-        btn.connect("clicked", lambda _: subprocess.Popen(["xdg-open", url]))
+        # Проверяем, можно ли обновиться через git
+        root_dir = Path(__file__).resolve().parent.parent.parent
+        git_dir = root_dir / ".git"
+
+        if git_dir.exists() and shutil.which("git"):
+            btn = make_button("Обновить")
+            btn.add_css_class("suggested-action")
+            btn.connect("clicked", lambda b: self._on_self_update(b, root_dir))
+        else:
+            btn = make_button("Скачать")
+            btn.add_css_class("suggested-action")
+            btn.connect("clicked", lambda _: subprocess.Popen(["xdg-open", url]))
+            
         row.add_suffix(btn)
         group.add(row)
+
+    def _on_self_update(self, btn, root_dir):
+        btn.set_sensitive(False)
+        btn.set_label("⏳ Обновление...")
+        self._log("\n▶  Запуск обновления (git pull)...\n")
+        
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress("Обновление приложения...")
+        
+        cmd_str = f"cd {root_dir} && git pull && if [ -f install.sh ]; then ./install.sh; fi"
+        
+        def _done(ok):
+            def _ui():
+                if ok:
+                    self._log("✔  Обновление завершено! Пожалуйста, перезапустите приложение.\n")
+                    btn.set_label("Готово (Перезапустите)")
+                else:
+                    self._log("✘  Ошибка обновления.\n")
+                    btn.set_label("Ошибка")
+                    btn.set_sensitive(True)
+            GLib.idle_add(_ui)
+            if hasattr(win, "stop_progress"):
+                win.stop_progress(ok)
+
+        if os.access(root_dir, os.W_OK):
+            # Если есть права на запись (установка в home), обновляем от пользователя
+            def _user_run():
+                r = subprocess.run(["bash", "-c", cmd_str], capture_output=True, text=True)
+                if r.stdout: GLib.idle_add(self._log, r.stdout)
+                if r.stderr: GLib.idle_add(self._log, r.stderr)
+                GLib.idle_add(_done, r.returncode == 0)
+            threading.Thread(target=_user_run, daemon=True).start()
+        else:
+            # Если нет прав (установка в /opt), обновляем через root
+            backend.run_privileged(["bash", "-c", cmd_str], self._log, _done)
         
     def _on_gnome_software_updates(self, row):
         row.set_working()
         self._log("\n▶  Оптимизация Центра приложений (отключение download-updates)...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Настройка GNOME Software...")
         
         def _do():
             # Устанавливаем ключ в false
             ok = backend.run_gsettings(["set", "org.gnome.software", "download-updates", "false"])
             GLib.idle_add(row.set_done, ok)
             GLib.idle_add(self._log, "✔  Автообновления отключены. Центр приложений теперь будет летать!\n" if ok else "✘  Ошибка применения настроек GNOME\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
             
         threading.Thread(target=_do, daemon=True).start()    
 
     def _on_gnome_software_updates_undo(self, row):
         row.set_working()
         self._log("\n▶  Включение автообновлений GNOME Software...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Настройка GNOME Software...")
         
         def _do():
             ok = backend.run_gsettings(["set", "org.gnome.software", "download-updates", "true"])
             GLib.idle_add(row.set_undo_done, ok)
             GLib.idle_add(self._log, "✔  Автообновления включены.\n" if ok else "✘  Ошибка\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
         threading.Thread(target=_do, daemon=True).start()
         
     def _on_epm(self, row):
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
-            
         row.set_working()
         self._log("\n▶  epm update...\n")
+        
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress("Обновление системы...")
         
         def on_full_upgrade_done(ok):
             # Всегда разблокируем кнопку, чтобы можно было обновляться снова
             GLib.idle_add(row.set_done, False)
             # Возвращаем исходный текст кнопки
-            GLib.idle_add(row._button.set_label, "Обновить")
+            GLib.idle_add(row._btn.set_label, "Обновить")
             
             if ok:
                 self._log("\n✔  ALT Linux обновлён!\n")
             else:
                 self._log("\n✘  Ошибка обновления\n")
+            if hasattr(win, "stop_progress"):
+                win.stop_progress(ok)
         
         def on_update_done(ok):
             if not ok: 
                 GLib.idle_add(row.set_done, False)
-                GLib.idle_add(row._button.set_label, "Обновить")
+                GLib.idle_add(row._btn.set_label, "Обновить")
                 self._log("\n✘  Ошибка epm update\n")
+                if hasattr(win, "stop_progress"):
+                    win.stop_progress(False)
                 return
             self._log("\n▶  epm full-upgrade...\n")
             backend.run_epm(["epm", "-y", "full-upgrade"], self._log, on_full_upgrade_done)
@@ -112,16 +171,21 @@ class SetupPage(Gtk.Box):
     def _on_install_epm(self, row):
         row.set_working()
         self._log("\n▶ Установка EPM (eepm)...\n")
-        backend.run_privileged(["apt-get", "install", "-y", "eepm"], self._log, row.set_done)
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка EPM...")
+        def _done(ok):
+            row.set_done(ok)
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
+        backend.run_privileged(["apt-get", "install", "-y", "eepm"], self._log, _done)
 
     def _on_remove_epm(self, row):
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
         row.set_working()
         self._log("\n▶ Удаление EPM (eepm)...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление EPM...")
         # Удаляем eepm
-        backend.run_privileged(["apt-get", "remove", "-y", "eepm"], self._log, row.set_undo_done)
+        backend.run_privileged(["apt-get", "remove", "-y", "eepm"], self._log, 
+            lambda ok: (row.set_undo_done(ok), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
 
     # ── Системные настройки ──────────────────────────────────────────────────
 
@@ -184,18 +248,22 @@ class SetupPage(Gtk.Box):
             ("system-file-manager-symbolic", "Настройки Nautilus", "Сортировка папок, создание ссылок, подписи файлов", "Применить", self._on_nautilus, _check_nautilus, "setting_nautilus", "Применены", self._on_nautilus_undo, "Сбросить"),
             ("drive-harddisk-symbolic", "Индикатор копирования", "Адекватный прогресс-бар копирования (vm.dirty)", "Исправить", self._on_vm_dirty, backend.is_vm_dirty_optimized, "setting_vm_dirty", "Исправлено", self._on_vm_dirty_undo, "Сбросить"),
             ("security-high-symbolic", "Запуск от администратора", "Пункт «Открыть как администратор» (nautilus-admin)", "Установить", self._on_install_nautilus_admin, lambda: backend.check_app_installed({"check": ["rpm", "nautilus-admin-gtk4"]}), "app_nautilus_admin", "Установлено", self._on_remove_nautilus_admin, "Удалить", "user-trash-symbolic"),
+            ("view-reveal-symbolic", "Предпросмотр (Sushi)", "Быстрый просмотр файлов по пробелу", "Установить", self._on_install_sushi, lambda: backend.check_app_installed({"check": ["rpm", "sushi"]}), "app_sushi", "Установлено", self._on_remove_sushi, "Удалить", "user-trash-symbolic"),
+            ("image-x-generic-symbolic", "3D превью (f3d)", "Визуализация 3D моделей в Nautilus", "Установить", self._on_install_f3d, lambda: backend.check_app_installed({"check": ["rpm", "f3d"]}), "app_f3d", "Установлено", self._on_remove_f3d, "Удалить", "user-trash-symbolic"),
         ]
         
-        self._r_naut, self._r_dirty, self._r_naut_admin = [
+        self._r_naut, self._r_dirty, self._r_naut_admin, self._r_sushi, self._r_f3d = [
             SettingRow(*r) for r in rows
         ]
         
-        for r in (self._r_naut, self._r_dirty, self._r_naut_admin):
+        for r in (self._r_naut, self._r_dirty, self._r_naut_admin, self._r_sushi, self._r_f3d):
             group.add(r)
 
     def _on_nautilus(self, row):
         row.set_working()
         self._log("\n▶  Применение настроек Nautilus...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Настройка Nautilus...")
         def _do():
             ok1 = backend.run_gsettings(["set", "org.gtk.gtk4.Settings.FileChooser", "sort-directories-first", "true"])
             ok2 = backend.run_gsettings(["set", "org.gnome.nautilus.icon-view", "captions", "['size', 'date_modified', 'none']"])
@@ -204,11 +272,14 @@ class SetupPage(Gtk.Box):
             ok = ok1 and ok2 and ok3 and ok4
             GLib.idle_add(row.set_done, ok)
             GLib.idle_add(self._log, "✔  Настройки Nautilus применены!\n" if ok else "✘  Ошибка\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
         threading.Thread(target=_do, daemon=True).start()
 
     def _on_nautilus_undo(self, row):
         row.set_working()
         self._log("\n▶  Сброс настроек Nautilus...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Сброс настроек Nautilus...")
         def _do():
             ok1 = backend.run_gsettings(["reset", "org.gtk.gtk4.Settings.FileChooser", "sort-directories-first"])
             ok2 = backend.run_gsettings(["reset", "org.gnome.nautilus.icon-view", "captions"])
@@ -238,7 +309,7 @@ class SetupPage(Gtk.Box):
             if ok:
                 self._log("✔  Установлено! Перезапускаю Nautilus...\n")
                 subprocess.run(["nautilus", "-q"])
-        backend.run_privileged(["apt-get", "install", "-y", "nautilus-admin-gtk4"], self._log, _done)
+        backend.run_epm(["epm", "-i", "-y", "nautilus-admin-gtk4"], self._log, _done)
 
     def _on_remove_nautilus_admin(self, row):
         row.set_working()
@@ -246,7 +317,118 @@ class SetupPage(Gtk.Box):
         def _done(ok):
             row.set_undo_done(ok)
             if ok: subprocess.run(["nautilus", "-q"])
-        backend.run_privileged(["apt-get", "remove", "-y", "nautilus-admin-gtk4"], self._log, _done)
+        backend.run_epm(["epm", "-e", "-y", "nautilus-admin-gtk4"], self._log, _done)
+
+    def _on_install_sushi(self, row):
+        row.set_working()
+        self._log("\n▶  Установка Sushi (предпросмотр)...\n")
+        def _done(ok):
+            row.set_done(ok)
+            if ok:
+                self._log("✔  Sushi установлен! Перезапускаю Nautilus...\n")
+                subprocess.run(["nautilus", "-q"])
+        backend.run_epm(["epm", "-i", "-y", "sushi"], self._log, _done)
+
+    def _on_remove_sushi(self, row):
+        row.set_working()
+        self._log("\n▶  Удаление Sushi...\n")
+        def _done(ok):
+            row.set_undo_done(ok)
+            if ok: subprocess.run(["nautilus", "-q"])
+        backend.run_epm(["epm", "-e", "-y", "sushi"], self._log, _done)
+
+    def _on_install_f3d(self, row):
+        row.set_working()
+        self._log("\n▶  Установка f3d (3D превью)...\n")
+        
+        cmd = ["epm", "-i", "-y", "f3d"]
+
+        def _final_done(ok):
+            row.set_done(ok)
+            if ok:
+                self._log("✔  f3d установлен! Очищаю кэш миниатюр и перезапускаю Nautilus...\n")
+                try:
+                    shutil.rmtree(os.path.expanduser("~/.cache/thumbnails"), ignore_errors=True)
+                except Exception:
+                    pass
+                subprocess.run(["nautilus", "-q"])
+            else:
+                self._log("✘  Не удалось установить f3d. Возможно, пакет отсутствует в репозитории.\n")
+                GLib.idle_add(self._ask_f3d_task_id, row)
+
+        def _on_update_done(ok):
+            if not ok:
+                self._log("✘  Ошибка обновления индексов.\n")
+                _final_done(False)
+                return
+            self._log("\n▶  Повторная попытка установки f3d...\n")
+            backend.run_epm(cmd, self._log, _final_done)
+
+        def _first_attempt_done(ok):
+            if ok:
+                _final_done(True)
+            else:
+                self._log("\n⚠  Ошибка установки. Пробую обновить индексы (epm update)...\n")
+                backend.run_epm(["epm", "update"], self._log, _on_update_done)
+
+        backend.run_epm(cmd, self._log, _first_attempt_done)
+
+    def _ask_f3d_task_id(self, row):
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("Например: 345678")
+        entry.set_input_purpose(Gtk.InputPurpose.DIGITS)
+        
+        dialog = Adw.AlertDialog(
+            heading="Установка из задания (Task)",
+            body="Пакет f3d не найден в репозитории.\nЕсли вы знаете ID задания в сборочнице, введите его:",
+        )
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("install", "Установить")
+        dialog.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
+        
+        def _on_response(_d, res):
+            if res == "install":
+                task_id = entry.get_text().strip()
+                if task_id:
+                    self._install_f3d_task(row, task_id)
+            else:
+                row.set_done(False)
+        
+        dialog.connect("response", _on_response)
+        dialog.present(self.get_root())
+
+    def _install_f3d_task(self, row, task_id):
+        row.set_working()
+        self._log(f"\n▶  Установка f3d из задания #{task_id}...\n")
+        
+        def _done(ok):
+            row.set_done(ok)
+            if ok:
+                self._log("✔  f3d установлен из задания! Перезапускаю Nautilus...\n")
+                subprocess.run(["nautilus", "-q"])
+            else:
+                self._log(f"✘  Ошибка установки задания #{task_id}\n")
+        
+        # Используем apt-repo напрямую, так как epm install task:ID может не сработать
+        # (передает аргумент в apt-get, который не понимает синтаксис task:)
+        cmd = [
+            "bash", "-c",
+            f"apt-get install -y apt-repo && "
+            f"apt-repo add task {task_id} && "
+            f"apt-get update && "
+            f"apt-get install -y f3d; "
+            f"RET=$?; apt-repo rm task {task_id}; exit $RET"
+        ]
+        backend.run_privileged(cmd, self._log, _done)
+
+    def _on_remove_f3d(self, row):
+        row.set_working()
+        self._log("\n▶  Удаление f3d...\n")
+        def _done(ok):
+            row.set_undo_done(ok)
+            if ok: subprocess.run(["nautilus", "-q"])
+        backend.run_epm(["epm", "-e", "-y", "f3d"], self._log, _done)
 
     # ── Раскладка клавиатуры ─────────────────────────────────────────────────
 
@@ -280,51 +462,52 @@ class SetupPage(Gtk.Box):
     def _on_sudo(self, row):
         row.set_working()
         self._log("\n▶  Включение sudo...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Включение sudo...")
         backend.run_privileged(
             ["control", "sudowheel", "enabled"],
             lambda _: None,
-            lambda ok: (row.set_done(ok), self._log("✔  sudo включён!\n" if ok else "✘  Ошибка\n")),
+            lambda ok: (row.set_done(ok), self._log("✔  sudo включён!\n" if ok else "✘  Ошибка\n"), win.stop_progress(ok) if hasattr(win, "stop_progress") else None),
         )
 
     def _on_sudo_undo(self, row):
         row.set_working()
         self._log("\n▶  Отключение sudo...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Отключение sudo...")
         backend.run_privileged(
             ["control", "sudowheel", "disabled"],
             lambda _: None,
-            lambda ok: (row.set_undo_done(ok), self._log("✔  sudo отключён!\n" if ok else "✘  Ошибка\n")),
+            lambda ok: (row.set_undo_done(ok), self._log("✔  sudo отключён!\n" if ok else "✘  Ошибка\n"), win.stop_progress(ok) if hasattr(win, "stop_progress") else None),
         )
 
     def _on_trim_timer(self, row):
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
         row.set_working()
         self._log("\n▶  Включение fstrim.timer...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Включение TRIM...")
         backend.run_privileged(
             ["systemctl", "enable", "--now", "fstrim.timer"],
             self._log,
-            lambda ok: (row.set_done(ok), self._log("✔  TRIM включён!\n" if ok else "✘  Ошибка\n")),
+            lambda ok: (row.set_done(ok), self._log("✔  TRIM включён!\n" if ok else "✘  Ошибка\n"), win.stop_progress(ok) if hasattr(win, "stop_progress") else None),
         )
 
     def _on_trim_timer_undo(self, row):
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
         row.set_working()
         self._log("\n▶  Отключение fstrim.timer...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Отключение TRIM...")
         backend.run_privileged(
             ["systemctl", "disable", "--now", "fstrim.timer"],
             self._log,
-            lambda ok: (row.set_undo_done(ok), self._log("✔  TRIM отключён!\n" if ok else "✘  Ошибка\n")),
+            lambda ok: (row.set_undo_done(ok), self._log("✔  TRIM отключён!\n" if ok else "✘  Ошибка\n"), win.stop_progress(ok) if hasattr(win, "stop_progress") else None),
         )
 
     def _on_journal_limit(self, row):
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
         row.set_working()
         self._log("\n▶  Оптимизация журналов (создание drop-in конфига)...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Настройка журналов...")
         cmd = [
             "bash", "-c",
             "mkdir -p /etc/systemd/journald.conf.d && "
@@ -334,24 +517,25 @@ class SetupPage(Gtk.Box):
         ]
         backend.run_privileged(
             cmd, self._log,
-            lambda ok: (row.set_done(ok), self._log("✔  Лимиты применены через drop-in!\n" if ok else "✘  Ошибка\n")),
+            lambda ok: (row.set_done(ok), self._log("✔  Лимиты применены через drop-in!\n" if ok else "✘  Ошибка\n"), win.stop_progress(ok) if hasattr(win, "stop_progress") else None),
         )
 
     def _on_journal_limit_undo(self, row):
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
         row.set_working()
         self._log("\n▶  Сброс настроек журнала...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Сброс настроек журнала...")
         backend.run_privileged(
             ["bash", "-c", "rm -f /etc/systemd/journald.conf.d/99-altbooster.conf && systemctl restart systemd-journald"],
             self._log,
-            lambda ok: (row.set_undo_done(ok), self._log("✔  Настройки журнала сброшены!\n" if ok else "✘  Ошибка\n")),
+            lambda ok: (row.set_undo_done(ok), self._log("✔  Настройки журнала сброшены!\n" if ok else "✘  Ошибка\n"), win.stop_progress(ok) if hasattr(win, "stop_progress") else None),
         )
 
     def _on_scale(self, row):
         row.set_working()
         self._log("\n▶  Масштабирование...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Включение масштабирования...")
 
         def _do():
             current = backend.gsettings_get(config.GSETTINGS_MUTTER, "experimental-features")
@@ -366,12 +550,15 @@ class SetupPage(Gtk.Box):
             )
             GLib.idle_add(row.set_done, ok)
             GLib.idle_add(self._log, "✔  Включено!\n" if ok else "✘  Ошибка\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
 
         threading.Thread(target=_do, daemon=True).start()
 
     def _on_scale_undo(self, row):
         row.set_working()
         self._log("\n▶  Отключение масштабирования...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Отключение масштабирования...")
         def _do():
             current = backend.gsettings_get(config.GSETTINGS_MUTTER, "experimental-features")
             try:
@@ -383,6 +570,7 @@ class SetupPage(Gtk.Box):
             ok = backend.run_gsettings(["set", config.GSETTINGS_MUTTER, "experimental-features", str(feats)])
             GLib.idle_add(row.set_undo_done, ok)
             GLib.idle_add(self._log, "✔  Отключено!\n" if ok else "✘  Ошибка\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
         threading.Thread(target=_do, daemon=True).start()
 
     # ── Обработчики раскладки ────────────────────────────────────────────────

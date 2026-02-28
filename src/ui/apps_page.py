@@ -410,12 +410,11 @@ class AppsPage(Gtk.Box):
         btn_add.set_sensitive(False)
 
     def _install_pkg(self, pkg_id, install_type, btn, status):
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
         btn.set_sensitive(False)
         btn.set_label("…")
         self._log(f"\n▶  Установка {pkg_id}...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress(f"Установка {pkg_id}...")
         done_cb = lambda ok: self._pkg_install_done(ok, pkg_id, btn, status)
         if install_type == "flatpak":
             backend.run_privileged(
@@ -428,6 +427,8 @@ class AppsPage(Gtk.Box):
             backend.run_epm(["epm", "install", "-y", pkg_id], self._log, done_cb)
 
     def _pkg_install_done(self, ok, pkg_id, btn, status):
+        win = self.get_root()
+        if hasattr(win, "stop_progress"): win.stop_progress(ok)
         if ok:
             set_status_ok(status)
             btn.set_label("Установлено")
@@ -760,16 +761,25 @@ class AppsPage(Gtk.Box):
     def _run_all(self, _):
         if self._busy:
             return
-        if backend.is_system_busy():
-            self._log("\n⚠  Система занята.\n")
-            return
         self._busy = True
+        self._cancel_install = False
         self._btn_all.set_sensitive(False)
         self._btn_all.set_label("⏳  Установка...")
+        
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress("Массовая установка приложений...", self._cancel_all)
+            
         threading.Thread(target=self._worker, daemon=True).start()
+
+    def _cancel_all(self):
+        self._cancel_install = True
+        self._log("\n⚠  Запрос отмены. Завершаю текущую операцию и останавливаюсь...\n")
 
     def _worker(self):
         for row in (r for r in self._rows if not r.is_installed()):
+            if self._cancel_install:
+                break
             # Ждем, пока предыдущая установка (если была) сбросит флаг
             while row._installing:
                 time.sleep(0.5)
@@ -785,6 +795,12 @@ class AppsPage(Gtk.Box):
     def _done(self):
         self._busy = False
         self._refresh_btn_all()
+        
+        win = self.get_root()
+        if hasattr(win, "stop_progress"):
+            ok = not getattr(self, "_cancel_install", False)
+            win.stop_progress(ok)
+            
         if hasattr(self, "_ext_btn") and self._ext_btn:
             self._ext_btn.set_sensitive(True)
             self._ext_btn.set_label("Запустить")
