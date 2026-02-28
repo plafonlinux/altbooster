@@ -74,20 +74,22 @@ class SetupPage(Gtk.Box):
         btn.set_sensitive(False)
         btn.set_label("⏳ Обновление...")
         self._log("\n▶  Запуск обновления (git pull)...\n")
-        
+
         win = self.get_root()
         if hasattr(win, "start_progress"):
             win.start_progress("Обновление приложения...")
-        
+
         cmd_str = f"cd {root_dir} && git pull && if [ -f install.sh ]; then ./install.sh; fi"
-        
+
         def _done(ok):
+            if ok:
+                self._log("✔  Обновление завершено! Пожалуйста, перезапустите приложение.\n")
+            else:
+                self._log("✘  Ошибка обновления.\n")
             def _ui():
                 if ok:
-                    self._log("✔  Обновление завершено! Пожалуйста, перезапустите приложение.\n")
                     btn.set_label("Готово (Перезапустите)")
                 else:
-                    self._log("✘  Ошибка обновления.\n")
                     btn.set_label("Ошибка")
                     btn.set_sensitive(True)
             GLib.idle_add(_ui)
@@ -293,60 +295,86 @@ class SetupPage(Gtk.Box):
     def _on_vm_dirty(self, row):
         row.set_working()
         self._log("\n▶  Настройка кэша копирования (vm.dirty)...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Настройка vm.dirty...")
         backend.apply_vm_dirty(self._log,
-            lambda ok: (row.set_done(ok), self._log("✔  Кэш копирования исправлен!\n" if ok else "✘  Ошибка\n")))
+            lambda ok: (row.set_done(ok), self._log("✔  Кэш копирования исправлен!\n" if ok else "✘  Ошибка\n"), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
 
     def _on_vm_dirty_undo(self, row):
         row.set_working()
         self._log("\n▶  Сброс настроек vm.dirty...\n")
-        backend.run_privileged(["rm", "-f", "/etc/sysctl.d/99-altbooster.conf"], self._log, lambda ok: (row.set_undo_done(ok), self._log("✔  Настройки сброшены (требуется перезагрузка для эффекта)\n" if ok else "✘  Ошибка\n")))
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Сброс vm.dirty...")
+        backend.run_privileged(["rm", "-f", "/etc/sysctl.d/99-altbooster.conf"], self._log,
+            lambda ok: (row.set_undo_done(ok), self._log("✔  Настройки сброшены (требуется перезагрузка для эффекта)\n" if ok else "✘  Ошибка\n"), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
 
     def _on_install_nautilus_admin(self, row):
         row.set_working()
         self._log("\n▶  Установка nautilus-admin-gtk4...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка nautilus-admin-gtk4...")
         def _done(ok):
             row.set_done(ok)
             if ok:
                 self._log("✔  Установлено! Перезапускаю Nautilus...\n")
-                subprocess.run(["nautilus", "-q"])
+            else:
+                self._log("✘  Ошибка установки nautilus-admin-gtk4\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
+            if ok: subprocess.run(["nautilus", "-q"])
         backend.run_epm(["epm", "-i", "-y", "nautilus-admin-gtk4"], self._log, _done)
 
     def _on_remove_nautilus_admin(self, row):
         row.set_working()
         self._log("\n▶  Удаление nautilus-admin-gtk4...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление nautilus-admin-gtk4...")
         def _done(ok):
             row.set_undo_done(ok)
+            self._log("✔  nautilus-admin-gtk4 удалён!\n" if ok else "✘  Ошибка удаления\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
             if ok: subprocess.run(["nautilus", "-q"])
         backend.run_epm(["epm", "-e", "-y", "nautilus-admin-gtk4"], self._log, _done)
 
     def _on_install_sushi(self, row):
         row.set_working()
         self._log("\n▶  Установка Sushi (предпросмотр)...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка Sushi...")
         def _done(ok):
             row.set_done(ok)
             if ok:
                 self._log("✔  Sushi установлен! Перезапускаю Nautilus...\n")
-                subprocess.run(["nautilus", "-q"])
+            else:
+                self._log("✘  Ошибка установки Sushi\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
+            if ok: subprocess.run(["nautilus", "-q"])
         backend.run_epm(["epm", "-i", "-y", "sushi"], self._log, _done)
 
     def _on_remove_sushi(self, row):
         row.set_working()
         self._log("\n▶  Удаление Sushi...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление Sushi...")
         def _done(ok):
             row.set_undo_done(ok)
+            self._log("✔  Sushi удалён!\n" if ok else "✘  Ошибка удаления Sushi\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
             if ok: subprocess.run(["nautilus", "-q"])
         backend.run_epm(["epm", "-e", "-y", "sushi"], self._log, _done)
 
     def _on_install_f3d(self, row):
         row.set_working()
         self._log("\n▶  Установка f3d (3D превью)...\n")
-        
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка f3d...")
+
         cmd = ["epm", "-i", "-y", "f3d"]
 
         def _final_done(ok):
             row.set_done(ok)
             if ok:
                 self._log("✔  f3d установлен! Очищаю кэш миниатюр и перезапускаю Nautilus...\n")
+                if hasattr(win, "stop_progress"): win.stop_progress(ok)
                 try:
                     shutil.rmtree(os.path.expanduser("~/.cache/thumbnails"), ignore_errors=True)
                 except Exception:
@@ -354,6 +382,7 @@ class SetupPage(Gtk.Box):
                 subprocess.run(["nautilus", "-q"])
             else:
                 self._log("✘  Не удалось установить f3d. Возможно, пакет отсутствует в репозитории.\n")
+                if hasattr(win, "stop_progress"): win.stop_progress(ok)
                 GLib.idle_add(self._ask_f3d_task_id, row)
 
         def _on_update_done(ok):
@@ -401,14 +430,17 @@ class SetupPage(Gtk.Box):
     def _install_f3d_task(self, row, task_id):
         row.set_working()
         self._log(f"\n▶  Установка f3d из задания #{task_id}...\n")
-        
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress(f"Установка f3d (задание #{task_id})...")
+
         def _done(ok):
             row.set_done(ok)
             if ok:
                 self._log("✔  f3d установлен из задания! Перезапускаю Nautilus...\n")
-                subprocess.run(["nautilus", "-q"])
             else:
                 self._log(f"✘  Ошибка установки задания #{task_id}\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
+            if ok: subprocess.run(["nautilus", "-q"])
         
         # Используем apt-repo напрямую, так как epm install task:ID может не сработать
         # (передает аргумент в apt-get, который не понимает синтаксис task:)
@@ -425,8 +457,12 @@ class SetupPage(Gtk.Box):
     def _on_remove_f3d(self, row):
         row.set_working()
         self._log("\n▶  Удаление f3d...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление f3d...")
         def _done(ok):
             row.set_undo_done(ok)
+            self._log("✔  f3d удалён!\n" if ok else "✘  Ошибка удаления f3d\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
             if ok: subprocess.run(["nautilus", "-q"])
         backend.run_epm(["epm", "-e", "-y", "f3d"], self._log, _done)
 

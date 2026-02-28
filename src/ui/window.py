@@ -103,8 +103,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         return header
 
     def _build_log_panel(self):
+        self._last_log_line = ""
+        self._progress_nesting = 0
         self._log_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        
+
         sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
         self._log_container.append(sep)
 
@@ -236,6 +238,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
     def _clear_log(self, *_):
         self._buf.set_text("")
+        self._last_log_line = ""
 
     def _reset_state(self, *_):
         d = Adw.AlertDialog(
@@ -261,12 +264,17 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     # ── Лог ──────────────────────────────────────────
 
     def start_progress(self, message: str, on_cancel=None):
-        self._on_cancel_cb = on_cancel
+        if on_cancel is not None:
+            self._on_cancel_cb = on_cancel
         def _do():
+            if on_cancel is not None:
+                self._progress_nesting = 1  # Новая верхнеуровневая операция
+            else:
+                self._progress_nesting += 1  # Вложенная операция
             self._status_label.set_label(message)
             self._progressbar.set_fraction(0.0)
-            self._stop_btn.set_sensitive(bool(on_cancel))
-            self._stop_btn.set_visible(bool(on_cancel))
+            self._stop_btn.set_sensitive(bool(self._on_cancel_cb))
+            self._stop_btn.set_visible(bool(self._on_cancel_cb))
             if self._pulse_timer_id:
                 GLib.source_remove(self._pulse_timer_id)
             self._pulse_timer_id = GLib.timeout_add(100, self._pulse_progress)
@@ -305,17 +313,23 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             if self._pulse_timer_id:
                 GLib.source_remove(self._pulse_timer_id)
                 self._pulse_timer_id = None
+            self._progress_nesting = max(0, self._progress_nesting - 1)
             self._progressbar.set_fraction(1.0)
-            self._status_label.set_label("✔ Готово" if success else "✘ Ошибка")
-            self._stop_btn.set_sensitive(False)
-            self._stop_btn.set_visible(False)
-            self._on_cancel_cb = None
+            label = self._last_log_line or ("✔ Готово" if success else "✘ Ошибка")
+            self._status_label.set_label(label)
+            if self._progress_nesting == 0:
+                self._stop_btn.set_sensitive(False)
+                self._stop_btn.set_visible(False)
+                self._on_cancel_cb = None
         GLib.idle_add(_do)
 
     def _log(self, text):
         GLib.idle_add(self._log_internal, text)
 
     def _log_internal(self, text):
+        stripped = text.strip()
+        if stripped:
+            self._last_log_line = stripped
         end = self._buf.get_end_iter()
         self._buf.insert(end, text)
         end = self._buf.get_end_iter()

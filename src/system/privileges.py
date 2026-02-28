@@ -75,17 +75,51 @@ def _wait_for_apt_lock(on_line: OnLine | None = None, timeout: int = 60) -> bool
         time.sleep(5)
     return False
 
+# ── Фильтр предупреждений APT о множественных версиях ────────────────────────
+
+def _apt_dedup_filter(on_line: OnLine) -> OnLine:
+    """Подавляет многострочные блоки 'W: There are multiple versions of...'."""
+    _WARN_PATTERNS = (
+        "There are multiple versions of",
+        "won't be cleanly updated",
+        "only one version",
+        "To leave multiple versions installed",
+        "you may remove that warning",
+        "option in your configuration file",
+        "RPM:",
+        "To disable these warnings completely set",
+        "You may want to run apt-get update to correct",
+    )
+    in_warn = [False]
+
+    def _filtered(line: str) -> None:
+        if "There are multiple versions of" in line:
+            in_warn[0] = True
+        if in_warn[0]:
+            if not line.strip():
+                return
+            if any(pat in line for pat in _WARN_PATTERNS):
+                return
+            in_warn[0] = False
+        on_line(line)
+
+    return _filtered
+
+
 # ── Выполнение привилегированных команд ───────────────────────────────────────
 
 def run_privileged(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
     """Запускает команду через sudo -S."""
-    
+
     if cmd and cmd[0] in ("epm", "epmi"):
         cmd = [
             "bash", "-c",
             "if ! rpm -q eepm >/dev/null 2>&1; then echo -e '▶ EPM не найден. Выполняется установка eepm...\\n'; apt-get install -y eepm; fi && \"$@\"",
             "--", *cmd
         ]
+
+    if cmd and cmd[0] in ("apt", "apt-get"):
+        on_line = _apt_dedup_filter(on_line)
 
     def _worker() -> None:
         password = get_sudo_password()
@@ -170,6 +204,8 @@ def run_epm(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
             "if ! rpm -q eepm >/dev/null 2>&1; then echo -e '▶ EPM не найден. Выполняется установка eepm...\\n'; apt-get install -y eepm; fi && \"$@\"",
             "--", *cmd
         ]
+
+    on_line = _apt_dedup_filter(on_line)
 
     def _worker() -> None:
         password = get_sudo_password()
