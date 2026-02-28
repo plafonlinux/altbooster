@@ -1,5 +1,10 @@
 """Вкладка «Внешний вид» — темы, иконки и цвета."""
 
+import os
+import random
+import re
+import tempfile
+import urllib.request
 import threading
 
 import gi
@@ -9,7 +14,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 
 import backend
 import config
-from widgets import make_scrolled_page, make_icon, make_button
+from widgets import make_scrolled_page, make_icon, make_button, make_suffix_box
 from ui.rows import SettingRow
 
 
@@ -200,11 +205,143 @@ class AppearancePage(Gtk.Box):
         group.set_title("Обои от PLAFON")
         body.append(group)
         
+        self._wallpapers_urls = []
+        self._current_preview_path = None
+
+        # Предпросмотр (Gtk.Picture)
+        self._wallpaper_preview = Gtk.Picture()
+        self._wallpaper_preview.set_size_request(-1, 220)
+        self._wallpaper_preview.set_content_fit(Gtk.ContentFit.COVER)
+        self._wallpaper_preview.add_css_class("card")
+        self._wallpaper_preview.set_margin_bottom(12)
+        self._wallpaper_preview.set_visible(False) # Скрыт, пока не загрузится
+        group.add(self._wallpaper_preview)
+
+        # Загружаем превью в фоне
+        threading.Thread(target=self._load_wallpaper_preview, daemon=True).start()
+        
         row = Adw.ActionRow()
         row.set_title("Открыть сайт с обоями")
         row.set_subtitle("https://oboi.plafon.org")
         row.add_prefix(make_icon("image-x-generic-symbolic"))
         btn = make_button("Открыть", style="flat")
-        btn.connect("clicked", lambda _: GLib.idle_add(Gio.AppInfo.launch_default_for_uri, "https://oboi.plafon.org", None))
-        row.add_suffix(btn)
+        btn.set_valign(Gtk.Align.CENTER)
+        # ИСПРАВЛЕНИЕ БАГА: Убран GLib.idle_add, который вызывал бесконечный цикл
+        btn.connect("clicked", lambda _: Gio.AppInfo.launch_default_for_uri("https://oboi.plafon.org", None))
+        
+        rand_btn = make_button("Случайные", width=110)
+        rand_btn.set_valign(Gtk.Align.CENTER)
+        rand_btn.set_tooltip_text("Установить случайные обои с сайта")
+        rand_btn.connect("clicked", self._on_random_wallpaper)
+        
+        row.add_suffix(make_suffix_box(rand_btn, btn))
         group.add(row)
+
+    def _load_wallpaper_preview(self):
+        try:
+            url = "https://oboi.plafon.org/photos"
+            req = urllib.request.Request(url, headers={"User-Agent": "ALTBooster"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                html = r.read().decode("utf-8", errors="ignore")
+            
+            # Ищем картинки: src="..." или src='...'
+            images = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
+            
+            valid_images = []
+            for img in images:
+                # Проверяем расширение (игнорируем query params)
+                if not re.search(r'\.(jpg|jpeg|png|webp)($|\?)', img, re.IGNORECASE):
+                    continue
+
+                if not img.startswith("http"):
+                    if img.startswith("//"):
+                        img = "https:" + img
+                    elif img.startswith("/"):
+                        img = "https://oboi.plafon.org" + img
+                    else:
+                        img = "https://oboi.plafon.org/" + img
+                
+                if "logo" not in img.lower() and "icon" not in img.lower() and "avatar" not in img.lower():
+                    valid_images.append(img)
+            
+            # Fallback: og:image
+            if not valid_images:
+                og = re.search(r'<meta\s+property="og:image"\s+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
+                if og:
+                    img = og.group(1)
+                    if not img.startswith("http"):
+                         img = "https://oboi.plafon.org/" + img.lstrip("/")
+                    valid_images.append(img)
+
+            self._wallpapers_urls = list(dict.fromkeys(valid_images))
+            
+            if self._wallpapers_urls:
+                random.shuffle(self._wallpapers_urls)
+                self._wallpapers_urls = self._wallpapers_urls[:5]
+                self._slideshow_index = 0
+                self._show_next_slide()
+                GLib.timeout_add_seconds(5, self._show_next_slide)
+            else:
+                GLib.idle_add(self._log, "ℹ Не удалось найти изображения на сайте обоев.\n")
+
+        except Exception as e:
+            GLib.idle_add(self._log, f"✘ Ошибка загрузки превью обоев: {e}\n")
+
+    def _show_next_slide(self):
+        if not self._wallpapers_urls:
+            return False
+        
+        url = self._wallpapers_urls[self._slideshow_index]
+        self._slideshow_index = (self._slideshow_index + 1) % len(self._wallpapers_urls)
+        
+        threading.Thread(target=self._download_and_set_preview, args=(url,), daemon=True).start()
+        return True # Повторять таймер
+
+    def _download_and_set_preview(self, url):
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+                with urllib.request.urlopen(url, timeout=10) as r:
+                    tmp.write(r.read())
+                tmp_path = tmp.name
+            
+            def _update():
+                # Удаляем старый файл
+                if self._current_preview_path and os.path.exists(self._current_preview_path):
+                    try:
+                        os.unlink(self._current_preview_path)
+                    except OSError:
+                        pass
+                
+                self._current_preview_path = tmp_path
+                self._wallpaper_preview.set_filename(tmp_path)
+                self._wallpaper_preview.set_visible(True)
+            
+            GLib.idle_add(_update)
+        except Exception:
+            pass
+
+    def _on_random_wallpaper(self, btn):
+        if not self._wallpapers_urls:
+            return
+        
+        url = random.choice(self._wallpapers_urls)
+        btn.set_sensitive(False)
+        self._log(f"\n▶  Установка обоев: {os.path.basename(url)}...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка обоев...")
+
+        def _do():
+            try:
+                dest = os.path.expanduser(f"~/Pictures/Wallpapers/{os.path.basename(url)}")
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                urllib.request.urlretrieve(url, dest)
+                backend.run_gsettings(["set", "org.gnome.desktop.background", "picture-uri", f"'file://{dest}'"])
+                backend.run_gsettings(["set", "org.gnome.desktop.background", "picture-uri-dark", f"'file://{dest}'"])
+                GLib.idle_add(self._log, "✔  Обои установлены!\n")
+            except Exception as e:
+                GLib.idle_add(self._log, f"✘  Ошибка: {e}\n")
+            
+            GLib.idle_add(btn.set_sensitive, True)
+            if hasattr(win, "stop_progress"): GLib.idle_add(win.stop_progress, True)
+
+        threading.Thread(target=_do, daemon=True).start()

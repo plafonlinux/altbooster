@@ -4,6 +4,7 @@ import ast
 import os
 import shutil
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -63,9 +64,9 @@ class SetupPage(Gtk.Box):
             btn.add_css_class("suggested-action")
             btn.connect("clicked", lambda b: self._on_self_update(b, root_dir))
         else:
-            btn = make_button("Скачать")
+            btn = make_button("Установить")
             btn.add_css_class("suggested-action")
-            btn.connect("clicked", lambda _: subprocess.Popen(["xdg-open", url]))
+            btn.connect("clicked", lambda b: self._on_self_update_tarball(b, version))
             
         row.add_suffix(btn)
         group.add(row)
@@ -108,6 +109,56 @@ class SetupPage(Gtk.Box):
             # Если нет прав (установка в /opt), обновляем через root
             backend.run_privileged(["bash", "-c", cmd_str], self._log, _done)
         
+    def _on_self_update_tarball(self, btn, version):
+        btn.set_sensitive(False)
+        btn.set_label("⏳ Обновление...")
+        self._log(f"\n▶  Запуск обновления до версии {version}...\n")
+
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress("Обновление приложения...")
+        
+        url = f"https://github.com/plafonlinux/altbooster/archive/refs/tags/v{version}.tar.gz"
+        downloader = "wget -O" if shutil.which("wget") else "curl -L -o"
+        
+        cmd_str = (
+            f"TMP=$(mktemp -d) && "
+            f"{downloader} $TMP/update.tar.gz {url} && "
+            f"tar xf $TMP/update.tar.gz -C $TMP && "
+            f"cd $TMP/altbooster-* && "
+            f"if [ -f install.sh ]; then chmod +x install.sh && ./install.sh; else echo 'install.sh not found'; exit 1; fi && "
+            f"rm -rf $TMP"
+        )
+
+        def _done(ok):
+            def _ui():
+                if ok:
+                    self._log("✔  Обновление завершено! Перезапуск...\n")
+                    btn.set_label("Перезапуск...")
+                    GLib.timeout_add(1500, self._restart_app)
+                else:
+                    self._log("✘  Ошибка обновления.\n")
+                    btn.set_label("Ошибка")
+                    btn.set_sensitive(True)
+            GLib.idle_add(_ui)
+            if hasattr(win, "stop_progress"):
+                win.stop_progress(ok)
+
+        root_dir = Path(__file__).resolve().parent.parent.parent
+        if os.access(root_dir, os.W_OK):
+            def _user_run():
+                r = subprocess.run(["bash", "-c", cmd_str], capture_output=True, text=True)
+                if r.stdout: GLib.idle_add(self._log, r.stdout)
+                if r.stderr: GLib.idle_add(self._log, r.stderr)
+                GLib.idle_add(_done, r.returncode == 0)
+            threading.Thread(target=_user_run, daemon=True).start()
+        else:
+            backend.run_privileged(["bash", "-c", cmd_str], self._log, _done)
+
+    def _restart_app(self):
+        """Перезапускает текущее приложение."""
+        os.execl(sys.executable, sys.executable, *sys.argv)
+
     def _on_gnome_software_updates(self, row):
         row.set_working()
         self._log("\n▶  Оптимизация Центра приложений (отключение download-updates)...\n")
