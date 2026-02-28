@@ -43,7 +43,7 @@ ALT Booster — нативное GTK4-приложение для рутинно
 
 ## Установка
 
-1. Клонировать и установить
+### 1. Клонировать и установить
 
 ```bash
 git clone https://github.com/plafonlinux/altbooster.git
@@ -58,7 +58,7 @@ altbooster
 # или через меню приложений GNOME
 ```
 
-## Удаление
+### Удаление
 
 ```bash
 ./uninstall.sh
