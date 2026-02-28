@@ -4,7 +4,7 @@
 
 # ALT Booster
 
-**Умная утилита для тонкой настройки и обслуживания ALT Linux. Создана с фокусом на безопасность, надёжность и современный интерфейс на GTK4/Adwaita.**
+Умная утилита для тонкой настройки и обслуживания ALT Linux. Создана с фокусом на безопасность, надёжность и современный интерфейс на GTK4/Adwaita.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-ALT%20Linux-informational)](https://altlinux.org)
