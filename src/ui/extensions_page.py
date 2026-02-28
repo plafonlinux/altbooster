@@ -340,10 +340,14 @@ class ExtensionsPage(Gtk.Box):
         self._installed_group = self._make_installed_group_widget()
         self._body.append(self._installed_group)
 
+        # Фильтруем системные расширения, которые перекрыты пользовательскими (дубликаты)
+        user_uuids = {u[0] for u in user_exts}
+        visible_system_exts = [e for e in system_exts if e[0] not in user_uuids]
+
         installed_uuids = {u[0] for u in user_exts} | {u[0] for u in system_exts}
         missing_recs = [r for r in RECOMMENDED if r[0] not in installed_uuids]
 
-        if not user_exts and not system_exts and not missing_recs:
+        if not user_exts and not visible_system_exts and not missing_recs:
             row = Adw.ActionRow()
             row.set_title("Расширений не найдено")
             row.set_subtitle("Установите расширения выше — они появятся здесь")
@@ -366,12 +370,12 @@ class ExtensionsPage(Gtk.Box):
                 exp.add_row(self._make_recommended_row(uuid, name, desc, install_id))
             self._installed_group.add(exp)
 
-        if system_exts:
+        if visible_system_exts:
             exp = Adw.ExpanderRow()
             exp.set_title("Системные")
-            exp.set_subtitle(f"{len(system_exts)} расш.")
+            exp.set_subtitle(f"{len(visible_system_exts)} расш.")
             exp.set_expanded(False)
-            for uuid, name in system_exts:
+            for uuid, name in visible_system_exts:
                 exp.add_row(self._make_installed_row(uuid, name, uuid in enabled, is_user=False))
             self._installed_group.add(exp)
 
