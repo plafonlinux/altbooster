@@ -428,7 +428,6 @@ class AppsPage(Gtk.Box):
 
     def _pkg_install_done(self, ok, pkg_id, btn, status):
         win = self.get_root()
-        if hasattr(win, "stop_progress"): win.stop_progress(ok)
         if ok:
             set_status_ok(status)
             btn.set_label("Установлено")
@@ -438,6 +437,7 @@ class AppsPage(Gtk.Box):
             btn.set_label("Повторить")
             btn.set_sensitive(True)
             self._log(f"✘  Ошибка установки {pkg_id}\n")
+        if hasattr(win, "stop_progress"): win.stop_progress(ok)
 
     def _clear_body(self):
         """Очищает все виджеты со страницы, кроме панели кнопок."""
@@ -795,14 +795,14 @@ class AppsPage(Gtk.Box):
     def _done(self):
         self._busy = False
         self._refresh_btn_all()
-        
-        win = self.get_root()
-        if hasattr(win, "stop_progress"):
-            ok = not getattr(self, "_cancel_install", False)
-            win.stop_progress(ok)
-            
+
         if hasattr(self, "_ext_btn") and self._ext_btn:
             self._ext_btn.set_sensitive(True)
             self._ext_btn.set_label("Запустить")
             self._ext_btn = None
         self._log("\n✔  Массовая установка завершена\n")
+
+        win = self.get_root()
+        if hasattr(win, "stop_progress"):
+            ok = not getattr(self, "_cancel_install", False)
+            win.stop_progress(ok)

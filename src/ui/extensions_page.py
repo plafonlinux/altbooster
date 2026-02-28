@@ -199,6 +199,8 @@ class ExtensionsPage(Gtk.Box):
         self._id_btn.set_label("…")
         clear_status(self._id_status)
         self._log(f"\n▶  Установка расширения {ext_id}...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress(f"Установка расширения {ext_id}...")
 
         def _do():
             gext = _gext_path()
@@ -209,10 +211,13 @@ class ExtensionsPage(Gtk.Box):
                     capture_output=True, text=True,
                 )
                 if r_pip.returncode != 0:
-                    GLib.idle_add(self._log, f"✘  Не удалось установить gext: {r_pip.stderr.strip()}\n")
-                    GLib.idle_add(set_status_error, self._id_status)
-                    GLib.idle_add(self._id_btn.set_label, "Установить")
-                    GLib.idle_add(self._id_btn.set_sensitive, True)
+                    def _fail_gext():
+                        self._log(f"✘  Не удалось установить gext: {r_pip.stderr.strip()}\n")
+                        if hasattr(win, "stop_progress"): win.stop_progress(False)
+                        set_status_error(self._id_status)
+                        self._id_btn.set_label("Установить")
+                        self._id_btn.set_sensitive(True)
+                    GLib.idle_add(_fail_gext)
                     return
                 GLib.idle_add(self._log, "✔  gext установлен!\n")
                 gext = _gext_path() or "gext"
@@ -221,16 +226,22 @@ class ExtensionsPage(Gtk.Box):
             if r.stdout:
                 GLib.idle_add(self._log, r.stdout)
             ok = r.returncode == 0
-            if ok:
-                GLib.idle_add(set_status_ok, self._id_status)
-                GLib.idle_add(self._id_entry.set_text, "")
-                GLib.idle_add(self._log, "✔  Расширение установлено!\n")
-                GLib.idle_add(self._refresh_installed)
-            else:
-                GLib.idle_add(set_status_error, self._id_status)
-                GLib.idle_add(self._log, f"✘  Ошибка: {r.stderr.strip()}\n")
-            GLib.idle_add(self._id_btn.set_label, "Найти")
-            GLib.idle_add(self._id_btn.set_sensitive, True)
+
+            def _finish():
+                if ok:
+                    self._log("✔  Расширение установлено!\n")
+                    if hasattr(win, "stop_progress"): win.stop_progress(True)
+                    set_status_ok(self._id_status)
+                    self._id_entry.set_text("")
+                    self._refresh_installed()
+                else:
+                    self._log(f"✘  Ошибка: {r.stderr.strip()}\n")
+                    if hasattr(win, "stop_progress"): win.stop_progress(False)
+                    set_status_error(self._id_status)
+                self._id_btn.set_label("Найти")
+                self._id_btn.set_sensitive(True)
+
+            GLib.idle_add(_finish)
 
         threading.Thread(target=_do, daemon=True).start()
 

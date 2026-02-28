@@ -412,15 +412,16 @@ class AppRow(Adw.ActionRow):
         self._installing = False
         self._prog.set_visible(False)
         win = self.get_root()
-        if hasattr(win, "stop_progress"): win.stop_progress(ok)
         if ok:
             self._log(f"✔  {self._app['label']} установлен!\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
             config.state_set(self._state_key, True)
             # Обновляем индекс установленного источника
             self._installed_source_index = self._selected_source_index
             self._set_installed_ui(True)
         else:
             self._log(f"✘  Ошибка установки {self._app['label']}\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
             self._btn.set_sensitive(True)
             self._badges_box.set_sensitive(True)
             self._btn.set_label("Повторить")
@@ -429,14 +430,15 @@ class AppRow(Adw.ActionRow):
         self._installing = False
         self._prog.set_visible(False)
         win = self.get_root()
-        if hasattr(win, "stop_progress"): win.stop_progress(ok)
         if ok:
             self._log(f"✔  {self._app['label']} удалён!\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
             config.state_set(self._state_key, False)
             self._installed_source_index = -1
             self._set_installed_ui(False)
         else:
             self._log(f"✘  Ошибка удаления {self._app['label']}\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
             self._trash_btn.set_sensitive(True)
 
 
@@ -558,17 +560,17 @@ class TaskRow(Adw.ActionRow):
         self.result = ok
         self._prog.set_fraction(1.0 if ok else 0.0)
         win = self.get_root()
-        if hasattr(win, "stop_progress"): win.stop_progress(ok)
         if ok:
             set_status_ok(self._status)
             self._btn.remove_css_class("suggested-action")
             self._btn.add_css_class("flat")
-            
+
             # Если у задачи есть проверка (это фикс/настройка), то после успеха блокируем кнопку
             if "check" in self._task:
                 self._btn.set_label("Применено")
                 self._btn.set_sensitive(False)
                 self._on_log(f"✔  Готово: {self._task['label']}\n")
+                if hasattr(win, "stop_progress"): win.stop_progress(ok)
                 self._on_progress()
                 return
         else:
@@ -576,4 +578,5 @@ class TaskRow(Adw.ActionRow):
         self._btn.set_label("Повтор")
         self._btn.set_sensitive(True)
         self._on_log(f"{'✔  Готово' if ok else '✘  Ошибка'}: {self._task['label']}\n")
+        if hasattr(win, "stop_progress"): win.stop_progress(ok)
         self._on_progress()

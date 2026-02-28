@@ -385,13 +385,13 @@ class MaintenancePage(Gtk.Box):
         self._busy = False
         self._btn_all.set_sensitive(True)
         self._btn_all.set_label("Запустить все задачи")
-        
+
+        self._log("\n✔  Все задачи обслуживания выполнены!\n")
+
         win = self.get_root()
         if hasattr(win, "stop_progress"):
             ok = not getattr(self, "_cancel_tasks", False)
             win.stop_progress(ok)
-            
-        self._log("\n✔  Готово!\n")
 
     def _update_progress(self):
         done = sum(1 for r in self._rows if r.result is not None)
