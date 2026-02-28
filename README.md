@@ -43,13 +43,7 @@ ALT Booster — нативное GTK4-приложение для рутинно
 
 ## Установка
 
-### 1. Зависимости
-
-```bash
-sudo apt-get install python3-module-pygobject3 libgtk4-gir libadwaita-gir
-```
-
-### 2. Клонировать и установить
+### 1. Клонировать и установить
 
 ```bash
 git clone https://github.com/plafonlinux/altbooster.git
@@ -57,14 +51,14 @@ cd altbooster
 ./install.sh
 ```
 
-### 3. Запустить
+### 2. Запустить
 
 ```bash
 altbooster
 # или через меню приложений GNOME
 ```
 
-## Удаление
+### Удаление
 
 ```bash
 ./uninstall.sh
