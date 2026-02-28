@@ -431,7 +431,7 @@ class DynamicPage(Gtk.Box):
 
     def _build(self, body: Gtk.Box) -> None:
         for group_data in self._page_data.get("groups", []):
-            if "requires" in group_data and not shutil.which(group_data["requires"]):
+            if "requires" in group_data and subprocess.run(["which", group_data["requires"]], capture_output=True).returncode != 0:
                 continue
 
             group = Adw.PreferencesGroup()
@@ -441,7 +441,7 @@ class DynamicPage(Gtk.Box):
             body.append(group)
 
             for row_data in group_data.get("rows", []):
-                if "requires" in row_data and not shutil.which(row_data["requires"]):
+                if "requires" in row_data and subprocess.run(["which", row_data["requires"]], capture_output=True).returncode != 0:
                     continue
                 row = self._factory.build(row_data)
                 group.add(row)

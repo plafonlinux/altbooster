@@ -80,6 +80,62 @@
         "fstrim",
         "-av"
       ]
+    },
+    {
+      "id": "fix_gdm_usb",
+      "icon": "drive-removable-media-symbolic",
+      "label": "Фикс фантомных USB",
+      "desc": "Убирает лишние накопители из меню GDM (требует перезагрузки)",
+      "check": {
+        "type": "path",
+        "value": "/etc/polkit-1/rules.d/49-no-usb-mount-gdm.rules"
+      },
+      "cmd": [
+        "bash",
+        "-c",
+        "mkdir -p /etc/polkit-1/rules.d && echo 'polkit.addRule(function(action, subject) { if (subject.user == \"gdm\") { if (action.id == \"org.freedesktop.udisks2.filesystem-mount\" || action.id == \"org.freedesktop.udisks2.encrypted-unlock\" || action.id == \"org.freedesktop.udisks2.loop-setup\") { return polkit.Result.NO; } } });' > /etc/polkit-1/rules.d/49-no-usb-mount-gdm.rules && chmod 644 /etc/polkit-1/rules.d/49-no-usb-mount-gdm.rules"
+      ]
+    },
+    {
+      "id": "fix_gsconnect",
+      "icon": "phone-symbolic",
+      "label": "Фикс GSConnect",
+      "desc": "Перезапуск daemon.js при входе (лечит ошибки соединения)",
+      "type": "user",
+      "check": {
+        "type": "path",
+        "value": "~/.config/autostart/kill-daemonjs.desktop"
+      },
+      "cmd": [
+        "bash",
+        "-c",
+        "mkdir -p ~/.local/bin ~/.config/autostart; echo -e '#!/bin/sh\\nsleep 8\\nkillall daemon.js' > ~/.local/bin/kill-daemonjs.sh; chmod +x ~/.local/bin/kill-daemonjs.sh; echo -e '[Desktop Entry]\\nType=Application\\nName=Kill daemon.js\\nExec='\"$HOME\"'/.local/bin/kill-daemonjs.sh\\nX-GNOME-Autostart-enabled=true\\nNoDisplay=true' > ~/.config/autostart/kill-daemonjs.desktop"
+      ]
+    },
+    {
+      "id": "disable_tracker",
+      "icon": "system-search-symbolic",
+      "label": "Отключить поиск файлов",
+      "desc": "Отключает службу индексации localsearch (экономит ресурсы)",
+      "type": "user",
+      "cmd": [
+        "bash",
+        "-c",
+        "systemctl --user mask localsearch-3 && systemctl --user stop localsearch-3"
+      ]
+    },
+    {
+      "id": "flatpak_home",
+      "icon": "folder-home-symbolic",
+      "label": "Flatpak: доступ к Home",
+      "desc": "Разрешает всем Flatpak-приложениям доступ к домашней папке",
+      "type": "user",
+      "cmd": [
+        "flatpak",
+        "override",
+        "--user",
+        "--filesystem=home"
+      ]
     }
   ]
 }

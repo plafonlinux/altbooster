@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
+
 import sys
 import os
+
 # Добавляем директорию скрипта в путь поиска модулей
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gi
+gi.require_version("Gio", "2.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gio, Adw, GLib
 
 import config
 from ui import PlafonWindow
-
 
 class AltBoosterApp(Adw.Application):
     def __init__(self):

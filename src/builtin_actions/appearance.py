@@ -18,6 +18,14 @@ def apply_papirus_icons(page, _arg: Any) -> bool:
     return ok
 
 
+def apply_alt_workstation_theme(page, _arg: Any) -> bool:
+    """Применяет тему иконок alt-workstation."""
+    ok = backend.run_gsettings(["set", "org.gnome.desktop.interface", "icon-theme", "alt-workstation"])
+    if page:
+        page.log("\n✔  Тема ALT Workstation применена!\n" if ok else "\n✘  Ошибка применения темы\n")
+    return ok
+
+
 def apply_adwaita_theme(page, _arg: Any) -> bool:
     ok = (
         backend.run_gsettings(["set", "org.gnome.desktop.interface", "gtk-theme", "Adwaita"])
