@@ -8,6 +8,8 @@ config.py — конфигурация, состояние сессии и да�
 
 import json
 import subprocess
+import threading
+import urllib.request
 from pathlib import Path
 
 
@@ -16,6 +18,8 @@ from pathlib import Path
 CONFIG_DIR  = Path.home() / ".config" / "altbooster"
 CONFIG_FILE = CONFIG_DIR / "window.json"
 STATE_FILE  = CONFIG_DIR / "state.json"
+
+VERSION = "2.1.0"
 
 
 # ── Пути к кэшу DaVinci Resolve по умолчанию ─────────────────────────────────
@@ -26,6 +30,15 @@ DV_PROXY_DEFAULT = "/mnt/datassd/DaVinci Resolve/Work Folders/ProxyMedia"
 # Gsettings-схемы — чтобы не повторять строки по всему коду
 GSETTINGS_MUTTER      = "org.gnome.mutter"
 GSETTINGS_KEYBINDINGS = "org.gnome.desktop.wm.keybindings"
+
+
+# ── Блокировки APT ────────────────────────────────────────────────────────────
+
+APT_LOCK_FILES = [
+    "/var/cache/apt/archives/lock",
+    "/var/lib/dpkg/lock-frontend",
+    "/var/lib/apt/lists/lock",
+]
 
 
 # ── Состояние сессии ──────────────────────────────────────────────────────────
@@ -93,3 +106,18 @@ def is_btrfs() -> bool:
         return bool(result.stdout.strip())
     except OSError:
         return False
+
+
+def check_update(on_result):
+    """Проверяет наличие новой версии на GitHub."""
+    def _worker():
+        try:
+            url = "https://api.github.com/repos/plafonlinux/altbooster/releases/latest"
+            req = urllib.request.Request(url, headers={"User-Agent": "ALTBooster"})
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                tag = data.get("tag_name", "").lstrip("v")
+                on_result(tag, data.get("html_url"))
+        except Exception:
+            on_result(None, None)
+    threading.Thread(target=_worker, daemon=True).start()

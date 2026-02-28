@@ -14,6 +14,7 @@ from ui.common import load_module
 from ui.dialogs import PasswordDialog
 from ui.setup_page import SetupPage
 from ui.apps_page import AppsPage
+from ui.extensions_page import ExtensionsPage
 from ui.davinci_page import DaVinciPage
 from ui.maintenance_page import MaintenancePage
 
@@ -21,6 +22,10 @@ from ui.maintenance_page import MaintenancePage
 class AltBoosterWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        
+        if not hasattr(self, '_on_log_drawer_toggle'):
+            print("!!! ОШИБКА: Метод _on_log_drawer_toggle не найден. Файлы могут быть устаревшими. Переустановите приложение. !!!")
+
         # 1. Лог собирается самым первым
         self._log_widget = self._build_log_panel()
         
@@ -35,6 +40,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         self._setup = SetupPage(self._log)
         self._apps = AppsPage(self._log)
+        self._extensions = ExtensionsPage(self._log)
         self._davinci = DaVinciPage(self._log)
         self._maint = MaintenancePage(self._log)
 
@@ -51,9 +57,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._amd = _dp("amd")
 
         for widget, name, title, icon in [
-            (self._setup,      "setup",       "Начало",          "go-home-symbolic"),
-            (self._apps,       "apps",        "Приложения",      "flathub-symbolic"),
-            (self._appearance, "appearance",  "Внешний вид",     "preferences-desktop-wallpaper-symbolic"),
+            (self._setup,       "setup",       "Начало",          "go-home-symbolic"),
+            (self._apps,        "apps",        "Приложения",      "flathub-symbolic"),
+            (self._extensions,  "extensions",  "Расширения",      "application-x-addon-symbolic"),
+            (self._appearance,  "appearance",  "Внешний вид",     "preferences-desktop-wallpaper-symbolic"),
             (self._terminal,   "terminal",    "Терминал",        "utilities-terminal-symbolic"),
             (self._amd,        "amd",         "AMD Radeon",      "video-display-symbolic"),
             (self._davinci,    "davinci",     "DaVinci Resolve", "davinci-symbolic"),
@@ -189,7 +196,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.set_application_name("ALT Booster")
         d.set_application_icon("altbooster")
         d.set_developer_name("PLAFON")
-        d.set_version("5.3-beta")
+        d.set_version("5.4-beta")
         d.set_website("https://github.com/plafonlinux/altbooster")
         d.set_issue_url("https://github.com/plafonlinux/altbooster/issues")
         d.set_comments("Утилита настройки системы ALT Linux.\nGTK4 / Adwaita / Python 3 / Data-Driven UI")

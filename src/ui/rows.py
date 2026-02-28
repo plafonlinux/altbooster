@@ -1,6 +1,7 @@
 """Строки виджетов: SettingRow, AppRow, TaskRow."""
 
 import os
+import subprocess
 import threading
 
 import gi
@@ -20,20 +21,24 @@ class SettingRow(Adw.ActionRow):
     """Строка настройки с кнопкой и индикатором статуса."""
 
     # ВАЖНО: Добавили аргумент done_label="Активировано" в конец
-    def __init__(self, icon, title, subtitle, btn_label, on_activate, check_fn, state_key, done_label="Активировано"):
+    def __init__(self, icon, title, subtitle, btn_label, on_activate, check_fn, state_key, done_label="Активировано", on_undo=None, undo_label="Отменить", undo_icon="edit-undo-symbolic"):
         super().__init__()
         self.set_title(title)
         self.set_subtitle(subtitle)
         self._check_fn = check_fn
         self._on_activate = on_activate
+        self._on_undo = on_undo
         self._state_key = state_key
         self._orig_label = btn_label
         self._done_label = done_label  # Сохраняем кастомный текст для кнопки
+        self._undo_label = undo_label
+        self._undo_icon = undo_icon
+        self._is_active = False
 
         self.add_prefix(make_icon(icon))
         self._status = make_status_icon()
         self._btn = make_button(btn_label)
-        self._btn.connect("clicked", lambda _: self._on_activate(self))
+        self._btn.connect("clicked", self._on_btn_clicked)
         self._btn.set_sensitive(False)
         self.add_suffix(make_suffix_box(self._status, self._btn))
 
@@ -41,6 +46,12 @@ class SettingRow(Adw.ActionRow):
             self._set_ui(True)
         elif "kbd" not in state_key and check_fn is not None:
             threading.Thread(target=self._refresh, daemon=True).start()
+
+    def _on_btn_clicked(self, _):
+        if self._is_active and self._on_undo:
+            self._on_undo(self)
+        else:
+            self._on_activate(self)
 
     def _refresh(self):
         try:
@@ -51,18 +62,53 @@ class SettingRow(Adw.ActionRow):
         GLib.idle_add(self._set_ui, enabled)
 
     def _set_ui(self, enabled):
+        self._is_active = enabled
+        self._status.set_visible(True)
         if enabled:
             set_status_ok(self._status)
-            self._btn.set_label(self._done_label)  # Используем наш кастомный текст
-            self._btn.set_sensitive(False)
-            self._btn.remove_css_class("suggested-action")
-            self._btn.add_css_class("flat")
+            if self._on_undo:
+                self._btn.set_visible(True)
+                self._btn.set_icon_name(self._undo_icon)
+                self._btn.set_tooltip_text(self._undo_label)
+                self._btn.set_sensitive(True)
+                self._btn.remove_css_class("suggested-action")
+                self._btn.add_css_class("flat")
+                self._btn.add_css_class("circular")
+                self._btn.set_size_request(-1, -1)
+                self._btn.remove_css_class("success")
+            else:
+                if not self._done_label:
+                    self._status.set_visible(False)
+                    self._btn.set_visible(True)
+                    self._btn.set_icon_name("object-select-symbolic")
+                    self._btn.set_tooltip_text("Активно")
+                    self._btn.set_sensitive(False)
+                    self._btn.remove_css_class("suggested-action")
+                    self._btn.add_css_class("flat")
+                    self._btn.add_css_class("circular")
+                    self._btn.set_size_request(-1, -1)
+                    self._btn.add_css_class("success")
+                else:
+                    self._btn.set_visible(True)
+                    self._btn.set_label(self._done_label)  # Используем наш кастомный текст
+                    self._btn.set_sensitive(False)
+                    self._btn.remove_css_class("suggested-action")
+                    self._btn.remove_css_class("circular")
+                    self._btn.add_css_class("flat")
+                    self._btn.set_size_request(130, -1)
+                    self._btn.remove_css_class("success")
         else:
             clear_status(self._status)
+            self._status.set_visible(True)
+            self._btn.set_visible(True)
             self._btn.set_label(self._orig_label)
+            self._btn.set_tooltip_text("")
             self._btn.set_sensitive(True)
             self._btn.remove_css_class("flat")
+            self._btn.remove_css_class("circular")
+            self._btn.remove_css_class("success")
             self._btn.add_css_class("suggested-action")
+            self._btn.set_size_request(130, -1)
 
     def set_working(self):
         self._btn.set_sensitive(False)
@@ -76,6 +122,13 @@ class SettingRow(Adw.ActionRow):
             self._btn.set_label("Повторить")
             self._btn.set_sensitive(True)
 
+    def set_undo_done(self, ok):
+        if ok:
+            config.state_set(self._state_key, False)
+            self._set_ui(False)
+        else:
+            # Если ошибка, возвращаем состояние "Активно"
+            self._set_ui(True)
 
 class AppRow(Adw.ActionRow):
     """Строка приложения с установкой / удалением."""
@@ -260,6 +313,29 @@ class TaskRow(Adw.ActionRow):
         right.append(self._btn)
         self.add_suffix(right)
 
+        if "check" in task:
+            threading.Thread(target=self._initial_check, daemon=True).start()
+
+    def _initial_check(self):
+        check = self._task["check"]
+        ok = False
+        if check.get("type") == "path":
+            path = os.path.expanduser(check["value"])
+            ok = os.path.exists(path)
+        
+        if ok:
+            GLib.idle_add(self._mark_done_init)
+
+    def _mark_done_init(self):
+        self.result = True
+        set_status_ok(self._status)
+        self._btn.set_label("Применено")
+        self._btn.set_sensitive(False)
+        self._btn.remove_css_class("suggested-action")
+        self._btn.add_css_class("flat")
+        if self._on_progress:
+            self._on_progress()
+
     def start(self):
         if self._running:
             return
@@ -269,7 +345,15 @@ class TaskRow(Adw.ActionRow):
         self._btn.set_label("…")
         clear_status(self._status)
         self._prog.set_fraction(0.0)
+
         cmd = self._task["cmd"].copy()
+
+        if self._task.get("type") == "user":
+            self._on_log(f"\n▶  {self._task['label']}...\n")
+            GLib.timeout_add(110, self._pulse)
+            threading.Thread(target=self._run_user, args=(cmd,), daemon=True).start()
+            return
+
         if self._task["id"] == "davinci":
             cmd = [
                 "find",
@@ -279,6 +363,19 @@ class TaskRow(Adw.ActionRow):
         self._on_log(f"\n▶  {self._task['label']}...\n")
         GLib.timeout_add(110, self._pulse)
         backend.run_privileged(cmd, self._on_log, self._finish)
+
+    def _run_user(self, cmd):
+        try:
+            # Запускаем команду от текущего пользователя
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.stdout:
+                GLib.idle_add(self._on_log, res.stdout)
+            if res.stderr:
+                GLib.idle_add(self._on_log, res.stderr)
+            GLib.idle_add(self._finish, res.returncode == 0)
+        except Exception as e:
+            GLib.idle_add(self._on_log, f"Error: {e}\n")
+            GLib.idle_add(self._finish, False)
 
     def _pulse(self):
         if self._running:

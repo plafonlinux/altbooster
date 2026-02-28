@@ -24,7 +24,7 @@
           "type": "command_row",
           "title": "Применить иконки Papirus",
           "subtitle": "Papirus-Dark / Papirus — по текущей теме",
-          "icon": "view-app-grid-symbolic",
+          "icon": "object-select-symbolic",
           "button_label": "Применить",
           "button_done_label": "Применено",
           "button_style": "flat",
@@ -32,11 +32,23 @@
           "action": { "type": "builtin", "fn": "apply_papirus_icons" }
         },
         {
+          "id": "alt_workstation_apply",
+          "type": "command_row",
+          "title": "Тема иконок ALT Workstation",
+          "subtitle": "Стандартная тема для ALT Workstation GNOME",
+          "icon": "preferences-desktop-theme-symbolic",
+          "button_label": "Применить",
+          "button_done_label": "Применено",
+          "button_style": "flat",
+          "check": { "type": "gsettings_contains", "schema": "org.gnome.desktop.interface", "key": "icon-theme", "value": "alt-workstation" },
+          "action": { "type": "builtin", "fn": "apply_alt_workstation_theme" }
+        },
+        {
           "id": "adwaita_apply",
           "type": "command_row",
           "title": "Стандартная тема иконок Adwaita",
           "subtitle": "icon-theme: Adwaita  |  gtk-theme: Adwaita",
-          "icon": "preferences-system-symbolic",
+          "icon": "go-home-symbolic",
           "button_label": "Применить",
           "button_done_label": "Применено",
           "button_style": "flat",

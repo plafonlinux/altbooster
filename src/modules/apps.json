@@ -335,6 +335,25 @@
       "title": "Утилиты",
       "items": [
         {
+          "id": "extension_manager",
+          "label": "Extension Manager",
+          "desc": "Управление расширениями GNOME",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.mattjakeman.ExtensionManager"
+            ],
+            "check": [
+              "flatpak",
+              "com.mattjakeman.ExtensionManager"
+            ]
+          }
+        },
+        {
           "id": "alacarte",
           "label": "Alacarte",
           "desc": "Редактор главного меню",
