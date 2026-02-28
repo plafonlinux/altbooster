@@ -535,13 +535,27 @@ class ExtensionsPage(Gtk.Box):
 
     def _do_delete_ext(self, uuid: str) -> None:
         """Удаляет пользовательское расширение (shutil.rmtree)."""
-        ext_path = _USER_EXT_DIR / uuid
         self._log(f"\n▶  Удаление {uuid}...\n")
 
         def _do():
             try:
-                shutil.rmtree(ext_path)
-                GLib.idle_add(self._log, f"✔  {uuid} удалён!\n")
+                ext_path = _USER_EXT_DIR / uuid
+                # Если папки нет по стандартному пути, ищем по UUID в metadata.json
+                if not ext_path.exists():
+                    for meta in _USER_EXT_DIR.glob("*/metadata.json"):
+                        try:
+                            if json.loads(meta.read_text(encoding="utf-8")).get("uuid") == uuid:
+                                ext_path = meta.parent
+                                break
+                        except Exception:
+                            pass
+
+                if ext_path.exists():
+                    shutil.rmtree(ext_path)
+                    GLib.idle_add(self._log, f"✔  {uuid} удалён!\n")
+                else:
+                    GLib.idle_add(self._log, "ℹ  Папка расширения не найдена (возможно, уже удалено).\n")
+
                 GLib.idle_add(self._refresh_installed)
             except Exception as e:
                 GLib.idle_add(self._log, f"✘  Ошибка удаления: {e}\n")
