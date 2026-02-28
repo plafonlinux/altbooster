@@ -37,26 +37,47 @@ def apply_adwaita_theme(page, _arg: Any) -> bool:
 
 
 def apply_folder_color(page, color: str) -> bool:
-    ok_d = subprocess.run(
-        ["papirus-folders", "-C", color, "--theme", "Papirus-Dark"],
-        capture_output=True,
-    ).returncode == 0
-    ok_l = subprocess.run(
-        ["papirus-folders", "-C", color, "--theme", "Papirus"],
-        capture_output=True,
-    ).returncode == 0
-    ok = ok_d or ok_l
-    if ok:
-        config.state_set("folder_color", color)
+    """Применяет цвет папок через papirus-folders (требует sudo)."""
+    ok = False
+    try:
+        # Для применения цвета к системным иконкам нужны права root
+        def log_fn(line):
+            if page: page.log(line)
+
+        ok_d = backend.run_privileged_sync(
+            ["papirus-folders", "-C", color, "--theme", "Papirus-Dark"],
+            log_fn
+        )
+        ok_l = backend.run_privileged_sync(
+            ["papirus-folders", "-C", color, "--theme", "Papirus"],
+            log_fn
+        )
+        ok = ok_d or ok_l
+        if ok:
+            config.state_set("folder_color", color)
+    except FileNotFoundError:
+        if page:
+            page.log("\n✘  Команда papirus-folders не найдена. Установите пакет.\n")
+        return False
+    
     if page:
         page.log(f"\n{'✔' if ok else '✘'}  Цвет папок: {color}\n")
     return ok
 
 
 def reset_folder_color(page, _arg: Any) -> bool:
-    subprocess.run(["papirus-folders", "-D", "--theme", "Papirus-Dark"], capture_output=True)
-    subprocess.run(["papirus-folders", "-D", "--theme", "Papirus"], capture_output=True)
-    config.state_set("folder_color", None)
-    if page:
-        page.log("\n✔  Папки сброшены на стандартный цвет\n")
-    return True
+    """Сбрасывает цвет папок на стандартный (требует sudo)."""
+    try:
+        def log_fn(line):
+            if page: page.log(line)
+
+        backend.run_privileged_sync(["papirus-folders", "-D", "--theme", "Papirus-Dark"], log_fn)
+        backend.run_privileged_sync(["papirus-folders", "-D", "--theme", "Papirus"], log_fn)
+        config.state_set("folder_color", None)
+        if page:
+            page.log("\n✔  Папки сброшены на стандартный цвет\n")
+        return True
+    except FileNotFoundError:
+        if page:
+            page.log("\n✘  Команда papirus-folders не найдена. Установите пакет.\n")
+        return False

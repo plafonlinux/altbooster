@@ -238,54 +238,58 @@ class AppearancePage(Gtk.Box):
         group.add(row)
 
     def _load_wallpaper_preview(self):
-        try:
-            url = "https://oboi.plafon.org/photos"
-            req = urllib.request.Request(url, headers={"User-Agent": "ALTBooster"})
-            with urllib.request.urlopen(req, timeout=5) as r:
-                html = r.read().decode("utf-8", errors="ignore")
-            
-            # Ищем картинки: src="..." или src='...'
-            images = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
-            
-            valid_images = []
-            for img in images:
-                # Проверяем расширение (игнорируем query params)
-                if not re.search(r'\.(jpg|jpeg|png|webp)($|\?)', img, re.IGNORECASE):
-                    continue
-
-                if not img.startswith("http"):
-                    if img.startswith("//"):
-                        img = "https:" + img
-                    elif img.startswith("/"):
-                        img = "https://oboi.plafon.org" + img
-                    else:
-                        img = "https://oboi.plafon.org/" + img
+        def fetch_images(target_url):
+            try:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+                }
+                req = urllib.request.Request(target_url, headers=headers)
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    html = r.read().decode("utf-8", errors="ignore")
                 
-                if "logo" not in img.lower() and "icon" not in img.lower() and "avatar" not in img.lower():
-                    valid_images.append(img)
-            
-            # Fallback: og:image
-            if not valid_images:
-                og = re.search(r'<meta\s+property="og:image"\s+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
-                if og:
-                    img = og.group(1)
+                # Ищем картинки в src, data-src (lazy load) и href
+                # Регулярка учитывает возможные пробелы вокруг =
+                candidates = re.findall(r'(?:src|data-src|href)\s*=\s*["\']([^"\']+)["\']', html, re.IGNORECASE)
+                
+                valid = []
+                for img in candidates:
+                    clean_img = img.split("?")[0].lower()
+                    if not clean_img.endswith((".jpg", ".jpeg", ".png", ".webp")):
+                        continue
+
                     if not img.startswith("http"):
-                         img = "https://oboi.plafon.org/" + img.lstrip("/")
-                    valid_images.append(img)
+                        if img.startswith("//"):
+                            img = "https:" + img
+                        elif img.startswith("/"):
+                            img = "https://oboi.plafon.org" + img
+                        else:
+                            img = "https://oboi.plafon.org/" + img
+                    
+                    if "logo" not in img.lower() and "icon" not in img.lower() and "avatar" not in img.lower():
+                        valid.append(img.replace("&amp;", "&"))
+                return valid
+            except Exception as e:
+                GLib.idle_add(self._log, f"⚠ Ошибка парсинга {target_url}: {e}\n")
+                return []
 
-            self._wallpapers_urls = list(dict.fromkeys(valid_images))
-            
-            if self._wallpapers_urls:
-                random.shuffle(self._wallpapers_urls)
-                self._wallpapers_urls = self._wallpapers_urls[:5]
-                self._slideshow_index = 0
-                self._show_next_slide()
-                GLib.timeout_add_seconds(5, self._show_next_slide)
-            else:
-                GLib.idle_add(self._log, "ℹ Не удалось найти изображения на сайте обоев.\n")
+        # 1. Пробуем раздел photos
+        images = fetch_images("https://oboi.plafon.org/photos")
+        
+        # 2. Если пусто, пробуем главную
+        if not images:
+            images = fetch_images("https://oboi.plafon.org")
 
-        except Exception as e:
-            GLib.idle_add(self._log, f"✘ Ошибка загрузки превью обоев: {e}\n")
+        self._wallpapers_urls = list(dict.fromkeys(images))
+        
+        if self._wallpapers_urls:
+            random.shuffle(self._wallpapers_urls)
+            self._wallpapers_urls = self._wallpapers_urls[:5]
+            self._slideshow_index = 0
+            self._show_next_slide()
+            GLib.timeout_add_seconds(5, self._show_next_slide)
+        else:
+            GLib.idle_add(self._log, "ℹ Не удалось найти изображения на сайте обоев.\n")
 
     def _show_next_slide(self):
         if not self._wallpapers_urls:
@@ -299,7 +303,10 @@ class AppearancePage(Gtk.Box):
 
     def _download_and_set_preview(self, url):
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+            ext = os.path.splitext(url.split("?")[0])[1]
+            if not ext: ext = ".jpg"
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
                 with urllib.request.urlopen(url, timeout=10) as r:
                     tmp.write(r.read())
                 tmp_path = tmp.name

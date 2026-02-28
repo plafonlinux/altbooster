@@ -632,7 +632,7 @@
               "occt"
             ],
             "check": [
-              "rpm",
+              "which",
               "occt"
             ]
           }

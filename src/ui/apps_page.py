@@ -349,10 +349,11 @@ class AppsPage(Gtk.Box):
                 "check": ["flatpak", install_id],
             }
         elif install_type == "epm_play":
+            check_type = "which" if install_id.lower() == "occt" else "rpm"
             source = {
                 "label": "EPM Play",
                 "cmd": ["epm", "play", install_id],
-                "check": ["rpm", install_id],
+                "check": [check_type, install_id],
             }
         else:
             # Для epm install используем название ветки
