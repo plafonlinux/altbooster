@@ -2,6 +2,7 @@
 
 import json
 import os
+import threading
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -9,12 +10,15 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk
 
 import config
+import backend
 from dynamic_page import DynamicPage
 from ui.common import load_module
-from ui.dialogs import PasswordDialog
+from ui.dialogs import PasswordDialog, get_saved_password
 from ui.setup_page import SetupPage
 from ui.apps_page import AppsPage
 from ui.extensions_page import ExtensionsPage
+from ui.appearance_page import AppearancePage
+from ui.terminal_page import TerminalPage
 from ui.davinci_page import DaVinciPage
 from ui.maintenance_page import MaintenancePage
 
@@ -23,10 +27,18 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
+        # Принудительно используем тему иконок Adwaita для приложения,
+        # чтобы иконки оставались монохромными даже если в системе выбрана другая тема.
+        icon_theme = "Adwaita"
+        if not os.path.exists("/usr/share/icons/Adwaita") and os.path.exists("/usr/share/icons/alt-workstation"):
+            icon_theme = "alt-workstation"
+        Gtk.Settings.get_default().set_property("gtk-icon-theme-name", icon_theme)
+
         if not hasattr(self, '_on_log_drawer_toggle'):
             print("!!! ОШИБКА: Метод _on_log_drawer_toggle не найден. Файлы могут быть устаревшими. Переустановите приложение. !!!")
 
         # 1. Лог собирается самым первым
+        self._log_hide_timer_id = None
         self._log_widget = self._build_log_panel()
         
         self.set_title("ALT Booster")
@@ -41,6 +53,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._setup = SetupPage(self._log)
         self._apps = AppsPage(self._log)
         self._extensions = ExtensionsPage(self._log)
+        self._appearance = AppearancePage(self._log)
+        self._terminal = TerminalPage(self._log)
         self._davinci = DaVinciPage(self._log)
         self._maint = MaintenancePage(self._log)
 
@@ -52,8 +66,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 lbl.set_wrap(True)
                 return lbl
 
-        self._appearance = _dp("appearance")
-        self._terminal = _dp("terminal")
         self._amd = _dp("amd")
 
         for widget, name, title, icon in [
@@ -69,14 +81,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             p = self._stack.add_titled(widget, name, title)
             p.set_icon_name(icon)
 
-        self._paned = Gtk.Paned.new(Gtk.Orientation.VERTICAL)
-        # Включаем обратно стандартный системный разделитель, чтобы можно было менять размер
-        self._paned.set_wide_handle(True)
-        self._paned.set_start_child(self._stack)
-        self._paned.set_end_child(self._log_widget)
-        self._paned.set_vexpand(True)
-        self._paned.set_position(settings.get("paned_pos", 720))
-        root.append(self._paned)
+        self._stack.set_vexpand(True)
+        root.append(self._stack)
+        root.append(self._log_widget)
 
     def _build_header(self):
         header = Adw.HeaderBar()
@@ -101,6 +108,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def _build_log_panel(self):
         self._log_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        self._log_container.append(sep)
+
         # Плоский заголовок только с кнопкой справа
         header = Gtk.CenterBox()
         header.set_margin_top(6)
@@ -109,10 +119,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         header.set_margin_end(12)
 
         self._log_drawer_btn = Gtk.Button()
-        self._log_drawer_btn.set_icon_name("pan-down-symbolic")
+        self._log_drawer_btn.set_icon_name("pan-up-symbolic")
         self._log_drawer_btn.add_css_class("flat")
         self._log_drawer_btn.add_css_class("circular")
-        self._log_drawer_btn.set_tooltip_text("Свернуть терминал")
+        self._log_drawer_btn.set_tooltip_text("Развернуть терминал")
         self._log_drawer_btn.connect("clicked", self._on_log_drawer_toggle)
 
         right_box = Gtk.Box()
@@ -125,7 +135,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._log_container.append(header)
         
         self._log_scroll = Gtk.ScrolledWindow()
-        self._log_scroll.set_vexpand(True)
+        self._log_scroll.set_vexpand(False)
+        self._log_scroll.set_size_request(-1, 250)
         self._log_scroll.set_min_content_height(50)
         self._tv = Gtk.TextView()
         self._tv.set_editable(False)
@@ -138,12 +149,16 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._buf = self._tv.get_buffer()
         self._log_scroll.set_child(self._tv)
 
+        self._log_scroll.set_visible(False)
         self._log_container.append(self._log_scroll)
         return self._log_container
 
     # Методы _on_drag_begin и _on_drag_update удалены
         
     def _on_log_drawer_toggle(self, btn):
+        if self._log_hide_timer_id:
+            GLib.source_remove(self._log_hide_timer_id)
+            self._log_hide_timer_id = None
         if self._log_scroll.get_visible():
             self._log_scroll.set_visible(False)
             btn.set_icon_name("pan-up-symbolic")
@@ -152,19 +167,33 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             self._log_scroll.set_visible(True)
             btn.set_icon_name("pan-down-symbolic")
             btn.set_tooltip_text("Свернуть терминал")
-            
-            # Теперь лог ВСЕГДА будет открываться маленьким, не читая старую память
-            if hasattr(self, '_paned'):
-                self._paned.set_position(880)
         
     # ── Пароль ───────────────────────────────────────────────────────────────
 
     def ask_password(self):
         self._maint.set_sensitive_all(False)
+        
+        # Пробуем авто-вход
+        saved_pw = get_saved_password()
+        if saved_pw:
+            self._log("🔑 Найден сохранённый пароль, проверка...\n")
+            def _check():
+                if backend.sudo_check(saved_pw):
+                    backend.set_sudo_password(saved_pw)
+                    GLib.idle_add(self._auth_ok)
+                    GLib.idle_add(self._log, "✔ Вход выполнен автоматически.\n")
+                else:
+                    GLib.idle_add(self._show_password_dialog)
+            threading.Thread(target=_check, daemon=True).start()
+        else:
+            self._show_password_dialog()
+
+    def _show_password_dialog(self):
         PasswordDialog(self, self._auth_ok, self.close)
 
     def _auth_ok(self):
         self._maint.set_sensitive_all(True)
+        self._maint.refresh_checks()
         self._log("👋 Добро пожаловать в ALT Booster. С чего начнём?\n")
 
     # ── Настройки окна ───────────────────────────────────────────────────────
@@ -183,7 +212,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 json.dump({
                     "width": self.get_width(),
                     "height": self.get_height(),
-                    "paned_pos": self._paned.get_position(),
                 }, f)
         except OSError:
             pass
@@ -196,15 +224,16 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.set_application_name("ALT Booster")
         d.set_application_icon("altbooster")
         d.set_developer_name("PLAFON")
-        d.set_version("5.4-beta")
-        d.set_website("https://github.com/plafonlinux/altbooster")
+        d.set_version("5.5")
         d.set_issue_url("https://github.com/plafonlinux/altbooster/issues")
-        d.set_comments("Утилита настройки системы ALT Linux.\nGTK4 / Adwaita / Python 3 / Data-Driven UI")
+        d.set_comments("ALT Booster для ALT Linux\nGTK4 / Adwaita / Python 3 / Data-Driven UI")
         d.set_license_type(Gtk.License.MIT_X11)
         d.set_developers(["PLAFON"])
         d.set_copyright("© 2026 PLAFON")
         d.add_link("📖 ALT Zero", "https://plafon.gitbook.io/alt-zero")
         d.add_link("💻 GitHub", "https://github.com/plafonlinux/altbooster")
+        d.add_link("✈ Telegram", "https://t.me/plafonyoutube")
+        d.add_link("✈ Чат", "https://t.me/plafonchat")
         d.present(self)
 
     def _clear_log(self, *_):
@@ -233,10 +262,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
     # ── Лог ──────────────────────────────────────────
 
-    def _log(self, text):
-        if hasattr(self, '_log_scroll') and not self._log_scroll.get_visible():
-            self._on_log_drawer_toggle(self._log_drawer_btn)
+    _LOG_AUTO_HIDE_MS = 4000  # скрыть через N мс после последнего сообщения
 
+    def _log(self, text):
         end = self._buf.get_end_iter()
         self._buf.insert(end, text)
         end = self._buf.get_end_iter()
@@ -246,3 +274,20 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         else:
             self._buf.move_mark(mark, end)
         self._tv.scroll_mark_onscreen(mark)
+        self._log_auto_show()
+
+    def _log_auto_show(self):
+        if not self._log_scroll.get_visible():
+            self._log_scroll.set_visible(True)
+            self._log_drawer_btn.set_icon_name("pan-down-symbolic")
+            self._log_drawer_btn.set_tooltip_text("Свернуть терминал")
+        if hasattr(self, "_log_hide_timer_id") and self._log_hide_timer_id:
+            GLib.source_remove(self._log_hide_timer_id)
+        self._log_hide_timer_id = GLib.timeout_add(self._LOG_AUTO_HIDE_MS, self._log_auto_hide)
+
+    def _log_auto_hide(self):
+        self._log_hide_timer_id = None
+        self._log_scroll.set_visible(False)
+        self._log_drawer_btn.set_icon_name("pan-up-symbolic")
+        self._log_drawer_btn.set_tooltip_text("Развернуть терминал")
+        return False

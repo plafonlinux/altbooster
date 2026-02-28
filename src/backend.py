@@ -4,6 +4,7 @@ backend.py — точка входа для доступа к системным
 
 from system.privileges import (
     set_sudo_password,
+    get_sudo_password,
     sudo_check,
     run_privileged,
     run_privileged_sync,
@@ -36,6 +37,7 @@ from system.tweaks import (
 
 __all__ = [
     "set_sudo_password",
+    "get_sudo_password",
     "sudo_check",
     "run_privileged",
     "run_privileged_sync",

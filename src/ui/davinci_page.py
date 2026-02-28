@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import threading
 import urllib.request
+import zipfile
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -47,16 +48,36 @@ class DaVinciPage(Gtk.Box):
         group.set_title("Установка")
         body.append(group)
 
-        row = Adw.ActionRow()
-        row.set_title("DaVinci Resolve")
-        row.set_subtitle("epm play davinci-resolve")
-        row.add_prefix(make_icon("davinci-symbolic"))
-        self._inst_st = make_status_icon()
-        self._inst_btn = make_button("Установить")
-        self._inst_btn.connect("clicked", self._on_install)
-        self._inst_btn.set_sensitive(False)
-        row.add_suffix(make_suffix_box(self._inst_st, self._inst_btn))
-        group.add(row)
+        # Официальный установщик с сайта Blackmagic
+        self._dv_file_row = Adw.ActionRow()
+        self._dv_file_row.set_title("Официальный установщик")
+        self._dv_file_row.set_subtitle("Выберите .zip или .run скачанный с blackmagicdesign.com")
+        self._dv_file_row.add_prefix(make_icon("folder-download-symbolic"))
+        self._dv_installer_path = None
+
+        site_btn = Gtk.Button(label="Сайт")
+        site_btn.add_css_class("flat")
+        site_btn.set_valign(Gtk.Align.CENTER)
+        site_btn.set_tooltip_text("Открыть страницу загрузки на blackmagicdesign.com")
+        site_btn.connect("clicked", lambda _: Gio.AppInfo.launch_default_for_uri(
+            "https://www.blackmagicdesign.com/ru/products/davinciresolve", None))
+
+        pick_btn = Gtk.Button(label="Выбрать файл")
+        pick_btn.add_css_class("flat")
+        pick_btn.set_valign(Gtk.Align.CENTER)
+        pick_btn.connect("clicked", self._on_pick_dv_installer)
+
+        self._dv_file_st = make_status_icon()
+        self._dv_inst_from_file_btn = make_button("Установить")
+        self._dv_inst_from_file_btn.set_sensitive(False)
+        self._dv_inst_from_file_btn.connect("clicked", self._on_install_from_file)
+
+        suffix = Gtk.Box(spacing=6)
+        suffix.set_valign(Gtk.Align.CENTER)
+        for w in [site_btn, pick_btn, self._dv_file_st, self._dv_inst_from_file_btn]:
+            suffix.append(w)
+        self._dv_file_row.add_suffix(suffix)
+        group.add(self._dv_file_row)
 
         threading.Thread(
             target=lambda: GLib.idle_add(self._set_install_ui, backend.is_davinci_installed()),
@@ -71,7 +92,7 @@ class DaVinciPage(Gtk.Box):
         exp = Adw.ExpanderRow()
         exp.set_title("Первичная настройка")
         exp.set_subtitle("PostInstall, AMD Radeon, AAC кодек, Fairlight")
-        exp.set_expanded(False)
+        exp.set_expanded(True)
         group.add(exp)
 
         # PostInstall
@@ -209,15 +230,9 @@ class DaVinciPage(Gtk.Box):
 
     def _set_install_ui(self, ok):
         if ok:
-            set_status_ok(self._inst_st)
-            self._inst_btn.set_label("Установлен")
-            self._inst_btn.set_sensitive(False)
-            self._inst_btn.remove_css_class("suggested-action")
-            self._inst_btn.add_css_class("flat")
+            set_status_ok(self._dv_file_st)
         else:
-            clear_status(self._inst_st)
-            self._inst_btn.set_sensitive(True)
-            self._inst_btn.set_label("Установить")
+            clear_status(self._dv_file_st)
 
     def _set_amd_ui(self, ok):
         if ok:
@@ -257,21 +272,91 @@ class DaVinciPage(Gtk.Box):
 
     # ── Обработчики ──────────────────────────────────────────────────────────
 
-    def _on_install(self, _):
+    def _on_pick_dv_installer(self, _):
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Выберите установщик DaVinci Resolve (.zip или .run)")
+        f = Gtk.FileFilter()
+        f.set_name("Установщик DaVinci Resolve (*.zip, *.run)")
+        f.add_pattern("*.zip")
+        f.add_pattern("*.run")
+        store = Gio.ListStore.new(Gtk.FileFilter)
+        store.append(f)
+        dialog.set_filters(store)
+        w = self
+        while w.get_parent():
+            w = w.get_parent()
+        dialog.open(w, None, self._on_installer_file_picked)
+
+    def _on_installer_file_picked(self, dialog, result):
+        try:
+            f = dialog.open_finish(result)
+            if f:
+                self._dv_installer_path = f.get_path()
+                name = os.path.basename(self._dv_installer_path)
+                self._dv_file_row.set_subtitle(f"Выбран: {name}")
+                self._dv_inst_from_file_btn.set_sensitive(True)
+                clear_status(self._dv_file_st)
+        except Exception:
+            pass
+
+    def _on_install_from_file(self, _):
+        if not self._dv_installer_path:
+            return
         if backend.is_system_busy():
             self._log("\n⚠  Система занята.\n")
             return
-        self._inst_btn.set_sensitive(False)
-        self._inst_btn.set_label("…")
-        self._log("\n▶  Установка DaVinci Resolve...\n")
+        self._dv_inst_from_file_btn.set_sensitive(False)
+        self._dv_inst_from_file_btn.set_label("…")
+        clear_status(self._dv_file_st)
+        name = os.path.basename(self._dv_installer_path)
+        self._log(f"\n▶  Установка DaVinci Resolve из {name}...\n")
+        threading.Thread(target=self._do_install_from_file, daemon=True).start()
 
-        def on_done(ok):
-            self._set_install_ui(ok)
-            self._log("✔  DaVinci готов!\n" if ok else "✘  Ошибка\n")
-            if not ok:
-                self._reset_btn_later(self._inst_btn, "Установить")
+    def _do_install_from_file(self):
+        path = self._dv_installer_path
+        ext = os.path.splitext(path)[1].lower()
+        ok = False
+        try:
+            if ext == ".zip":
+                GLib.idle_add(self._log, "▶  Распаковка архива...\n")
+                with tempfile.TemporaryDirectory() as tmp:
+                    with zipfile.ZipFile(path) as zf:
+                        zf.extractall(tmp)
+                    run_files = [
+                        os.path.join(root, fname)
+                        for root, _, files in os.walk(tmp)
+                        for fname in files if fname.endswith(".run")
+                    ]
+                    if not run_files:
+                        GLib.idle_add(self._log, "✘  .run файл не найден в архиве\n")
+                        GLib.idle_add(self._dv_inst_from_file_btn.set_label, "Установить")
+                        GLib.idle_add(self._dv_inst_from_file_btn.set_sensitive, True)
+                        return
+                    run_path = run_files[0]
+                    GLib.idle_add(self._log, f"▶  Запуск {os.path.basename(run_path)} -i ...\n")
+                    os.chmod(run_path, 0o755)
+                    ok = backend.run_privileged_sync([run_path, "-i"], self._log)
+            elif ext == ".run":
+                os.chmod(path, 0o755)
+                GLib.idle_add(self._log, f"▶  Запуск {os.path.basename(path)} -i ...\n")
+                ok = backend.run_privileged_sync([path, "-i"], self._log)
+            else:
+                GLib.idle_add(self._log, "✘  Поддерживаются только .zip и .run\n")
+        except Exception as e:
+            GLib.idle_add(self._log, f"✘  Ошибка: {e}\n")
 
-        backend.run_epm(["epm", "play", "davinci-resolve"], self._log, on_done)
+        def _done():
+            if ok:
+                set_status_ok(self._dv_file_st)
+                self._dv_inst_from_file_btn.set_label("Установить")
+                self._dv_inst_from_file_btn.set_sensitive(True)
+                self._log("✔  DaVinci Resolve установлен!\n")
+            else:
+                set_status_error(self._dv_file_st)
+                self._dv_inst_from_file_btn.set_label("Повторить")
+                self._dv_inst_from_file_btn.set_sensitive(True)
+                self._log("✘  Ошибка установки. Проверьте лог.\n")
+        GLib.idle_add(_done)
 
     def _on_postinstall(self, _):
         self._post_btn.set_sensitive(False)

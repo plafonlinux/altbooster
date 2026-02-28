@@ -118,6 +118,10 @@
       "label": "Отключить поиск файлов",
       "desc": "Отключает службу индексации localsearch (экономит ресурсы)",
       "type": "user",
+      "check": {
+        "type": "path",
+        "value": "~/.config/systemd/user/localsearch-3.service"
+      },
       "cmd": [
         "bash",
         "-c",
@@ -126,8 +130,8 @@
     },
     {
       "id": "flatpak_home",
-      "icon": "folder-home-symbolic",
-      "label": "Flatpak: доступ к Home",
+      "icon": "folder-symbolic",
+      "label": "Выдать доступ к /home",
       "desc": "Разрешает всем Flatpak-приложениям доступ к домашней папке",
       "type": "user",
       "cmd": [

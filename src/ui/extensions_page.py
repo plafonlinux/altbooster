@@ -6,6 +6,8 @@ import json
 import shutil
 import subprocess
 import threading
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import gi
@@ -128,41 +130,57 @@ class ExtensionsPage(Gtk.Box):
         scroll, self._body = make_scrolled_page()
         self.append(scroll)
 
-        self._build_install_by_id_group()
+        self._build_search_group()
+        self._search_results_group = None
         self._installed_group = None
         self._build_installed_group()
 
-    # ── Секция: Установить по ID ──────────────────────────────────────────────
+    # ── Секция: Поиск и установка ─────────────────────────────────────────────
 
-    def _build_install_by_id_group(self):
-        group = Adw.PreferencesGroup()
-        group.set_title("Установить расширение")
-        group.set_description(
-            "Числовой ID с сайта extensions.gnome.org — например: 615, 1460, 3843"
-        )
-        self._body.append(group)
+    def _build_search_group(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+        self._body.append(box)
 
-        row = Adw.ActionRow()
-        row.set_title("ID расширения")
+        self._id_status = make_status_icon()
 
         self._id_entry = Gtk.Entry()
         self._id_entry.set_valign(Gtk.Align.CENTER)
-        self._id_entry.set_placeholder_text("Введите ID...")
-        self._id_entry.set_size_request(150, -1)
-        self._id_entry.connect("activate", self._on_install_by_id)
+        self._id_entry.set_placeholder_text("Поиск расширений или ID...")
+        self._id_entry.set_hexpand(True)
+        self._id_entry.set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, "edit-clear-symbolic")
+        self._id_entry.connect("icon-press", lambda e, p, *_: e.set_text("") if p == Gtk.EntryIconPosition.SECONDARY else None)
+        self._id_entry.connect("activate", self._on_search_activate)
+        self._id_entry.connect("notify::text", self._on_search_text_changed)
 
-        self._id_status = make_status_icon()
-        self._id_btn = make_button("Установить", width=110)
-        self._id_btn.connect("clicked", self._on_install_by_id)
+        self._id_btn = make_button("Найти", width=110)
+        self._id_btn.connect("clicked", self._on_search_activate)
 
-        row.add_suffix(make_suffix_box(self._id_status, self._id_entry, self._id_btn))
-        group.add(row)
+        box.append(self._id_status)
+        box.append(self._id_entry)
+        box.append(self._id_btn)
 
-    def _on_install_by_id(self, *_):
-        ext_id = self._id_entry.get_text().strip()
-        if not ext_id:
+    def _on_search_text_changed(self, entry, _):
+        """Скрывает результаты поиска, если поле ввода очищено."""
+        if not entry.get_text() and self._search_results_group:
+            self._body.remove(self._search_results_group)
+            self._search_results_group = None
+            clear_status(self._id_status)
+
+    def _on_search_activate(self, *_):
+        text = self._id_entry.get_text().strip()
+        if not text:
             return
 
+        if text.isdigit():
+            self._install_by_id(text)
+        else:
+            self._search_extensions(text)
+
+    def _install_by_id(self, ext_id):
         self._id_btn.set_sensitive(False)
         self._id_btn.set_label("…")
         clear_status(self._id_status)
@@ -197,10 +215,93 @@ class ExtensionsPage(Gtk.Box):
             else:
                 GLib.idle_add(set_status_error, self._id_status)
                 GLib.idle_add(self._log, f"✘  Ошибка: {r.stderr.strip()}\n")
-            GLib.idle_add(self._id_btn.set_label, "Установить")
+            GLib.idle_add(self._id_btn.set_label, "Найти")
             GLib.idle_add(self._id_btn.set_sensitive, True)
 
         threading.Thread(target=_do, daemon=True).start()
+
+    def _search_extensions(self, query):
+        self._id_btn.set_sensitive(False)
+        self._id_btn.set_label("Поиск...")
+        clear_status(self._id_status)
+        
+        # Очищаем предыдущие результаты
+        if self._search_results_group:
+            self._body.remove(self._search_results_group)
+            self._search_results_group = None
+
+        def _do():
+            try:
+                params = urllib.parse.urlencode({"search": query, "n_per_page": 10})
+                url = f"https://extensions.gnome.org/extension-query/?{params}"
+                req = urllib.request.Request(url, headers={"User-Agent": "ALTBooster"})
+                
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    data = json.loads(response.read().decode())
+                
+                results = data.get("extensions", [])
+                
+                # Получаем список установленных UUID
+                installed_uuids = set()
+                try:
+                    r = subprocess.run(["gnome-extensions", "list"], capture_output=True, text=True)
+                    if r.returncode == 0:
+                        installed_uuids = set(line.strip() for line in r.stdout.splitlines() if line.strip())
+                except Exception:
+                    pass
+
+                GLib.idle_add(self._display_search_results, results, installed_uuids)
+                
+            except Exception as e:
+                GLib.idle_add(self._log, f"✘ Ошибка поиска: {e}\n")
+                GLib.idle_add(set_status_error, self._id_status)
+            
+            GLib.idle_add(self._id_btn.set_label, "Найти")
+            GLib.idle_add(self._id_btn.set_sensitive, True)
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _display_search_results(self, results, installed_uuids=None):
+        if installed_uuids is None:
+            installed_uuids = set()
+        if not results:
+            set_status_error(self._id_status)
+            self._log("ℹ Ничего не найдено.\n")
+            return
+
+        set_status_ok(self._id_status)
+        
+        group = Adw.PreferencesGroup()
+        group.set_title(f"Результаты поиска ({len(results)})")
+        
+        # Вставляем группу сразу после группы поиска (индекс 1, т.к. 0 это группа поиска)
+        # Но так как мы используем append/remove, проще вставить перед installed_group
+        if self._installed_group:
+            # Находим виджет перед installed_group
+            prev = None
+            child = self._body.get_first_child()
+            while child:
+                if child == self._installed_group:
+                    break
+                prev = child
+                child = child.get_next_sibling()
+            self._body.insert_child_after(group, prev)
+        else:
+            self._body.append(group)
+            
+        self._search_results_group = group
+
+        for ext in results:
+            uuid = ext.get("uuid", "")
+            is_installed = uuid in installed_uuids
+            row = self._make_recommended_row(
+                uuid,
+                ext.get("name", "Без названия"),
+                ext.get("description", ""),
+                str(ext.get("pk", "")),
+                installed=is_installed
+            )
+            group.add(row)
 
     # ── Секция: Установленные расширения ──────────────────────────────────────
 
@@ -303,15 +404,23 @@ class ExtensionsPage(Gtk.Box):
         row.add_suffix(make_suffix_box(*suffix_widgets))
         return row
 
-    def _make_recommended_row(self, uuid, name, desc, install_id=None):
+    def _make_recommended_row(self, uuid, name, desc, install_id=None, installed=False):
         row = Adw.ActionRow()
         row.set_title(name)
         row.set_subtitle(desc)
         row.add_prefix(make_icon("application-x-addon-symbolic"))
 
         status = make_status_icon()
-        btn = make_button("Установить")
-        btn.connect("clicked", lambda _, u=uuid, b=btn, s=status, iid=install_id: self._on_install_ext(u, b, s, iid))
+        
+        if installed:
+            set_status_ok(status)
+            btn = make_button("Установлено")
+            btn.set_sensitive(False)
+            btn.add_css_class("flat")
+        else:
+            btn = make_button("Установить")
+            btn.connect("clicked", lambda _, u=uuid, b=btn, s=status, iid=install_id: self._on_install_ext(u, b, s, iid))
+            
         row.add_suffix(make_suffix_box(status, btn))
         return row
 

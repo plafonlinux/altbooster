@@ -7,6 +7,7 @@ from __future__ import annotations
 import getpass
 import grp
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -91,6 +92,8 @@ def check_app_installed(source: dict) -> bool:
         return subprocess.run(["rpm", "-q", value], capture_output=True).returncode == 0
     if kind == "path":
         return os.path.exists(os.path.expanduser(value))
+    if kind == "which":
+        return shutil.which(value) is not None
     return False
 
 def is_vm_dirty_optimized() -> bool:
