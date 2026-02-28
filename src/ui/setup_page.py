@@ -29,19 +29,49 @@ class SetupPage(Gtk.Box):
         self._build_system_group(body)
         self._build_filemanager_group(body)
         self._build_keyboard_group(body)
-        
-        config.check_update(self._on_update_found)
+
+        self.check_for_updates()
+
+    def check_for_updates(self, manual=False):
+        """Проверяет наличие обновлений и показывает баннер или диалог."""
+        if manual:
+            self._log("\n▶  Проверка обновлений...\n")
+
+        def on_result(version, url):
+            if not version:
+                if manual: GLib.idle_add(self._show_no_update_dialog)
+                return
+            try:
+                current = [int(x) for x in config.VERSION.split(".")]
+                latest = [int(x) for x in version.split(".")]
+                if latest <= current:
+                    if manual: GLib.idle_add(self._show_no_update_dialog)
+                    return
+            except ValueError:
+                if manual: GLib.idle_add(self._show_no_update_dialog)
+                return
+
+            self._on_update_found(version, url)
+
+        config.check_update(on_result)
+
+    def _show_no_update_dialog(self):
+        self._log("✔  Новых обновлений не найдено.\n")
+        dialog = Adw.AlertDialog(
+            heading="Обновлений не найдено",
+            body="У вас установлена последняя версия ALT Booster.",
+        )
+        dialog.add_response("ok", "OK")
+        dialog.set_default_response("ok")
+        dialog.present(self.get_root())
 
     def _on_update_found(self, version, url):
-        if not version:
-            return
-        try:
-            current = [int(x) for x in config.VERSION.split(".")]
-            latest = [int(x) for x in version.split(".")]
-            if latest <= current:
-                return
-        except ValueError:
-            return
+        # Проверяем, не показан ли уже баннер
+        child = self._body.get_first_child()
+        while child:
+            if isinstance(child, Adw.PreferencesGroup) and child.get_title() == "Доступно обновление":
+                return  # Баннер уже есть
+            child = child.get_next_sibling()
 
         GLib.idle_add(self._show_update_banner, version, url)
 

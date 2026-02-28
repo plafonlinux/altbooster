@@ -57,7 +57,6 @@ class AppsPage(Gtk.Box):
         # Поиск пакетов (Center)
         self._pkg_search_groups = []
         search_box = Gtk.Box(spacing=6)
-        search_box.set_halign(Gtk.Align.CENTER)
 
         self._branch_combo = Gtk.DropDown()
         self._branch_combo.set_model(Gtk.StringList.new(["p11", "Sisyphus", "epm play", "Flathub"]))
@@ -68,8 +67,8 @@ class AppsPage(Gtk.Box):
         search_box.append(self._branch_combo)
 
         self._search_entry = Gtk.Entry()
+        self._search_entry.set_hexpand(True)
         self._search_entry.set_placeholder_text("Поиск пакетов ALT...")
-        self._search_entry.set_width_chars(22)
         self._search_entry.set_valign(Gtk.Align.CENTER)
         self._search_entry.connect("activate", self._on_pkg_search)
         self._search_entry.connect("notify::text", self._on_search_text_changed)
@@ -77,10 +76,6 @@ class AppsPage(Gtk.Box):
 
         self._search_status = make_status_icon()
         search_box.append(self._search_status)
-
-        self._search_btn = make_button("Найти", width=90)
-        self._search_btn.connect("clicked", self._on_pkg_search)
-        search_box.append(self._search_btn)
 
         self._btns_box.set_center_widget(search_box)
 
@@ -98,6 +93,21 @@ class AppsPage(Gtk.Box):
         self._load_and_build()
         GLib.idle_add(self._refresh_btn_all)
 
+    def _update_reset_button_ui(self, is_default):
+        """Обновляет кнопку сброса в зависимости от того, стандартный ли список."""
+        if is_default:
+            self._btn_reset.set_label("✓ Список по умолчанию")
+            self._btn_reset.set_tooltip_text("Список приложений соответствует стандартному")
+            self._btn_reset.remove_css_class("destructive-action")
+            self._btn_reset.add_css_class("success")
+            self._btn_reset.set_sensitive(False)
+        else:
+            self._btn_reset.set_label("Вернуть стандартный список")
+            self._btn_reset.set_tooltip_text("Сбросить список к стандартному (обновить)")
+            self._btn_reset.remove_css_class("success")
+            self._btn_reset.add_css_class("destructive-action")
+            self._btn_reset.set_sensitive(True)
+
     def _on_search_text_changed(self, entry, _):
         if not entry.get_text():
             self._clear_pkg_search_results()
@@ -106,8 +116,8 @@ class AppsPage(Gtk.Box):
         text = self._search_entry.get_text().strip()
         if not text:
             return
-        self._search_btn.set_sensitive(False)
-        self._search_btn.set_label("Поиск...")
+        self._search_entry.set_sensitive(False)
+        self._branch_combo.set_sensitive(False)
         clear_status(self._search_status)
         self._clear_pkg_search_results()
         branch_map = {0: "p11", 1: "sisyphus", 2: "epm_play", 3: "flathub"}
@@ -175,9 +185,9 @@ class AppsPage(Gtk.Box):
                 except Exception:
                     pass
             GLib.idle_add(self._display_pkg_results, fallback, True)
-
-        GLib.idle_add(self._search_btn.set_label, "Найти")
-        GLib.idle_add(self._search_btn.set_sensitive, True)
+        
+        GLib.idle_add(self._search_entry.set_sensitive, True)
+        GLib.idle_add(self._branch_combo.set_sensitive, True)
 
     def _fetch_flathub(self, query):
         body = json.dumps({"query": query, "locale": "ru"}).encode()
@@ -453,33 +463,51 @@ class AppsPage(Gtk.Box):
 
     def _load_and_build(self):
         self._clear_body()
+        is_default = False
         try:
             # Если пользовательского файла нет, копируем системный
             if not self._json_path.exists():
                 if self._system_json_path.exists():
                     os.makedirs(self._json_path.parent, exist_ok=True)
                     shutil.copy(self._system_json_path, self._json_path)
+                    is_default = True
                 else:
                     self._log(f"✘ Ошибка: Файл конфигурации не найден: {self._system_json_path}\n")
                     self._data = {"groups": []}
+                    self._update_reset_button_ui(False)
                     self._build()
                     return
+
+            # Загружаем оба файла для сравнения и работы
+            user_data = {}
+            system_data = {}
             with open(self._json_path, encoding="utf-8") as f:
-                self._data = json.load(f)
+                user_data = json.load(f)
+            if self._system_json_path.exists():
+                with open(self._system_json_path, encoding="utf-8") as f_sys:
+                    system_data = json.load(f_sys)
+            if user_data == system_data:
+                is_default = True
+
+            self._data = user_data
+
             if not isinstance(self._data, dict):
                 raise ValueError("JSON должен быть объектом (dict)")
             # Создаём бэкап при первой успешной загрузке
             backup_path = self._json_path.with_suffix(".json.bak")
             if not backup_path.exists():
                 shutil.copy(self._json_path, backup_path)
+            self._update_reset_button_ui(is_default)
             self._build()
         except json.JSONDecodeError as e:
             self._log(f"✘ Ошибка синтаксиса в apps.json: {e}\n   Проверьте строку {e.lineno}, позицию {e.colno}.\n")
             self._data = {"groups": []}
+            self._update_reset_button_ui(False)
             self._add_error_widgets()
         except (OSError, ValueError) as e:
             self._log(f"✘ Ошибка загрузки приложений: {e}\n")
             self._data = {"groups": []}
+            self._update_reset_button_ui(False)
 
     def _build(self):
         groups = self._data.get("groups", [])
@@ -726,10 +754,10 @@ class AppsPage(Gtk.Box):
             self._btn_all.add_css_class("success")
             self._btn_all.remove_css_class("flat")
         else:
-            self._btn_all.set_label("✅ Все приложения установлены")
+            self._btn_all.set_label("✓ Все приложения установлены")
             self._btn_all.remove_css_class("suggested-action")
-            self._btn_all.remove_css_class("success")
-            self._btn_all.add_css_class("flat")
+            self._btn_all.add_css_class("success")
+            self._btn_all.remove_css_class("flat")
 
     def run_all_external(self, btn):
         dialog = Adw.AlertDialog(
