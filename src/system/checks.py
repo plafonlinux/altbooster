@@ -20,7 +20,7 @@ def is_sudo_enabled() -> bool:
     # Работает если в системе ещё действует кэш sudo-сессии.
     try:
         env = os.environ.copy()
-        env["LANG"] = "C"
+        env["LC_ALL"] = "C"
         res = subprocess.run(["sudo", "-n", "true"], capture_output=True, text=True, env=env, timeout=2)
         if res.returncode == 0:
             return True
@@ -37,12 +37,15 @@ def is_sudo_enabled() -> bool:
     password = get_sudo_password()
     if password:
         try:
+            env = os.environ.copy()
+            env["LC_ALL"] = "C"
             res = subprocess.run(
                 ["sudo", "-S", "/usr/sbin/control", "sudowheel"],
                 input=password + "\n",
                 capture_output=True,
                 text=True,
                 timeout=2,
+                env=env,
             )
             out = (res.stdout + res.stderr).lower()
             if "enabled" in out or "wheelonly" in out:
@@ -58,7 +61,9 @@ def is_sudo_enabled() -> bool:
 
 def is_flathub_enabled() -> bool:
     """Проверяет, включен ли репозиторий Flathub."""
-    result = subprocess.run(["flatpak", "remotes"], capture_output=True, text=True)
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"
+    result = subprocess.run(["flatpak", "remotes"], capture_output=True, text=True, env=env)
     return "flathub" in result.stdout.lower()
 
 def is_fstrim_enabled() -> bool:
