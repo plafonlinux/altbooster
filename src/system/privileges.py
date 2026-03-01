@@ -27,6 +27,7 @@ OnDone = Callable[[bool], None]
 
 _sudo_password: str | None = None
 _sudo_lock = threading.Lock()
+_sudo_nopass: bool = False  # True когда sudo работает без пароля (NOPASSWD / кэш)
 
 
 def set_sudo_password(pw: str) -> None:
@@ -39,6 +40,11 @@ def get_sudo_password() -> str:
     """Возвращает сохранённый sudo-пароль."""
     with _sudo_lock:
         return _sudo_password or ""
+
+def set_sudo_nopass(enabled: bool) -> None:
+    """Переключает режим sudo без пароля (для NOPASSWD или кэшированной сессии)."""
+    global _sudo_nopass
+    _sudo_nopass = enabled
 
 # ── pkexec режим ──────────────────────────────────────────────────────────────
 
@@ -75,16 +81,91 @@ def set_pkexec_mode(enabled: bool) -> None:
     global _use_pkexec
     _use_pkexec = enabled
 
+def start_pkexec_shell() -> tuple[bool, bool]:
+    """Запускает и верифицирует постоянный pkexec bash-шелл.
+
+    Вызывается из диалога подтверждения pkexec. Блокирует вызывающий поток
+    до тех пор, пока пользователь не ответит на диалог polkit (или не истечёт
+    60-секундный таймаут).
+
+    Возвращает:
+        (ok, is_cancel)
+        ok        — шелл запущен и ответил на тест
+        is_cancel — пользователь закрыл диалог polkit (returncode == 126)
+    """
+    global _pkexec_shell_proc
+
+    with _pkexec_shell_lock:
+        # Шелл уже работает — ничего не нужно делать
+        if _pkexec_shell_proc and _pkexec_shell_proc.poll() is None:
+            return True, False
+
+        try:
+            proc = subprocess.Popen(
+                ["pkexec", "bash"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=0,
+            )
+        except Exception:
+            return False, False
+
+        # Отправляем тестовую команду с уникальным маркером
+        test_marker = f"---READY-{uuid.uuid4()}---"
+        try:
+            proc.stdin.write(f'echo "{test_marker}"\n')
+            proc.stdin.flush()
+        except OSError:
+            proc.terminate()
+            return False, False
+
+        # Читаем stdout в отдельном потоке, чтобы задать жёсткий таймаут
+        found: list[bool | None] = [None]
+
+        def _reader() -> None:
+            try:
+                while True:
+                    line = proc.stdout.readline()
+                    if not line:            # EOF — процесс завершился
+                        found[0] = False
+                        return
+                    if test_marker in line:
+                        found[0] = True
+                        return
+            except Exception:
+                found[0] = False
+
+        reader = threading.Thread(target=_reader, daemon=True)
+        reader.start()
+        reader.join(timeout=60)
+
+        if found[0] is True:
+            _pkexec_shell_proc = proc
+            return True, False
+
+        # Таймаут или ошибка — завершаем процесс
+        is_cancel = False
+        if proc.poll() is not None:
+            is_cancel = (proc.returncode == 126)
+        try:
+            proc.terminate()
+            proc.wait(timeout=3)
+        except Exception:
+            proc.kill()
+        return False, is_cancel
+
 def sudo_check(pw: str) -> bool:
     """Проверяет корректность sudo-пароля."""
     try:
         result = subprocess.run(
-            ["sudo", "-k", "-S", "-v"],
+            ["sudo", "-k", "-S", "id", "-u"],
             input=pw + "\n",
             capture_output=True,
             text=True,
         )
-        return result.returncode == 0
+        return result.returncode == 0 and result.stdout.strip() == "0"
     except (OSError, subprocess.SubprocessError):
         return False
 
@@ -251,21 +332,29 @@ def run_privileged(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None
         if check_lock:
             _wait_for_apt_lock(on_line)
 
-        proc = subprocess.Popen(
-            ["sudo", "-S", *cmd],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        if proc.stdin:
-            try:
-                proc.stdin.write(password + "\n")
-                proc.stdin.flush()
-            except BrokenPipeError:
-                pass
-            proc.stdin.close()
+        if _sudo_nopass:
+            proc = subprocess.Popen(
+                ["sudo", "-n", *cmd],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        else:
+            proc = subprocess.Popen(
+                ["sudo", "-S", *cmd],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            if proc.stdin:
+                try:
+                    proc.stdin.write(password + "\n")
+                    proc.stdin.flush()
+                except BrokenPipeError:
+                    pass
+                proc.stdin.close()
 
         def _drain_stderr() -> None:
             if not proc.stderr:
@@ -331,37 +420,47 @@ def run_epm(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
         return
 
     def _worker() -> None:
-        password = get_sudo_password()
-        env = os.environ.copy()
+        _wait_for_apt_lock(on_line)
 
-        fd, askpass_path = tempfile.mkstemp(suffix=".sh")
-        with os.fdopen(fd, "w") as script:
-            script.write("#!/bin/sh\n")
-            script.write(f"echo {password!r}\n")
-
-        # Устанавливаем права 0700 (rwx------)
-        os.chmod(askpass_path, stat.S_IRWXU)
-        env["SUDO_ASKPASS"] = askpass_path
-
+        askpass_path: str | None = None
         try:
-            _wait_for_apt_lock(on_line)
-            proc = subprocess.Popen(
-                ["sudo", "-A", *cmd],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,
-                text=True,
-                env=env,
-            )
+            if _sudo_nopass:
+                proc = subprocess.Popen(
+                    ["sudo", "-n", *cmd],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL,
+                    text=True,
+                )
+            else:
+                password = get_sudo_password()
+                env = os.environ.copy()
+                fd, askpass_path = tempfile.mkstemp(suffix=".sh")
+                with os.fdopen(fd, "w") as script:
+                    script.write("#!/bin/sh\n")
+                    script.write(f"echo {password!r}\n")
+                # Устанавливаем права 0700 (rwx------)
+                os.chmod(askpass_path, stat.S_IRWXU)
+                env["SUDO_ASKPASS"] = askpass_path
+                proc = subprocess.Popen(
+                    ["sudo", "-A", *cmd],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL,
+                    text=True,
+                    env=env,
+                )
+
             if proc.stdout:
                 for line in proc.stdout:
                     GLib.idle_add(on_line, line)
             proc.wait()
             GLib.idle_add(on_done, proc.returncode == 0)
         finally:
-            try:
-                os.unlink(askpass_path)
-            except OSError:
-                pass
+            if askpass_path:
+                try:
+                    os.unlink(askpass_path)
+                except OSError:
+                    pass
 
     threading.Thread(target=_worker, daemon=True).start()

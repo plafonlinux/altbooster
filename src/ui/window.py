@@ -272,9 +272,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             except (KeyError, ImportError, OSError):
                 pass
 
-            # Быстрый путь: sudo работает без пароля (кэш сессии)
+            # Быстрый путь: sudo работает без пароля (кэш сессии или NOPASSWD)
             try:
                 if subprocess.run(["sudo", "-n", "true"], capture_output=True, timeout=1).returncode == 0:
+                    backend.set_sudo_nopass(True)
                     GLib.idle_add(self._auth_ok)
                     return
             except Exception:
@@ -381,6 +382,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def _reset_password(self, *_):
         clear_saved_password()
         backend.set_sudo_password(None)
+        backend.set_sudo_nopass(False)
         backend.set_pkexec_mode(False)
         # Сбрасываем кэш sudo, чтобы гарантировать запрос пароля
         subprocess.run(["sudo", "-k"])
