@@ -15,7 +15,7 @@ import config
 import backend
 from dynamic_page import DynamicPage
 from ui.common import load_module
-from ui.dialogs import PasswordDialog, get_saved_password
+from ui.dialogs import PasswordDialog, get_saved_password, clear_saved_password
 from ui.setup_page import SetupPage
 from ui.apps_page import AppsPage
 from ui.extensions_page import ExtensionsPage
@@ -95,6 +95,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         menu.append("О приложении", "win.about")
         menu.append("Очистить лог", "win.clear_log")
         menu.append("Очистить кэш", "win.reset_state")
+        menu.append("Сбросить сохраненный пароль", "win.reset_password")
         mb = Gtk.MenuButton(); mb.set_icon_name("open-menu-symbolic"); mb.set_menu_model(menu)
         header.pack_end(mb)
         
@@ -103,6 +104,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             ("about", self._show_about),
             ("clear_log", self._clear_log),
             ("reset_state", self._reset_state),
+            ("reset_password", self._reset_password),
         ]
         for name, cb in actions:
             a = Gio.SimpleAction.new(name, None)
@@ -121,7 +123,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._log_container.append(sep)
 
         # 1. Статус
-        self._status_label = Gtk.Label(label="Готов к работе")
+        self._status_label = Gtk.Label(label="Ожидание авторизации...")
         self._status_label.set_halign(Gtk.Align.START)
         self._status_label.set_margin_start(12)
         self._status_label.set_margin_top(12)
@@ -221,6 +223,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._maint.set_sensitive_all(True)
         self._maint.refresh_checks()
         self._log("👋 Добро пожаловать в ALT Booster. С чего начнём?\n")
+        self._status_label.set_label("Готов к работе")
 
     # ── Настройки окна ───────────────────────────────────────────────────────
 
@@ -289,8 +292,12 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 self._log("🔄 Кэш статусов очищен.\n") # <--- Текст в терминале
                 GLib.timeout_add(1500, self.close)
 
-        d.connect("response", _on_response)
-        d.present(self)
+    def _reset_password(self, *_):
+        clear_saved_password()
+        backend.set_sudo_password(None)
+        self._log("🔑 Сохраненный пароль сброшен.\n")
+        self.add_toast(Adw.Toast(title="Пароль сброшен"))
+
 
     # ── Лог ──────────────────────────────────────────
 
