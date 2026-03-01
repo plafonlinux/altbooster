@@ -30,6 +30,18 @@ class SetupPage(Gtk.Box):
         self._build_filemanager_group(body)
         self._build_keyboard_group(body)
 
+    def _is_sisyphus(self):
+        # Проверяем и altlinux-release, и os-release (стандарт freedesktop)
+        for path in ["/etc/altlinux-release", "/etc/os-release"]:
+            try:
+                if os.path.exists(path):
+                    with open(path, encoding="utf-8") as f:
+                        if "Sisyphus" in f.read():
+                            return True
+            except Exception:
+                continue
+        return False
+
     def check_for_updates(self, manual=False):
         """Проверяет наличие обновлений и показывает баннер или диалог."""
         if manual:
@@ -292,18 +304,31 @@ class SetupPage(Gtk.Box):
             except Exception:
                 return False
 
+        # Настройка f3d в зависимости от ветки
+        is_sisyphus = self._is_sisyphus()
+        f3d_btn_label = "Установить" if is_sisyphus else "Только Sisyphus"
+
         rows = [
             ("system-file-manager-symbolic", "Настройки Nautilus", "Сортировка папок, создание ссылок, подписи файлов", "Применить", self._on_nautilus, _check_nautilus, "setting_nautilus", "Применены", self._on_nautilus_undo, "Сбросить"),
             ("drive-harddisk-symbolic", "Индикатор копирования", "Адекватный прогресс-бар копирования (vm.dirty)", "Исправить", self._on_vm_dirty, backend.is_vm_dirty_optimized, "setting_vm_dirty", "Исправлено", self._on_vm_dirty_undo, "Сбросить"),
             ("security-high-symbolic", "Запуск от администратора", "Пункт «Открыть как администратор» (nautilus-admin)", "Установить", self._on_install_nautilus_admin, lambda: backend.check_app_installed({"check": ["rpm", "nautilus-admin-gtk4"]}), "app_nautilus_admin", "Установлено", self._on_remove_nautilus_admin, "Удалить", "user-trash-symbolic"),
             ("view-reveal-symbolic", "Предпросмотр (Sushi)", "Быстрый просмотр файлов по пробелу", "Установить", self._on_install_sushi, lambda: backend.check_app_installed({"check": ["rpm", "sushi"]}), "app_sushi", "Установлено", self._on_remove_sushi, "Удалить", "user-trash-symbolic"),
-            ("image-x-generic-symbolic", "3D превью (f3d) (в ожидании p11)", "Визуализация 3D моделей в Nautilus", "Установить", self._on_install_f3d, lambda: backend.check_app_installed({"check": ["rpm", "f3d"]}), "app_f3d", "Установлено", self._on_remove_f3d, "Удалить", "user-trash-symbolic"),
+            ("image-x-generic-symbolic", "3D превью (f3d)", "Визуализация 3D моделей в Nautilus", f3d_btn_label, self._on_install_f3d, lambda: backend.check_app_installed({"check": ["rpm", "f3d"]}), "app_f3d", "Установлено", self._on_remove_f3d, "Удалить", "user-trash-symbolic"),
         ]
         
         self._r_naut, self._r_dirty, self._r_naut_admin, self._r_sushi, self._r_f3d = [
             SettingRow(*r) for r in rows
         ]
         
+        # Если не Sisyphus, блокируем кнопку установки f3d
+        if not is_sisyphus:
+            orig_set_ui = self._r_f3d._set_ui
+            def _disabled_set_ui(enabled):
+                orig_set_ui(enabled)
+                if not enabled:
+                    self._r_f3d._btn.set_sensitive(False)
+            self._r_f3d._set_ui = _disabled_set_ui
+
         for r in (self._r_naut, self._r_dirty, self._r_naut_admin, self._r_sushi, self._r_f3d):
             group.add(r)
 
@@ -431,20 +456,33 @@ class SetupPage(Gtk.Box):
                 if hasattr(win, "stop_progress"): win.stop_progress(ok)
                 GLib.idle_add(self._ask_f3d_task_id, row)
 
-        def _on_update_done(ok):
+        def _retry_install_after_update(ok):
             if not ok:
                 self._log("✘  Ошибка обновления индексов.\n")
                 _final_done(False)
                 return
-            self._log("\n▶  Повторная попытка установки f3d...\n")
+            self._log("\n▶  Повторная попытка установки f3d (после update)...\n")
             backend.run_epm(cmd, self._log, _final_done)
+
+        def _retry_install_after_dedup(ok):
+            # Если dedup помог (или даже если нет), пробуем установить.
+            # Если снова ошибка — идем на update.
+            def _after_dedup_install(ok2):
+                if ok2:
+                    _final_done(True)
+                else:
+                    self._log("\n⚠  Ошибка. Пробую обновить индексы (epm update)...\n")
+                    backend.run_epm(["epm", "update"], self._log, _retry_install_after_update)
+            
+            self._log("\n▶  Повторная попытка установки f3d (после dedup)...\n")
+            backend.run_epm(cmd, self._log, _after_dedup_install)
 
         def _first_attempt_done(ok):
             if ok:
                 _final_done(True)
             else:
-                self._log("\n⚠  Ошибка установки. Пробую обновить индексы (epm update)...\n")
-                backend.run_epm(["epm", "update"], self._log, _on_update_done)
+                self._log("\n⚠  Ошибка установки. Пробую исправить дубликаты (apt-get dedup)...\n")
+                backend.run_privileged(["apt-get", "dedup", "-y"], self._log, _retry_install_after_dedup)
 
         backend.run_epm(cmd, self._log, _first_attempt_done)
 

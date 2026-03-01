@@ -98,6 +98,10 @@ def _apt_dedup_filter(on_line: OnLine) -> OnLine:
         "RPM:",
         "To disable these warnings completely set",
         "You may want to run apt-get update to correct",
+        "В Вашей системе установлено несколько версий пакета",
+        "Этот пакет не может быть обновлён обычным путём",
+        "оставите только одну его версию",
+        "Чтобы оставить установленными несколько версий",
     )
     in_warn = [False]
 
