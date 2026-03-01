@@ -208,17 +208,21 @@ class ExtensionsPage(Gtk.Box):
                         pip_cmd = candidate
                         break
                 if pip_cmd is None:
-                    def _fail_no_pip():
-                        self._log(
-                            "✘  pip не найден. Установите вручную:\n"
-                            "   sudo apt-get install pip python3-module-pip\n"
-                            "   pip install gnome-extensions-cli\n"
-                        )
-                        if hasattr(win, "stop_progress"): win.stop_progress(False)
-                        set_status_error(self._id_status)
-                        self._id_entry.set_sensitive(True)
-                    GLib.idle_add(_fail_no_pip)
-                    return
+                    GLib.idle_add(self._log, "▶  pip не найден. Устанавливаю системные пакеты...\n")
+                    if backend.run_privileged_sync(["apt-get", "install", "-y", "pip", "python3-module-pip"], self._log):
+                        for candidate in ("pip3", "pip"):
+                            if shutil.which(candidate):
+                                pip_cmd = candidate
+                                break
+
+                    if pip_cmd is None:
+                        def _fail_no_pip():
+                            self._log("✘  Не удалось установить pip. Проверьте интернет или репозитории.\n")
+                            if hasattr(win, "stop_progress"): win.stop_progress(False)
+                            set_status_error(self._id_status)
+                            self._id_entry.set_sensitive(True)
+                        GLib.idle_add(_fail_no_pip)
+                        return
                 r_pip = subprocess.run(
                     [pip_cmd, "install", "gnome-extensions-cli", "--user"],
                     capture_output=True, text=True,
@@ -518,11 +522,15 @@ class ExtensionsPage(Gtk.Box):
                         pip_cmd = candidate
                         break
                 if pip_cmd is None:
-                    GLib.idle_add(self._log,
-                        "✘  pip не найден. Установите вручную:\n"
-                        "   sudo apt-get install pip python3-module-pip\n"
-                        "   pip install gnome-extensions-cli\n"
-                    )
+                    GLib.idle_add(self._log, "▶  pip не найден. Устанавливаю системные пакеты...\n")
+                    if backend.run_privileged_sync(["apt-get", "install", "-y", "pip", "python3-module-pip"], self._log):
+                        for candidate in ("pip3", "pip"):
+                            if shutil.which(candidate):
+                                pip_cmd = candidate
+                                break
+
+                if pip_cmd is None:
+                    GLib.idle_add(self._log, "✘  Не удалось установить pip.\n")
                     GLib.idle_add(set_status_error, status)
                     GLib.idle_add(btn.set_label, "Повторить")
                     GLib.idle_add(btn.set_sensitive, True)

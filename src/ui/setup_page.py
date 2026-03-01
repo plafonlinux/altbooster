@@ -305,7 +305,7 @@ class SetupPage(Gtk.Box):
         body.append(sys_group)
         
         sys_rows = [
-            ("security-high-symbolic",             "Включить sudo",               "control sudowheel enabled",                     "Активировать", self._on_sudo,           lambda: False,                         "setting_sudo", "Активировано", self._on_sudo_undo, "Отключить"),
+            ("security-high-symbolic",             "Включить sudo",               "control sudowheel enabled",                     "Активировать", self._on_sudo,           None,                                  "setting_sudo", "Активировано", self._on_sudo_undo, "Отключить"),
             ("view-refresh-symbolic",    "Автообновление GNOME Software",      "Отключает фоновую загрузку в Центре приложений", "Отключить",    self._on_gnome_software_updates, lambda: backend.gsettings_get("org.gnome.software", "download-updates") == "false", "setting_gnome_software_updates", "Выключено", self._on_gnome_software_updates_undo, "Включить"),
             ("media-flash-symbolic",               "Автоматический TRIM",         "Включает еженедельную очистку блоков SSD",      "Включить",     self._on_trim_timer,           backend.is_fstrim_enabled,             "setting_trim_auto", "Активировано", self._on_trim_timer_undo, "Отключить"),
             ("document-open-recent-symbolic",      "Лимиты журналов",             "SystemMaxUse=100M и сжатие в journald.conf",    "Настроить",    self._on_journal_limit,  backend.is_journal_optimized,          "setting_journal_opt", "Активировано", self._on_journal_limit_undo, "Сбросить"),
