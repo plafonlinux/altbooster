@@ -297,7 +297,7 @@ class SetupPage(Gtk.Box):
             ("drive-harddisk-symbolic", "Индикатор копирования", "Адекватный прогресс-бар копирования (vm.dirty)", "Исправить", self._on_vm_dirty, backend.is_vm_dirty_optimized, "setting_vm_dirty", "Исправлено", self._on_vm_dirty_undo, "Сбросить"),
             ("security-high-symbolic", "Запуск от администратора", "Пункт «Открыть как администратор» (nautilus-admin)", "Установить", self._on_install_nautilus_admin, lambda: backend.check_app_installed({"check": ["rpm", "nautilus-admin-gtk4"]}), "app_nautilus_admin", "Установлено", self._on_remove_nautilus_admin, "Удалить", "user-trash-symbolic"),
             ("view-reveal-symbolic", "Предпросмотр (Sushi)", "Быстрый просмотр файлов по пробелу", "Установить", self._on_install_sushi, lambda: backend.check_app_installed({"check": ["rpm", "sushi"]}), "app_sushi", "Установлено", self._on_remove_sushi, "Удалить", "user-trash-symbolic"),
-            ("image-x-generic-symbolic", "3D превью (f3d)", "Визуализация 3D моделей в Nautilus", "Установить", self._on_install_f3d, lambda: backend.check_app_installed({"check": ["rpm", "f3d"]}), "app_f3d", "Установлено", self._on_remove_f3d, "Удалить", "user-trash-symbolic"),
+            ("image-x-generic-symbolic", "3D превью (f3d) (в ожидании p11)", "Визуализация 3D моделей в Nautilus", "Установить", self._on_install_f3d, lambda: backend.check_app_installed({"check": ["rpm", "f3d"]}), "app_f3d", "Установлено", self._on_remove_f3d, "Удалить", "user-trash-symbolic"),
         ]
         
         self._r_naut, self._r_dirty, self._r_naut_admin, self._r_sushi, self._r_f3d = [
@@ -546,11 +546,23 @@ class SetupPage(Gtk.Box):
         self._log("\n▶  Включение sudo...\n")
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress("Включение sudo...")
-        backend.run_privileged(
-            ["control", "sudowheel", "enabled"],
-            lambda _: None,
-            lambda ok: (row.set_done(ok), self._log("✔  sudo включён!\n" if ok else "✘  Ошибка\n"), win.stop_progress(ok) if hasattr(win, "stop_progress") else None),
-        )
+
+        def _do():
+            # Используем pkexec, так как sudo может быть еще не настроен (чистая установка).
+            # pkexec запросит пароль root или администратора через GUI.
+            cmd = ["pkexec", "/usr/sbin/control", "sudowheel", "enabled"]
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True)
+                ok = (res.returncode == 0)
+            except Exception:
+                ok = False
+
+            GLib.idle_add(row.set_done, ok)
+            GLib.idle_add(self._log, "✔  sudo включён (через pkexec)!\n" if ok else "✘  Ошибка. Попробуйте в терминале: su - и control sudowheel enabled\n")
+            if hasattr(win, "stop_progress"):
+                GLib.idle_add(win.stop_progress, ok)
+
+        threading.Thread(target=_do, daemon=True).start()
 
     def _on_sudo_undo(self, row):
         row.set_working()

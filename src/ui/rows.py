@@ -243,7 +243,7 @@ class AppRow(Adw.ActionRow):
                 else:
                     btn.add_css_class("flat") # Бледный (не выбран)
                 
-                btn.connect("clicked", lambda b, idx=i: self.set_selected_source(idx))
+                btn.connect("clicked", lambda _, idx=i: self.set_selected_source(idx))
                 self._badges_box.append(btn)
 
     def set_selected_source(self, idx):
@@ -498,7 +498,17 @@ class TaskRow(Adw.ActionRow):
             try:
                 ok = needle in open(path, encoding="utf-8", errors="ignore").read()
             except OSError:
-                ok = False
+                pw = backend.get_sudo_password()
+                if pw:
+                    try:
+                        res = subprocess.run(
+                            ["sudo", "-S", "cat", path],
+                            input=pw + "\n",
+                            capture_output=True, text=True,
+                        )
+                        ok = needle in res.stdout
+                    except Exception:
+                        ok = False
 
         if ok:
             GLib.idle_add(self._mark_done_init)
@@ -574,13 +584,12 @@ class TaskRow(Adw.ActionRow):
             self._btn.remove_css_class("suggested-action")
             self._btn.add_css_class("flat")
 
-            # Если у задачи есть проверка (это фикс/настройка), то после успеха блокируем кнопку
+            # Если у задачи есть проверка, перепроверяем реальное состояние
             if "check" in self._task:
-                self._btn.set_label("Применено")
-                self._btn.set_sensitive(False)
                 self._on_log(f"✔  Готово: {self._task['label']}\n")
                 if hasattr(win, "stop_progress"): win.stop_progress(ok)
                 self._on_progress()
+                threading.Thread(target=self._initial_check, daemon=True).start()
                 return
         else:
             set_status_error(self._status)
