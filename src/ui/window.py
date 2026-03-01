@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
 
 import gi
@@ -100,6 +101,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         menu.append("Очистить лог", "win.clear_log")
         menu.append("Очистить кэш", "win.reset_state")
         menu.append("Сбросить сохраненный пароль", "win.reset_password")
+        menu.append("Сброс настроек приложения", "win.reset_config")
         mb = Gtk.MenuButton(); mb.set_icon_name("open-menu-symbolic"); mb.set_menu_model(menu)
         header.pack_end(mb)
         
@@ -109,6 +111,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             ("clear_log", self._clear_log),
             ("reset_state", self._reset_state),
             ("reset_password", self._reset_password),
+            ("reset_config", self._reset_config),
         ]
         for name, cb in actions:
             a = Gio.SimpleAction.new(name, None)
@@ -307,6 +310,33 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         
         # Сразу предлагаем войти заново (или проверяем sudo -n)
         self.ask_password()
+
+    def _reset_config(self, *_):
+        dialog = Adw.AlertDialog(
+            heading="Сброс настроек приложения?",
+            body="Внимание! Это действие удалит все ваши настройки, списки приложений и кэш.\nПриложение будет перезапущено в состоянии «как после установки».",
+        )
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("reset", "Сбросить")
+        dialog.set_response_appearance("reset", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        def _on_response(_d, response):
+            if response == "reset":
+                self._log("▶  Сброс конфигурации...\n")
+                try:
+                    if os.path.exists(config.CONFIG_DIR):
+                        shutil.rmtree(config.CONFIG_DIR)
+                    self._log("✔  Конфигурация удалена. Перезапуск...\n")
+                    os.execl(sys.executable, sys.executable, *sys.argv)
+                except Exception as e:
+                    self._log(f"✘  Ошибка сброса: {e}\n")
+            else:
+                self._log("ℹ  Пользователь отменил действие.\n")
+
+        dialog.connect("response", _on_response)
+        dialog.present(self)
 
     def add_toast(self, toast):
         self._toast_overlay.add_toast(toast)
