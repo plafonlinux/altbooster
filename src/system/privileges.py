@@ -272,8 +272,10 @@ def _run_pkexec(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
             # Формируем команду с маркером окончания
             delimiter = f"---END-{uuid.uuid4()}---"
             cmd_str = shlex.join(cmd)
-            # Запускаем команду в подоболочке, перенаправляем stderr и печатаем код возврата
-            script = f"({cmd_str}) 2>&1; echo \"{delimiter} $?\"\n"
+            # stdbuf -oL форсирует строчную буферизацию stdout дочерней команды,
+            # иначе apt/epm внутри пайпа буферизуют вывод блоками → прогресс
+            # появляется "пачками", а не построчно.
+            script = f"(stdbuf -oL {cmd_str}) 2>&1; echo \"{delimiter} $?\"\n"
 
             success = False
             try:
