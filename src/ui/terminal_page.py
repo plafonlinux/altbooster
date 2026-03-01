@@ -32,7 +32,7 @@ alias tml="sudo timeshift --list"
 #
 # Neofetch
 #
-alias n="fastfetch -c ~/.config/fastfetch/plafonfetch.jsonc"
+alias n="fastfetch -c ~/.config/fastfetch/config.jsonc"
 alias k="uname -rs"
 alias g="gnome-shell --version"
 alias f="lsb_release -sd"
@@ -578,10 +578,10 @@ class TerminalPage(Gtk.Box):
 
         # 4. Конфиг plafonfetch.jsonc
         group.add(SettingRow(
-            "document-save-symbolic", "Конфиг plafonfetch.jsonc",
-            "Сохраняет в ~/.config/fastfetch/plafonfetch.jsonc", "Установить",
+            "document-save-symbolic", "Конфиг Fastfetch (Default)",
+            "Сохраняет в ~/.config/fastfetch/config.jsonc", "Установить",
             self._on_install_ff_config,
-            lambda: backend.check_app_installed({"check": ["path", "~/.config/fastfetch/plafonfetch.jsonc"]}),
+            lambda: backend.check_app_installed({"check": ["path", "~/.config/fastfetch/config.jsonc"]}),
             "term_ff_config", "Установлен",
             self._on_remove_ff_config, "Удалить", "user-trash-symbolic"
         ))
@@ -655,7 +655,7 @@ class TerminalPage(Gtk.Box):
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress("Создание конфига Fastfetch...")
         def _do():
-            p = Path(os.path.expanduser("~/.config/fastfetch/plafonfetch.jsonc"))
+            p = Path(os.path.expanduser("~/.config/fastfetch/config.jsonc"))
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(_FASTFETCH_CONFIG, encoding="utf-8")
             GLib.idle_add(row.set_done, True)
@@ -669,7 +669,7 @@ class TerminalPage(Gtk.Box):
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress("Удаление конфига Fastfetch...")
         def _do():
-            p = Path(os.path.expanduser("~/.config/fastfetch/plafonfetch.jsonc"))
+            p = Path(os.path.expanduser("~/.config/fastfetch/config.jsonc"))
             if p.exists():
                 p.unlink()
             GLib.idle_add(row.set_undo_done, True)
