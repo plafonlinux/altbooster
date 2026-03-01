@@ -87,8 +87,9 @@
       "label": "Фикс фантомных USB",
       "desc": "Убирает лишние накопители из меню GDM (требует перезагрузки)",
       "check": {
-        "type": "path",
-        "value": "/etc/polkit-1/rules.d/49-no-usb-mount-gdm.rules"
+        "type": "file_contains",
+        "path": "/etc/polkit-1/rules.d/49-no-usb-mount-gdm.rules",
+        "value": "filesystem-mount-other-seat"
       },
       "cmd": [
         "bash",
