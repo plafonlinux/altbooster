@@ -37,38 +37,44 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
         start_time = time.time()
         super().__init__(**kwargs)
-        
-        # Принудительно используем тему иконок Adwaita для приложения,
-        # чтобы иконки оставались монохромными даже если в системе выбрана другая тема.
+
+        # ── Тема иконок ───────────────────────────────────────────────────────
+        # Принудительно выставляем Adwaita, чтобы иконки оставались монохромными
+        # даже если в системе выбрана сторонняя тема с цветными иконками.
         icon_theme = "Adwaita"
         if not os.path.exists("/usr/share/icons/Adwaita") and os.path.exists("/usr/share/icons/alt-workstation"):
             icon_theme = "alt-workstation"
         Gtk.Settings.get_default().set_property("gtk-icon-theme-name", icon_theme)
 
-        # 1. Лог собирается самым первым
+        # ── Лог (строится первым, чтобы все остальные компоненты могли писать в него) ──
         self._pulse_timer_id = None
         self._reset_status_timer_id = None
+        # SimpleQueue потокобезопасна без блокировок — идеально для лог-потока
         self._log_queue = queue.SimpleQueue()
         self._log_widget = self._build_log_panel()
-        
+
         self.set_title("ALT Booster")
         settings = self._load_settings()
-        
-        # Инициализируем путь, но тяжелую настройку (ротация, инфо) переносим в поток
+
+        # Путь к лог-файлу инициализируем сразу; ротацию и запись заголовка
+        # выполняем в фоновом потоке, чтобы не тормозить старт UI.
         self._log_file = config.CONFIG_DIR / "altbooster.log"
         threading.Thread(target=self._log_writer_loop, daemon=True).start()
 
         self.set_default_size(settings.get("width", 740), settings.get("height", 880))
         self.connect("close-request", self._on_close)
 
+        # ── Структура окна: ToastOverlay → Box → Header + Stack + Log ─────────
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        
+
+        # ToastOverlay позволяет показывать всплывающие уведомления поверх всего контента
         self._toast_overlay = Adw.ToastOverlay()
         self._toast_overlay.set_child(root)
         self.set_content(self._toast_overlay)
 
         root.append(self._build_header())
 
+        # ── Страницы приложения ───────────────────────────────────────────────
         self._setup = SetupPage(self._log)
         self._apps = AppsPage(self._log)
         self._extensions = ExtensionsPage(self._log)
@@ -78,6 +84,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._maint = MaintenancePage(self._log)
 
         def _dp(name):
+            # DynamicPage строится из JSON-описания; при ошибке показываем сообщение вместо краша
             try:
                 return DynamicPage(load_module(name), self._log)
             except Exception as e:
@@ -87,6 +94,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         self._amd = _dp("amd")
 
+        # Регистрируем все страницы в ViewStack; порядок определяет порядок вкладок
         for widget, name, title, icon in [
             (self._setup,       "setup",       "Начало",          "go-home-symbolic"),
             (self._apps,        "apps",        "Приложения",      "flathub-symbolic"),
@@ -107,16 +115,23 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         startup_ms = (time.time() - start_time) * 1000
         self._log(f"ℹ Startup time: {startup_ms:.2f} ms\n")
 
+    # ── Заголовок окна и меню ─────────────────────────────────────────────────
+
     def _build_header(self):
+        """Строит HeaderBar с переключателем вкладок и меню настроек."""
         header = Adw.HeaderBar()
+
+        # ViewStack создаём здесь (до регистрации страниц в __init__),
+        # чтобы он был доступен при добавлении вкладок в цикле выше
         self._stack = Adw.ViewStack()
-        sw = Adw.ViewSwitcher(); sw.set_stack(self._stack)
+        sw = Adw.ViewSwitcher()
+        sw.set_stack(self._stack)
         header.set_title_widget(sw)
-        
+
+        # ── Структура меню (гамбургер) ────────────────────────────────────────
         menu = Gio.Menu()
-        
         menu.append("Проверить обновления", "win.check_update")
-        
+
         section_settings = Gio.Menu()
         section_settings.append("Импорт настроек", "win.import_settings")
         section_settings.append("Экспорт настроек", "win.export_settings")
@@ -137,17 +152,20 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         section_about.append("О приложении", "win.about")
         menu.append_section(None, section_about)
 
-        mb = Gtk.MenuButton(); mb.set_icon_name("open-menu-symbolic"); mb.set_menu_model(menu)
+        mb = Gtk.MenuButton()
+        mb.set_icon_name("open-menu-symbolic")
+        mb.set_menu_model(menu)
         header.pack_end(mb)
-        
+
+        # Регистрируем действия меню как GAction на уровне окна
         actions = [
-            ("check_update", self._check_for_updates),
-            ("about", self._show_about),
-            ("clear_log", self._clear_log),
-            ("reset_state", self._reset_state),
-            ("reset_password", self._reset_password),
-            ("reset_config", self._reset_config),
-            ("open_log", self._open_log_file),
+            ("check_update",    self._check_for_updates),
+            ("about",           self._show_about),
+            ("clear_log",       self._clear_log),
+            ("reset_state",     self._reset_state),
+            ("reset_password",  self._reset_password),
+            ("reset_config",    self._reset_config),
+            ("open_log",        self._open_log_file),
             ("export_settings", self._export_settings),
             ("import_settings", self._import_settings),
         ]
@@ -158,16 +176,18 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         return header
 
+    # ── Панель лога (снизу окна) ──────────────────────────────────────────────
+
     def _build_log_panel(self):
+        """Строит нижнюю панель: статус-строка + прогресс-бар + раскрывающийся лог."""
         self._last_log_line = ""
         self._progress_nesting = 0
         self._on_cancel_cb = None
         self._log_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
-        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-        self._log_container.append(sep)
+        self._log_container.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
-        # 1. Статус
+        # Статус-строка: показывает последнюю значимую строку лога или «Готов к работе»
         self._status_label = Gtk.Label(label="Ожидание авторизации...")
         self._status_label.set_halign(Gtk.Align.START)
         self._status_label.set_margin_start(12)
@@ -176,7 +196,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._status_label.add_css_class("heading")
         self._log_container.append(self._status_label)
 
-        # 2. Прогресс-бар + Кнопка Стоп
+        # Прогресс-бар + кнопка остановки операции
         hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         hbox.set_margin_start(12)
         hbox.set_margin_end(12)
@@ -198,16 +218,17 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         self._log_container.append(hbox)
 
-        # 3. Спойлер с логом
+        # Раскрывающийся спойлер с полным текстом терминального вывода
         self._log_expander = Gtk.Expander(label="Лог терминала")
         self._log_expander.set_margin_start(12)
         self._log_expander.set_margin_end(12)
         self._log_expander.set_margin_bottom(12)
-        
+
         self._log_scroll = Gtk.ScrolledWindow()
         self._log_scroll.set_vexpand(False)
         self._log_scroll.set_size_request(-1, 250)
         self._log_scroll.set_min_content_height(50)
+
         self._tv = Gtk.TextView()
         self._tv.set_editable(False)
         self._tv.set_monospace(True)
@@ -218,22 +239,25 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._tv.set_bottom_margin(10)
         self._buf = self._tv.get_buffer()
         self._log_scroll.set_child(self._tv)
-
-        self._log_scroll.set_visible(True)
         self._log_expander.set_child(self._log_scroll)
         self._log_container.append(self._log_expander)
-        
+
         return self._log_container
 
+    # ── Инициализация лог-файла ───────────────────────────────────────────────
+
     def _setup_logging(self):
+        """Настраивает лог-файл: ротация при превышении 2 МБ, запись заголовка сессии.
+
+        Вызывается в фоновом потоке (_log_writer_loop), чтобы не задерживать старт UI.
+        """
         try:
             os.makedirs(config.CONFIG_DIR, exist_ok=True)
-            # Ротация логов: если больше 2 МБ, бэкапим старый и начинаем новый
+            # Ротация: если файл больше 2 МБ — переименовываем в .old и начинаем новый
             if self._log_file.exists() and self._log_file.stat().st_size > 2 * 1024 * 1024:
-                backup = self._log_file.with_suffix(".log.old")
-                shutil.move(self._log_file, backup)
-            
-            # Сбор информации о системе
+                shutil.move(self._log_file, self._log_file.with_suffix(".log.old"))
+
+            # Собираем краткую информацию о системе для заголовка сессии
             sys_info = [f"v{config.VERSION}"]
             try:
                 sys_info.append(f"Kernel: {platform.release()}")
@@ -251,19 +275,32 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         except Exception as e:
             print(f"Log setup failed: {e}")
 
-    # ── Пароль ───────────────────────────────────────────────────────────────
+    # ── Авторизация ───────────────────────────────────────────────────────────
 
     def ask_password(self):
+        """Определяет метод аутентификации и запрашивает пароль (или обходит запрос).
+
+        Запускается в фоновом потоке: проверки через subprocess могут занимать время.
+        Все вызовы UI — через GLib.idle_add, чтобы не нарушать GTK-тред.
+
+        Порядок проверок:
+        1. sudo не найден → pkexec
+        2. sudo работает без пароля (NOPASSWD/кэш) → сразу _auth_ok
+        3. Есть сохранённый пароль → проверяем его тихо
+        4. Пользователь не в группе wheel → pkexec
+        5. sudowheel отключён → предлагаем включить через pkexec
+        6. Всё остальное → диалог ввода пароля
+        """
         self._maint.set_sensitive_all(False)
 
         def _check():
-            # 1. sudo не установлен в системе → pkexec
+            # 1. sudo не установлен → pkexec единственный вариант
             if not shutil.which("sudo"):
                 GLib.idle_add(self._log, "ℹ Sudo не найден. Включен режим pkexec.\n")
                 GLib.idle_add(self._use_pkexec_auth)
                 return
 
-            # 2. sudo работает без пароля (NOPASSWD / кэш сессии)
+            # 2. sudo уже работает без пароля (NOPASSWD в sudoers или живой кэш)
             try:
                 if subprocess.run(["sudo", "-n", "true"], capture_output=True, timeout=1).returncode == 0:
                     backend.set_sudo_nopass(True)
@@ -272,7 +309,28 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             except Exception:
                 pass
 
-            # 3. Пробуем сохранённый пароль
+            # 2.5. Нет управляющего терминала → запуск из GNOME-ярлыка.
+            # PAM-модули GNOME (polkit, gnome-keyring и т.п.) проверяют PAM_TTY при
+            # инициализации: без TTY они обходят проверку пароля через агент сессии —
+            # sudo -S принимает любой пароль. Правильное решение для GUI-запуска:
+            # показать системный polkit-диалог через start_pkexec_shell().
+            # start_pkexec_shell блокирует фоновый поток до ответа пользователя — это
+            # нормально, мы находимся в _check(), а не в GTK-потоке.
+            if not sys.stdin.isatty():
+                GLib.idle_add(self._log, "ℹ Запуск из GNOME (без терминала). Инициализация pkexec...\n")
+                backend.set_pkexec_mode(True)
+                ok, is_cancel = backend.start_pkexec_shell()
+                if ok:
+                    GLib.idle_add(self._auth_ok)
+                elif is_cancel:
+                    GLib.idle_add(self._log, "⚠ Аутентификация отменена пользователем.\n")
+                    GLib.idle_add(self.close)
+                else:
+                    GLib.idle_add(self._log, "⚠ pkexec недоступен. Закрытие приложения.\n")
+                    GLib.idle_add(self.close)
+                return
+
+            # 3. Пробуем сохранённый в keyring пароль — это бесшумный автовход
             saved_pw = get_saved_password()
             if saved_pw and backend.sudo_check(saved_pw):
                 backend.set_sudo_password(saved_pw)
@@ -280,7 +338,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 GLib.idle_add(self._auth_ok)
                 return
 
-            # 4. Пользователь не в группе wheel → pkexec (постоянный режим)
+            # 4. Пользователь не в группе wheel — sudo в принципе недоступен
             try:
                 wheel_gid = grp.getgrnam("wheel").gr_gid
                 if wheel_gid not in os.getgroups() and wheel_gid != os.getgid():
@@ -290,20 +348,22 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             except (KeyError, ImportError, OSError):
                 pass
 
-            # 5. Пользователь в wheel, но sudo не работает.
-            #    Если sudowheel отключён — предлагаем включить через pkexec и перезапуститься.
+            # 5. Пользователь в wheel, но sudowheel отключён — предлагаем настроить
             if shutil.which("control"):
                 try:
+                    env = os.environ.copy()
+                    env["LC_ALL"] = "C"
                     res = subprocess.run(
-                        ["control", "sudowheel"], capture_output=True, text=True, timeout=3
+                        ["control", "sudowheel"], capture_output=True, text=True, timeout=3, env=env,
                     )
-                    if res.stdout.strip().lower() != "enabled":
+                    out = res.stdout.strip().lower()
+                    if "enabled" not in out and "wheelonly" not in out:
                         GLib.idle_add(self._offer_sudowheel_setup)
                         return
                 except Exception:
                     pass
 
-            # 6. sudowheel включён, пароль не сохранён → диалог ввода пароля
+            # 6. sudowheel включён, пароль не сохранён → показываем диалог
             GLib.idle_add(self._show_password_dialog)
 
         threading.Thread(target=_check, daemon=True).start()
@@ -312,13 +372,13 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         PasswordDialog(self, self._auth_ok, self.close)
 
     def _use_pkexec_auth(self):
-        """Активирует pkexec-режим вместо sudo."""
+        """Переключает всё приложение в pkexec-режим (без sudo)."""
         backend.set_pkexec_mode(True)
         self._log("🔑 Используется pkexec (polkit) для привилегированных команд.\n")
         self._auth_ok()
 
     def _offer_sudowheel_setup(self):
-        """Предлагает включить sudowheel через pkexec и перезапустить утилиту."""
+        """Предлагает диалог включения sudowheel через pkexec с последующим перезапуском."""
         d = Adw.MessageDialog(
             heading="Настройка sudo",
             body=(
@@ -341,11 +401,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             self._log("⚙ Включение sudowheel через pkexec...\n")
             threading.Thread(target=self._do_sudowheel_setup, daemon=True).start()
         else:
-            # Отмена → работаем через pkexec на этот сеанс
+            # Отмена → продолжаем через pkexec только на этот сеанс
             self._use_pkexec_auth()
 
     def _do_sudowheel_setup(self):
-        """Запускает pkexec control sudowheel enabled и перезапускает утилиту."""
+        """Запускает 'pkexec control sudowheel enabled' и перезапускает приложение."""
         try:
             result = subprocess.run(
                 ["pkexec", "control", "sudowheel", "enabled"],
@@ -362,26 +422,30 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             GLib.idle_add(self._use_pkexec_auth)
 
     def _restart_app(self):
-        """Перезапускает процесс приложения."""
+        """Планирует перезапуск процесса через 600 мс (чтобы успел отрисоваться лог)."""
         GLib.timeout_add(600, self._do_restart)
 
     def _do_restart(self):
         try:
+            # execv заменяет текущий процесс — чисто и без лишних процессов
             os.execv(sys.executable, [sys.executable] + sys.argv)
         except Exception:
+            # Если execv не сработал — запускаем новый процесс и закрываем старый
             subprocess.Popen([sys.executable] + sys.argv)
             self.get_application().quit()
         return False
 
     def _auth_ok(self):
+        """Вызывается после успешной аутентификации: разблокирует UI и показывает приветствие."""
         self._maint.set_sensitive_all(True)
         self._maint.refresh_checks()
         self._log("👋 Добро пожаловать в ALT Booster. С чего начнём?\n")
         self._status_label.set_label("Готов к работе")
 
-    # ── Настройки окна ───────────────────────────────────────────────────────
+    # ── Настройки окна ────────────────────────────────────────────────────────
 
     def _load_settings(self):
+        """Загружает сохранённые размеры окна. При ошибке возвращает пустой dict."""
         try:
             with open(config.CONFIG_FILE) as f:
                 return json.load(f)
@@ -389,18 +453,16 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             return {}
 
     def _on_close(self, _):
+        """Сохраняет текущие размеры окна перед закрытием."""
         try:
             os.makedirs(config.CONFIG_DIR, exist_ok=True)
             with open(config.CONFIG_FILE, "w") as f:
-                json.dump({
-                    "width": self.get_width(),
-                    "height": self.get_height(),
-                }, f)
+                json.dump({"width": self.get_width(), "height": self.get_height()}, f)
         except OSError:
             pass
         return False
 
-    # ── Меню ─────────────────────────────────────────────────────────────────
+    # ── Действия меню ─────────────────────────────────────────────────────────
 
     def _check_for_updates(self, *_):
         """Переключается на вкладку «Начало» и запускает проверку обновлений."""
@@ -425,17 +487,19 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.present(self)
 
     def _clear_log(self, *_):
+        """Очищает текстовый буфер лога в UI (файл на диске не трогает)."""
         self._buf.set_text("")
         self._last_log_line = ""
 
     def _reset_state(self, *_):
+        """Показывает диалог подтверждения и удаляет кэш статусов проверок."""
         d = Adw.AlertDialog(
             heading="Очистить кэш?",
             body="Все сохранённые статусы проверок будут удалены.\n"
                  "Утилита заново опросит систему при следующем запуске.",
         )
         d.add_response("cancel", "Отмена")
-        d.add_response("reset", "Очистить") # <--- Текст на красной кнопке
+        d.add_response("reset", "Очистить")
         d.set_response_appearance("reset", Adw.ResponseAppearance.DESTRUCTIVE)
         d.set_default_response("cancel")
         d.set_close_response("cancel")
@@ -443,26 +507,30 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         def _on_response(_d, r):
             if r == "reset":
                 config.reset_state()
-                self._log("🔄 Кэш статусов очищен.\n") # <--- Текст в терминале
+                self._log("🔄 Кэш статусов очищен.\n")
                 GLib.timeout_add(1500, self.close)
 
+        d.connect("response", _on_response)
+        d.present(self)
+
     def _reset_password(self, *_):
+        """Сбрасывает все сохранённые данные аутентификации и повторяет авторизацию."""
         clear_saved_password()
         backend.set_sudo_password(None)
         backend.set_sudo_nopass(False)
         backend.set_pkexec_mode(False)
-        # Сбрасываем кэш sudo, чтобы гарантировать запрос пароля
+        # sudo -k инвалидирует кэш сессии, чтобы следующий sudo точно попросил пароль
         subprocess.run(["sudo", "-k"])
         self._log("🔑 Сохраненный пароль сброшен.\n")
         self.add_toast(Adw.Toast(title="Пароль сброшен"))
-        
-        # Сразу предлагаем войти заново (или проверяем sudo -n)
         self.ask_password()
 
     def _reset_config(self, *_):
+        """Предупреждает и полностью удаляет директорию конфига с перезапуском."""
         dialog = Adw.AlertDialog(
             heading="Сброс настроек приложения?",
-            body="Внимание! Это действие удалит все ваши настройки, списки приложений и кэш.\nПриложение будет перезапущено в состоянии «как после установки».",
+            body="Внимание! Это действие удалит все ваши настройки, списки приложений и кэш.\n"
+                 "Приложение будет перезапущено в состоянии «как после установки».",
         )
         dialog.add_response("cancel", "Отмена")
         dialog.add_response("reset", "Сбросить")
@@ -487,6 +555,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _open_log_file(self, *_):
+        """Открывает лог-файл в подходящем редакторе (или через системную ассоциацию)."""
         if not self._log_file.exists():
             self.add_toast(Adw.Toast(title="Файл логов еще не создан"))
             return
@@ -494,33 +563,35 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         path = str(self._log_file)
         cmd = []
 
-        # 1. Графические редакторы (gnome-text-editor, gedit)
+        # Приоритет: gnome-text-editor → gedit → терминал + nano
         if shutil.which("gnome-text-editor"):
             cmd = ["gnome-text-editor", path]
         elif shutil.which("gedit"):
             cmd = ["gedit", path]
-        # 2. Терминал + nano (если нет GUI редактора)
         elif shutil.which("nano"):
             term = shutil.which("ptyxis") or shutil.which("gnome-terminal") or shutil.which("kgx")
             if term:
                 cmd = [term, "--", "nano", path]
-        
+
         if cmd:
             try:
                 subprocess.Popen(cmd)
                 return
             except Exception:
                 pass
-        
-        # 3. Fallback (системная ассоциация)
+
+        # Последний fallback — системная ассоциация файлов
         Gio.AppInfo.launch_default_for_uri(self._log_file.as_uri(), None)
 
+    # ── Экспорт / импорт настроек ─────────────────────────────────────────────
+
     def _export_settings(self, *_):
+        """Показывает диалог выбора файла для экспорта настроек в ZIP."""
         dialog = Gtk.FileDialog()
         dialog.set_title("Экспорт настроек")
         filename = f"altbooster_backup_{datetime.datetime.now().strftime('%Y-%m-%d')}.zip"
         dialog.set_initial_name(filename)
-        
+
         def _on_save(d, res):
             try:
                 file = d.save_finish(res)
@@ -532,29 +603,30 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         dialog.save(self, None, _on_save)
 
     def _do_export(self, zip_path):
+        """Упаковывает всё содержимое CONFIG_DIR в ZIP-архив."""
         try:
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-                # Сохраняем версию приложения для проверки совместимости
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                # Версия в архиве нужна для проверки совместимости при импорте
                 zf.writestr("version", config.VERSION)
 
                 if os.path.exists(config.CONFIG_DIR):
                     for root, _, files in os.walk(config.CONFIG_DIR):
                         for file in files:
                             full_path = os.path.join(root, file)
-                            
-                            # Пропускаем битые символические ссылки, чтобы не сломать экспорт
+                            # Пропускаем битые симлинки — иначе ZipFile упадёт с ошибкой
                             if os.path.islink(full_path) and not os.path.exists(full_path):
                                 self._log(f"⚠ Пропущен битый symlink: {file}\n")
                                 continue
-
                             rel_path = os.path.relpath(full_path, config.CONFIG_DIR)
                             zf.write(full_path, rel_path)
+
             self._log(f"✔ Настройки экспортированы в {zip_path}\n")
             self.add_toast(Adw.Toast(title="Экспорт завершен"))
         except Exception as e:
             self._log(f"✘ Ошибка создания архива: {e}\n")
 
     def _import_settings(self, *_):
+        """Показывает диалог выбора ZIP-файла для импорта настроек."""
         dialog = Gtk.FileDialog()
         dialog.set_title("Импорт настроек")
         f = Gtk.FileFilter()
@@ -575,10 +647,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         dialog.open(self, None, _on_open)
 
     def _confirm_import(self, zip_path):
-        # Проверяем версию архива
+        """Читает версию из архива и показывает диалог подтверждения импорта."""
         imported_ver = "неизвестно"
         try:
-            with zipfile.ZipFile(zip_path, 'r') as zf:
+            with zipfile.ZipFile(zip_path, "r") as zf:
                 if "version" in zf.namelist():
                     imported_ver = zf.read("version").decode("utf-8").strip()
         except Exception as e:
@@ -587,73 +659,82 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         body = "Текущие настройки будут перезаписаны. Приложение перезапустится."
         if imported_ver != config.VERSION:
-            body += f"\n\n⚠ Внимание: Версия настроек ({imported_ver}) отличается от текущей ({config.VERSION}). Возможны ошибки совместимости."
+            body += (
+                f"\n\n⚠ Внимание: Версия настроек ({imported_ver}) отличается от текущей "
+                f"({config.VERSION}). Возможны ошибки совместимости."
+            )
 
-        dialog = Adw.AlertDialog(
-            heading="Импортировать настройки?",
-            body=body,
-        )
+        dialog = Adw.AlertDialog(heading="Импортировать настройки?", body=body)
         dialog.add_response("cancel", "Отмена")
         dialog.add_response("import", "Импортировать")
         dialog.set_response_appearance("import", Adw.ResponseAppearance.DESTRUCTIVE)
         dialog.set_default_response("cancel")
         dialog.set_close_response("cancel")
-        
+
         def _on_response(_d, res):
-            if res == "import":
-                try:
-                    # Безопасный импорт: сначала распаковываем во временную папку
-                    with tempfile.TemporaryDirectory() as tmp_dir:
-                        with zipfile.ZipFile(zip_path, 'r') as zf:
-                            zf.extractall(tmp_dir)
-                        
-                        # Удаляем файл версии, чтобы не мусорить в конфиге
-                        ver_file = os.path.join(tmp_dir, "version")
-                        if os.path.exists(ver_file):
-                            os.remove(ver_file)
-                        
-                        # Безопасная замена: делаем бэкап текущего конфига
-                        backup_dir = config.CONFIG_DIR.with_suffix(".bak_restore")
-                        if os.path.exists(config.CONFIG_DIR):
-                            if os.path.exists(backup_dir):
-                                shutil.rmtree(backup_dir)
-                            shutil.move(config.CONFIG_DIR, backup_dir)
+            if res != "import":
+                return
+            try:
+                # Безопасный импорт через временную папку:
+                # 1. Распаковываем во tmp
+                # 2. Делаем бэкап текущего конфига
+                # 3. Копируем из tmp в CONFIG_DIR
+                # При ошибке на шаге 3 — восстанавливаем бэкап
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    with zipfile.ZipFile(zip_path, "r") as zf:
+                        zf.extractall(tmp_dir)
 
-                        try:
-                            shutil.copytree(tmp_dir, config.CONFIG_DIR)
-                            # Если успешно, удаляем бэкап
-                            if os.path.exists(backup_dir):
-                                shutil.rmtree(backup_dir)
-                        except Exception:
-                            # При ошибке восстанавливаем старый конфиг
-                            if os.path.exists(backup_dir):
-                                if os.path.exists(config.CONFIG_DIR):
-                                    shutil.rmtree(config.CONFIG_DIR)
-                                shutil.move(backup_dir, config.CONFIG_DIR)
-                            raise
+                    ver_file = os.path.join(tmp_dir, "version")
+                    if os.path.exists(ver_file):
+                        os.remove(ver_file)
 
-                    self._log("✔ Настройки импортированы. Перезапуск...\n")
-                    os.execl(sys.executable, sys.executable, *sys.argv)
-                except Exception as e:
-                    self._log(f"✘ Ошибка импорта: {e}\n")
-        
+                    backup_dir = config.CONFIG_DIR.with_suffix(".bak_restore")
+                    if os.path.exists(config.CONFIG_DIR):
+                        if os.path.exists(backup_dir):
+                            shutil.rmtree(backup_dir)
+                        shutil.move(config.CONFIG_DIR, backup_dir)
+
+                    try:
+                        shutil.copytree(tmp_dir, config.CONFIG_DIR)
+                        if os.path.exists(backup_dir):
+                            shutil.rmtree(backup_dir)
+                    except Exception:
+                        # Что-то пошло не так — возвращаем старый конфиг
+                        if os.path.exists(backup_dir):
+                            if os.path.exists(config.CONFIG_DIR):
+                                shutil.rmtree(config.CONFIG_DIR)
+                            shutil.move(backup_dir, config.CONFIG_DIR)
+                        raise
+
+                self._log("✔ Настройки импортированы. Перезапуск...\n")
+                os.execl(sys.executable, sys.executable, *sys.argv)
+            except Exception as e:
+                self._log(f"✘ Ошибка импорта: {e}\n")
+
         dialog.connect("response", _on_response)
         dialog.present(self)
 
     def add_toast(self, toast):
+        """Показывает всплывающее уведомление поверх контента."""
         self._toast_overlay.add_toast(toast)
 
-
-    # ── Лог ──────────────────────────────────────────
+    # ── Прогресс-бар и статус ─────────────────────────────────────────────────
 
     def start_progress(self, message: str, on_cancel=None):
+        """Запускает пульсирующий прогресс-бар с указанным сообщением.
+
+        on_cancel — колбэк для кнопки «Стоп». Если None — кнопка скрыта.
+        Поддерживает вложенность: вложенные операции инкрементируют счётчик
+        и не скрывают кнопку Stop пока не завершится верхнеуровневая.
+        """
         if on_cancel is not None:
             self._on_cancel_cb = on_cancel
+
         def _do():
             if on_cancel is not None:
-                self._progress_nesting = 1  # Новая верхнеуровневая операция
+                self._progress_nesting = 1
             else:
-                self._progress_nesting += 1  # Вложенная операция
+                self._progress_nesting += 1
             self._status_label.set_label(message)
             self._progressbar.set_fraction(0.0)
             self._stop_btn.set_sensitive(bool(self._on_cancel_cb))
@@ -661,13 +742,15 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             if self._pulse_timer_id:
                 GLib.source_remove(self._pulse_timer_id)
             self._pulse_timer_id = GLib.timeout_add(100, self._pulse_progress)
-            # Отменяем отложенный сброс статуса, если он ещё не сработал
+            # Отменяем отложенный сброс статуса, если операции начались заново
             if self._reset_status_timer_id:
                 GLib.source_remove(self._reset_status_timer_id)
                 self._reset_status_timer_id = None
+
         GLib.idle_add(_do)
 
     def _on_stop_clicked(self, _):
+        """Показывает диалог подтверждения остановки текущей операции."""
         if not self._on_cancel_cb:
             return
 
@@ -682,20 +765,24 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         dialog.set_close_response("cancel")
 
         def _on_response(_d, response):
-            if response == "stop":
-                if self._on_cancel_cb:
-                    self._status_label.set_label("Отмена...")
-                    self._stop_btn.set_sensitive(False)
-                    self._on_cancel_cb()
+            if response == "stop" and self._on_cancel_cb:
+                self._status_label.set_label("Отмена...")
+                self._stop_btn.set_sensitive(False)
+                self._on_cancel_cb()
 
         dialog.connect("response", _on_response)
         dialog.present(self)
 
     def _pulse_progress(self):
+        """Анимирует прогресс-бар (пульс каждые 100 мс). Возвращает True чтобы продолжаться."""
         self._progressbar.pulse()
         return True
 
     def stop_progress(self, success: bool = True):
+        """Останавливает прогресс-бар, показывает итоговый статус.
+
+        Через 4 секунды статус автоматически возвращается в «Готов к работе».
+        """
         def _do():
             if self._pulse_timer_id:
                 GLib.source_remove(self._pulse_timer_id)
@@ -708,28 +795,38 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 self._stop_btn.set_sensitive(False)
                 self._stop_btn.set_visible(False)
                 self._on_cancel_cb = None
-                # Через 4 секунды возвращаем статус в «Готов к работе»
                 if self._reset_status_timer_id:
                     GLib.source_remove(self._reset_status_timer_id)
                 self._reset_status_timer_id = GLib.timeout_add(4000, self._reset_status_label)
+
         GLib.idle_add(_do)
 
     def _reset_status_label(self):
+        """Таймерный колбэк: сбрасывает статус-строку в «Готов к работе»."""
         self._reset_status_timer_id = None
         self._status_label.set_label("Готов к работе")
         return False
 
+    # ── Лог ──────────────────────────────────────────────────────────────────
+
     def _log(self, text):
+        """Потокобезопасная запись в лог: всегда выполняет UI-обновление в главном потоке."""
         GLib.idle_add(self._log_internal, text)
 
     def _log_internal(self, text):
+        """Добавляет текст в TextView и очередь для записи в файл.
+
+        Вызывается только из UI-потока (через GLib.idle_add).
+        """
         stripped = text.strip()
         if stripped:
+            # Сохраняем последнюю значимую строку для статус-строки
             self._last_log_line = stripped
-        
-        # Отправляем в очередь для записи в файл (чтобы не блокировать UI)
+
+        # Ставим в очередь для фонового лог-потока (без блокировки UI)
         self._log_queue.put(text)
 
+        # Вставляем текст в буфер и прокручиваем до конца
         end = self._buf.get_end_iter()
         self._buf.insert(end, text)
         end = self._buf.get_end_iter()
@@ -741,13 +838,15 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._tv.scroll_mark_onscreen(mark)
 
     def _log_writer_loop(self):
-        """Фоновый поток для записи логов в файл."""
-        # Выполняем ротацию и запись заголовка в этом потоке, чтобы не тормозить старт
+        """Фоновый поток: читает из очереди и пишет строки в лог-файл.
+
+        Также выполняет ротацию и запись заголовка сессии при первом запуске.
+        """
         self._setup_logging()
-        
         while True:
             text = self._log_queue.get()
-            if not hasattr(self, "_log_file"): continue
+            if not hasattr(self, "_log_file"):
+                continue
             try:
                 with open(self._log_file, "a", encoding="utf-8") as f:
                     f.write(text)

@@ -195,28 +195,62 @@ class SetupPage(Gtk.Box):
         threading.Thread(target=_do, daemon=True).start()
         
     def _on_epm(self, row):
+        # Если EPM не установлен — сначала спросить, установить ли его
+        if not backend.is_epm_installed():
+            d = Adw.MessageDialog(
+                heading="EPM не установлен",
+                body="Для обновления системы необходим пакетный менеджер eepm.\nУстановить EPM и затем запустить обновление?",
+            )
+            d.set_transient_for(self.get_root())
+            d.add_response("cancel", "Отмена")
+            d.add_response("install", "Установить и обновить")
+            d.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
+            d.set_default_response("install")
+
+            def _on_response(dialog, response):
+                if response == "install":
+                    # Устанавливаем EPM через run_privileged, затем запускаем обновление
+                    self._r_epm_install.set_working()
+                    self._log("\n▶ Установка EPM (eepm)...\n")
+                    win = self.get_root()
+                    if hasattr(win, "start_progress"):
+                        win.start_progress("Установка EPM...")
+                    def _after_install(ok):
+                        GLib.idle_add(self._r_epm_install.set_done, ok)
+                        if hasattr(win, "stop_progress"):
+                            win.stop_progress(ok)
+                        if ok:
+                            GLib.idle_add(self._on_epm, row)
+                        else:
+                            self._log("\n✘ Не удалось установить EPM\n")
+                    backend.run_privileged(["apt-get", "install", "-y", "eepm"], self._log, _after_install)
+
+            d.connect("response", _on_response)
+            d.present()
+            return
+
         row.set_working()
         self._log("\n▶  epm update...\n")
-        
+
         win = self.get_root()
         if hasattr(win, "start_progress"):
             win.start_progress("Обновление системы...")
-        
+
         def on_full_upgrade_done(ok):
             # Всегда разблокируем кнопку, чтобы можно было обновляться снова
             GLib.idle_add(row.set_done, False)
             # Возвращаем исходный текст кнопки
             GLib.idle_add(row._btn.set_label, "Обновить")
-            
+
             if ok:
                 self._log("\n✔  ALT Linux обновлён!\n")
             else:
                 self._log("\n✘  Ошибка обновления\n")
             if hasattr(win, "stop_progress"):
                 win.stop_progress(ok)
-        
+
         def on_update_done(ok):
-            if not ok: 
+            if not ok:
                 GLib.idle_add(row.set_done, False)
                 GLib.idle_add(row._btn.set_label, "Обновить")
                 self._log("\n✘  Ошибка epm update\n")
@@ -225,7 +259,7 @@ class SetupPage(Gtk.Box):
                 return
             self._log("\n▶  epm full-upgrade...\n")
             backend.run_epm(["epm", "-y", "full-upgrade"], self._log, on_full_upgrade_done)
-            
+
         backend.run_epm(["epm", "-y", "update"], self._log, on_update_done)    
 
     def _on_install_epm(self, row):
@@ -271,7 +305,7 @@ class SetupPage(Gtk.Box):
         body.append(sys_group)
         
         sys_rows = [
-            ("security-high-symbolic",             "Включить sudo",               "control sudowheel enabled",                     "Активировать", self._on_sudo,           backend.is_sudo_enabled,               "setting_sudo", "Активировано", self._on_sudo_undo, "Отключить"),
+            ("security-high-symbolic",             "Включить sudo",               "control sudowheel enabled",                     "Активировать", self._on_sudo,           None,                                  "setting_sudo", "Активировано", self._on_sudo_undo, "Отключить"),
             ("view-refresh-symbolic",    "Автообновление GNOME Software",      "Отключает фоновую загрузку в Центре приложений", "Отключить",    self._on_gnome_software_updates, lambda: backend.gsettings_get("org.gnome.software", "download-updates") == "false", "setting_gnome_software_updates", "Выключено", self._on_gnome_software_updates_undo, "Включить"),
             ("media-flash-symbolic",               "Автоматический TRIM",         "Включает еженедельную очистку блоков SSD",      "Включить",     self._on_trim_timer,           backend.is_fstrim_enabled,             "setting_trim_auto", "Активировано", self._on_trim_timer_undo, "Отключить"),
             ("document-open-recent-symbolic",      "Лимиты журналов",             "SystemMaxUse=100M и сжатие в journald.conf",    "Настроить",    self._on_journal_limit,  backend.is_journal_optimized,          "setting_journal_opt", "Активировано", self._on_journal_limit_undo, "Сбросить"),
