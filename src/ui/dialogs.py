@@ -52,7 +52,7 @@ def clear_saved_password():
     except Exception:
         pass
 
-class PasswordDialog(Adw.AlertDialog):
+class PasswordDialog(Adw.MessageDialog):
     """Диалог ввода пароля sudo."""
 
     def __init__(self, parent, on_success, on_cancel, on_pkexec=None):
@@ -64,6 +64,7 @@ class PasswordDialog(Adw.AlertDialog):
             "Пароль сохраняется только на время сессии."
         )
         super().__init__(heading="Требуется пароль sudo", body=body)
+        self.set_transient_for(parent)
         self._on_success = on_success
         self._on_cancel = on_cancel
         self._on_pkexec = on_pkexec
@@ -73,7 +74,7 @@ class PasswordDialog(Adw.AlertDialog):
         self._entry = Gtk.PasswordEntry()
         self._entry.set_show_peek_icon(True)
         self._entry.set_property("placeholder-text", "Пароль пользователя")
-        self._entry.connect("activate", lambda _: self._submit())
+        self._entry.connect("activate", lambda _: self.emit("response", "ok"))
         self._entry.connect("notify::text", self._on_text_changed)
 
         if _HAS_SECRET:
@@ -95,7 +96,7 @@ class PasswordDialog(Adw.AlertDialog):
         self.set_default_response("ok")
         self.set_close_response("cancel")
         self.connect("response", self._on_response)
-        self.present(parent)
+        self.present()
 
     def _on_text_changed(self, *args):
         self.set_response_enabled("ok", bool(self._entry.get_text()))
@@ -108,6 +109,7 @@ class PasswordDialog(Adw.AlertDialog):
         elif rid == "pkexec" and self._on_pkexec:
             self._submit_pkexec()
         else:
+            self.close()
             self._on_cancel()
 
     def _submit_pkexec(self):

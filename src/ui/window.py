@@ -46,7 +46,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self.connect("close-request", self._on_close)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.set_content(root)
+        
+        self._toast_overlay = Adw.ToastOverlay()
+        self._toast_overlay.set_child(root)
+        self.set_content(self._toast_overlay)
+
         root.append(self._build_header())
 
         self._setup = SetupPage(self._log)
@@ -295,11 +299,17 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def _reset_password(self, *_):
         clear_saved_password()
         backend.set_sudo_password(None)
+        backend.set_pkexec_mode(False)
+        # Сбрасываем кэш sudo, чтобы гарантировать запрос пароля
+        subprocess.run(["sudo", "-k"])
         self._log("🔑 Сохраненный пароль сброшен.\n")
         self.add_toast(Adw.Toast(title="Пароль сброшен"))
         
         # Сразу предлагаем войти заново (или проверяем sudo -n)
         self.ask_password()
+
+    def add_toast(self, toast):
+        self._toast_overlay.add_toast(toast)
 
 
     # ── Лог ──────────────────────────────────────────
