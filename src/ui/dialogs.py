@@ -100,6 +100,8 @@ class PasswordDialog(Adw.MessageDialog):
         if self._submitted:
             return
         if rid == "ok":
+            # Останавливаем обработку сигнала по-умолчанию, чтобы диалог не закрылся
+            _d.stop_emission_by_name("response")
             self._submit()
         else:
             self.close()
