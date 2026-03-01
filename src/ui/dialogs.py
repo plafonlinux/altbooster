@@ -1,6 +1,5 @@
 """Диалоговые окна: PasswordDialog, AppEditDialog."""
 
-import subprocess
 import threading
 
 import gi
@@ -74,7 +73,9 @@ class PasswordDialog(Adw.MessageDialog):
         self._entry = Gtk.PasswordEntry()
         self._entry.set_show_peek_icon(True)
         self._entry.set_property("placeholder-text", "Пароль пользователя")
-        self._entry.connect("activate", lambda _: self.emit("response", "ok"))
+        # Вызываем _submit() напрямую, не через emit("response"),
+        # чтобы default-handler Adw.MessageDialog не закрыл окно при пустом поле
+        self._entry.connect("activate", lambda _: self._submit())
         self._entry.connect("notify::text", self._on_text_changed)
 
         if _HAS_SECRET:
@@ -116,17 +117,12 @@ class PasswordDialog(Adw.MessageDialog):
         self.set_response_enabled("pkexec", False)
         self.set_response_enabled("ok", False)
         self.set_body("⏳ Пожалуйста, подтвердите доступ в появившемся окне...")
-        
+
         def _worker():
-            try:
-                # Проверяем реальную авторизацию через pkexec
-                res = subprocess.run(["pkexec", "/bin/true"], capture_output=True, text=True)
-                ok = (res.returncode == 0)
-                # Код 126 = Authorization dismissed (Отмена пользователем)
-                is_cancel = (res.returncode == 126)
-            except Exception:
-                ok = False
-                is_cancel = False
+            # Запускаем persistent bash-шелл через pkexec.
+            # Это показывает диалог polkit ОДИН РАЗ, и шелл остаётся
+            # живым для всех последующих привилегированных команд.
+            ok, is_cancel = backend.start_pkexec_shell()
             GLib.idle_add(self._check_pkexec_done, ok, is_cancel)
 
         threading.Thread(target=_worker, daemon=True).start()
