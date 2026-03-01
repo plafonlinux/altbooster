@@ -12,6 +12,7 @@ import threading
 import zipfile
 import tempfile
 import time
+import grp
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -255,6 +256,22 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._maint.set_sensitive_all(False)
 
         def _check():
+            # 0. Если sudo нет в системе — сразу переключаемся на pkexec
+            if not shutil.which("sudo"):
+                GLib.idle_add(self._log, "ℹ Sudo не найден. Включен режим pkexec.\n")
+                GLib.idle_add(self._use_pkexec_auth)
+                return
+
+            # 0.1. Проверка группы wheel (ALT Linux)
+            try:
+                wheel_gid = grp.getgrnam("wheel").gr_gid
+                if wheel_gid not in os.getgroups() and wheel_gid != os.getgid():
+                    GLib.idle_add(self._log, "ℹ Пользователь не в группе wheel. Включен режим pkexec.\n")
+                    GLib.idle_add(self._use_pkexec_auth)
+                    return
+            except (KeyError, ImportError, OSError):
+                pass
+
             # Быстрый путь: sudo работает без пароля (кэш сессии)
             try:
                 if subprocess.run(["sudo", "-n", "true"], capture_output=True, timeout=1).returncode == 0:
