@@ -4,8 +4,6 @@ checks.py — Проверки состояния системы.
 
 from __future__ import annotations
 
-import getpass
-import grp
 import os
 import shutil
 import subprocess
@@ -16,17 +14,19 @@ from .gsettings import gsettings_get
 import config
 
 def is_sudo_enabled() -> bool:
-    """Проверяет статус sudo. В ALT Linux 'control' требует прав root для чтения /etc/sudoers."""
-    
-    # Способ 1: Проверка через sudo -n (неинтерактивно)
-    # Если в системе действует кэш sudo (недавно вводили пароль), это сработает мгновенно
+    """Проверяет статус sudo через control sudowheel в ALT Linux."""
+
+    # Способ 1: Проверка через sudo -n (неинтерактивно).
+    # Работает если в системе ещё действует кэш sudo-сессии.
     try:
         if subprocess.run(["sudo", "-n", "true"], capture_output=True, timeout=1).returncode == 0:
             return True
-    except:
+    except Exception:
         pass
 
-    # Способ 2: Если пароль уже введен в приложении, проверяем статус через него
+    # Способ 2: Если пароль уже введён в приложении, проверяем control sudowheel.
+    # Это единственный надёжный способ: `control sudowheel` читает реальный /etc/sudoers,
+    # поэтому не даёт ложных срабатываний при отключении sudo через wheel-группу.
     password = get_sudo_password()
     if password:
         try:
@@ -35,23 +35,17 @@ def is_sudo_enabled() -> bool:
                 input=password + "\n",
                 capture_output=True,
                 text=True,
-                timeout=2
+                timeout=2,
             )
             out = (res.stdout + res.stderr).lower()
             if "enabled" in out or "wheelonly" in out:
                 return True
-        except:
+        except Exception:
             pass
 
-    # Способ 3: Проверка членства текущего пользователя в группе wheel
-    # Это основной индикатор возможности использования sudo в ALT Linux
-    try:
-        user = getpass.getuser()
-        group_members = grp.getgrnam("wheel").gr_mem
-        if user in group_members:
-            return True
-    except:
-        pass
+    # Способ 3 (НЕ используем): проверка членства в группе wheel ненадёжна,
+    # потому что `control sudowheel disabled` не удаляет пользователя из группы,
+    # а лишь убирает её из /etc/sudoers — это приводило к ложному "Активировано".
 
     return False
 

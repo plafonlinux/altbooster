@@ -44,7 +44,9 @@ class SettingRow(Adw.ActionRow):
 
         if config.state_get(state_key) is True:
             self._set_ui(True)
-        elif "kbd" not in state_key and check_fn is not None:
+        # Всегда запускаем фоновую проверку реального состояния,
+        # чтобы кэш не показывал устаревший статус (например, после внешнего изменения sudo).
+        if "kbd" not in state_key and check_fn is not None:
             threading.Thread(target=self._refresh, daemon=True).start()
 
     def _on_btn_clicked(self, _):

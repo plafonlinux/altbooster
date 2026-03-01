@@ -68,7 +68,7 @@ RECOMMENDED = [
         "7502",
     ),
     (
-        "rounded-window-corners@yilozt",
+        "rounded-window-corners@fxgn",
         "Rounded Window Corners Reborn",
         "Скругление углов окон и мониторов",
         "5237",
@@ -201,13 +201,36 @@ class ExtensionsPage(Gtk.Box):
             gext = _gext_path()
             if not gext:
                 GLib.idle_add(self._log, "▶  gext не найден, устанавливаю...\n")
+                # Пробуем pip3, затем pip (на ALT p11 команда называется pip)
+                pip_cmd = None
+                for candidate in ("pip3", "pip"):
+                    if shutil.which(candidate):
+                        pip_cmd = candidate
+                        break
+                if pip_cmd is None:
+                    def _fail_no_pip():
+                        self._log(
+                            "✘  pip не найден. Установите вручную:\n"
+                            "   sudo apt-get install pip python3-module-pip\n"
+                            "   pip install gnome-extensions-cli\n"
+                        )
+                        if hasattr(win, "stop_progress"): win.stop_progress(False)
+                        set_status_error(self._id_status)
+                        self._id_entry.set_sensitive(True)
+                    GLib.idle_add(_fail_no_pip)
+                    return
                 r_pip = subprocess.run(
-                    ["pip3", "install", "gnome-extensions-cli", "--user"],
+                    [pip_cmd, "install", "gnome-extensions-cli", "--user"],
                     capture_output=True, text=True,
                 )
                 if r_pip.returncode != 0:
                     def _fail_gext():
-                        self._log(f"✘  Не удалось установить gext: {r_pip.stderr.strip()}\n")
+                        self._log(
+                            f"✘  Не удалось установить gext: {r_pip.stderr.strip()}\n"
+                            "   Попробуйте вручную:\n"
+                            "   sudo apt-get install pip python3-module-pip\n"
+                            "   pip install gnome-extensions-cli\n"
+                        )
                         if hasattr(win, "stop_progress"): win.stop_progress(False)
                         set_status_error(self._id_status)
                         self._id_entry.set_sensitive(True)
@@ -450,7 +473,18 @@ class ExtensionsPage(Gtk.Box):
     def _on_install_ext(self, uuid, btn, status, install_id=None):
         btn.set_sensitive(False)
         btn.set_label("…")
-        
+
+        # Проверяем, нет ли уже системного расширения с таким UUID
+        if (_SYSTEM_EXT_DIR / uuid).exists():
+            self._log(
+                f"⚠  Расширение {uuid} уже установлено системно.\n"
+                "   Пользовательская копия поверх системной не работает в GNOME Shell.\n"
+                "   Установка отменена.\n"
+            )
+            set_status_error(status)
+            btn.set_label("Уже системное")
+            return
+
         # Поддержка установки через EPM (для системных пакетов)
         if install_id and install_id.startswith("epm:"):
             pkg = install_id[4:]
@@ -478,12 +512,32 @@ class ExtensionsPage(Gtk.Box):
             gext = _gext_path()
             if not gext:
                 GLib.idle_add(self._log, "▶  gext не найден, устанавливаю...\n")
+                pip_cmd = None
+                for candidate in ("pip3", "pip"):
+                    if shutil.which(candidate):
+                        pip_cmd = candidate
+                        break
+                if pip_cmd is None:
+                    GLib.idle_add(self._log,
+                        "✘  pip не найден. Установите вручную:\n"
+                        "   sudo apt-get install pip python3-module-pip\n"
+                        "   pip install gnome-extensions-cli\n"
+                    )
+                    GLib.idle_add(set_status_error, status)
+                    GLib.idle_add(btn.set_label, "Повторить")
+                    GLib.idle_add(btn.set_sensitive, True)
+                    if hasattr(win, "stop_progress"): win.stop_progress(False)
+                    return
                 r_pip = subprocess.run(
-                    ["pip3", "install", "gnome-extensions-cli", "--user"],
+                    [pip_cmd, "install", "gnome-extensions-cli", "--user"],
                     capture_output=True, text=True,
                 )
                 if r_pip.returncode != 0:
-                    GLib.idle_add(self._log, f"✘  Не удалось установить gext: {r_pip.stderr.strip()}\n")
+                    GLib.idle_add(self._log,
+                        f"✘  Не удалось установить gext: {r_pip.stderr.strip()}\n"
+                        "   sudo apt-get install pip python3-module-pip\n"
+                        "   pip install gnome-extensions-cli\n"
+                    )
                     GLib.idle_add(set_status_error, status)
                     GLib.idle_add(btn.set_label, "Повторить")
                     GLib.idle_add(btn.set_sensitive, True)
@@ -579,6 +633,7 @@ class ExtensionsPage(Gtk.Box):
                 if ext_path.exists():
                     shutil.rmtree(ext_path)
                     GLib.idle_add(self._log, f"✔  {uuid} удалён!\n")
+                    GLib.idle_add(self._log, "ℹ  Для полного эффекта перезайдите в сессию.\n")
                 else:
                     GLib.idle_add(self._log, "ℹ  Папка расширения не найдена (возможно, уже удалено).\n")
 

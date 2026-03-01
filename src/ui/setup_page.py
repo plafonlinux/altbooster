@@ -30,20 +30,22 @@ class SetupPage(Gtk.Box):
         self._build_filemanager_group(body)
         self._build_keyboard_group(body)
 
-        self.check_for_updates()
-
     def check_for_updates(self, manual=False):
         """Проверяет наличие обновлений и показывает баннер или диалог."""
         if manual:
             self._log("\n▶  Проверка обновлений...\n")
 
-        def on_result(version, url):
+        def on_result(version):
             if not version:
                 if manual: GLib.idle_add(self._show_no_update_dialog)
                 return
             try:
                 current = [int(x) for x in config.VERSION.split(".")]
                 latest = [int(x) for x in version.split(".")]
+                # Нормализуем до одинаковой длины (5.6 vs 5.6.0 → [5,6,0] vs [5,6,0])
+                max_len = max(len(current), len(latest))
+                current += [0] * (max_len - len(current))
+                latest  += [0] * (max_len - len(latest))
                 if latest <= current:
                     if manual: GLib.idle_add(self._show_no_update_dialog)
                     return
@@ -51,7 +53,8 @@ class SetupPage(Gtk.Box):
                 if manual: GLib.idle_add(self._show_no_update_dialog)
                 return
 
-            self._on_update_found(version, url)
+            # ВАЖНО: вызываем из главного потока, т.к. работаем с GTK-виджетами
+            GLib.idle_add(self._on_update_found, version)
 
         config.check_update(on_result)
 
@@ -65,7 +68,7 @@ class SetupPage(Gtk.Box):
         dialog.set_default_response("ok")
         dialog.present(self.get_root())
 
-    def _on_update_found(self, version, url):
+    def _on_update_found(self, version):
         # Проверяем, не показан ли уже баннер
         child = self._body.get_first_child()
         while child:
@@ -73,106 +76,64 @@ class SetupPage(Gtk.Box):
                 return  # Баннер уже есть
             child = child.get_next_sibling()
 
-        GLib.idle_add(self._show_update_banner, version, url)
+        GLib.idle_add(self._show_update_banner, version)
 
-    def _show_update_banner(self, version, url):
-        group = Adw.PreferencesGroup()
-        group.set_title("Доступно обновление")
-        self._body.prepend(group)
+    def _show_update_banner(self, version):
+        self._update_group = Adw.PreferencesGroup()
+        self._update_group.set_title("Доступно обновление")
+        self._body.prepend(self._update_group)
 
         row = Adw.ActionRow()
         row.set_title(f"Новая версия {version}")
-        row.set_subtitle("Рекомендуется обновить приложение")
+        row.set_subtitle("Загрузим архив с GitHub, запустим install.sh и перезапустим утилиту")
         row.add_prefix(Gtk.Image.new_from_icon_name("software-update-available-symbolic"))
 
-        # Проверяем, можно ли обновиться через git
-        root_dir = Path(__file__).resolve().parent.parent.parent
-        git_dir = root_dir / ".git"
+        btn = make_button("Установить")
+        btn.add_css_class("suggested-action")
+        btn.connect("clicked", lambda b: self._do_update(b, version))
 
-        if git_dir.exists() and shutil.which("git"):
-            btn = make_button("Обновить")
-            btn.add_css_class("suggested-action")
-            btn.connect("clicked", lambda b: self._on_self_update(b, root_dir))
-        else:
-            btn = make_button("Установить")
-            btn.add_css_class("suggested-action")
-            btn.connect("clicked", lambda b: self._on_self_update_tarball(b, version))
-            
         row.add_suffix(btn)
-        group.add(row)
+        self._update_group.add(row)
 
-    def _on_self_update(self, btn, root_dir):
+    def _do_update(self, btn, version):
         btn.set_sensitive(False)
-        btn.set_label("⏳ Обновление...")
-        self._log("\n▶  Запуск обновления (git pull)...\n")
+        btn.set_label("⏳ Загрузка...")
+        self._log(f"\n▶  Обновление до версии {version}...\n")
 
         win = self.get_root()
         if hasattr(win, "start_progress"):
             win.start_progress("Обновление приложения...")
 
-        cmd_str = f"cd {root_dir} && git pull && if [ -f install.sh ]; then ./install.sh; fi"
-
-        def _done(ok):
-            if ok:
-                self._log("✔  Обновление завершено! Пожалуйста, перезапустите приложение.\n")
-            else:
-                self._log("✘  Ошибка обновления.\n")
-            def _ui():
-                if ok:
-                    btn.set_label("Готово (Перезапустите)")
-                else:
-                    btn.set_label("Ошибка")
-                    btn.set_sensitive(True)
-            GLib.idle_add(_ui)
-            if hasattr(win, "stop_progress"):
-                win.stop_progress(ok)
-
-        if os.access(root_dir, os.W_OK):
-            # Если есть права на запись (установка в home), обновляем от пользователя
-            def _user_run():
-                r = subprocess.run(["bash", "-c", cmd_str], capture_output=True, text=True)
-                if r.stdout: GLib.idle_add(self._log, r.stdout)
-                if r.stderr: GLib.idle_add(self._log, r.stderr)
-                GLib.idle_add(_done, r.returncode == 0)
-            threading.Thread(target=_user_run, daemon=True).start()
-        else:
-            # Если нет прав (установка в /opt), обновляем через root
-            backend.run_privileged(["bash", "-c", cmd_str], self._log, _done)
-        
-    def _on_self_update_tarball(self, btn, version):
-        btn.set_sensitive(False)
-        btn.set_label("⏳ Обновление...")
-        self._log(f"\n▶  Запуск обновления до версии {version}...\n")
-
-        win = self.get_root()
-        if hasattr(win, "start_progress"):
-            win.start_progress("Обновление приложения...")
-        
         url = f"https://github.com/plafonlinux/altbooster/archive/refs/tags/v{version}.tar.gz"
         downloader = "wget -O" if shutil.which("wget") else "curl -L -o"
-        
+
         cmd_str = (
             f"TMP=$(mktemp -d) && "
             f"{downloader} $TMP/update.tar.gz {url} && "
             f"tar xf $TMP/update.tar.gz -C $TMP && "
             f"cd $TMP/altbooster-* && "
-            f"if [ -f install.sh ]; then chmod +x install.sh && ./install.sh; else echo 'install.sh not found'; exit 1; fi && "
+            f"chmod +x install.sh && ./install.sh && "
             f"rm -rf $TMP"
         )
 
         def _done(ok):
             def _ui():
+                # Убираем баннер обновления в любом случае
+                if hasattr(self, "_update_group") and self._update_group:
+                    try:
+                        self._body.remove(self._update_group)
+                    except Exception:
+                        pass
+                    self._update_group = None
+
                 if ok:
-                    self._log("✔  Обновление завершено! Перезапуск...\n")
-                    btn.set_label("Перезапуск...")
-                    GLib.timeout_add(1500, self._restart_app)
+                    self._log("✔  Готово! Перезапуск через 2 сек...\n")
+                    GLib.timeout_add(2000, self._restart_app)
                 else:
-                    self._log("✘  Ошибка обновления.\n")
-                    btn.set_label("Ошибка")
-                    btn.set_sensitive(True)
+                    self._log("✘  Ошибка обновления. Попробуйте вручную через терминал.\n")
+                if hasattr(win, "stop_progress"):
+                    win.stop_progress(ok)
             GLib.idle_add(_ui)
-            if hasattr(win, "stop_progress"):
-                win.stop_progress(ok)
 
         root_dir = Path(__file__).resolve().parent.parent.parent
         if os.access(root_dir, os.W_OK):
@@ -187,7 +148,11 @@ class SetupPage(Gtk.Box):
 
     def _restart_app(self):
         """Перезапускает текущее приложение."""
-        os.execl(sys.executable, sys.executable, *sys.argv)
+        try:
+            os.execl(sys.executable, sys.executable, *sys.argv)
+        except OSError as e:
+            GLib.idle_add(self._log, f"✘  Не удалось перезапустить: {e}\nЗапустите altbooster вручную.\n")
+        return False  # GLib.timeout_add: не повторять
 
     def _on_gnome_software_updates(self, row):
         row.set_working()
