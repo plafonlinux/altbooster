@@ -3,12 +3,16 @@
 import datetime
 import json
 import os
+import platform
+import queue
 import shutil
 import subprocess
 import sys
 import threading
 import zipfile
 import tempfile
+import time
+import grp
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -31,6 +35,7 @@ from ui.maintenance_page import MaintenancePage
 
 class AltBoosterWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
+        start_time = time.time()
         super().__init__(**kwargs)
         
         # Принудительно используем тему иконок Adwaita для приложения,
@@ -42,10 +47,16 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         # 1. Лог собирается самым первым
         self._pulse_timer_id = None
+        self._log_queue = queue.SimpleQueue()
         self._log_widget = self._build_log_panel()
         
         self.set_title("ALT Booster")
         settings = self._load_settings()
+        
+        # Инициализируем путь, но тяжелую настройку (ротация, инфо) переносим в поток
+        self._log_file = config.CONFIG_DIR / "altbooster.log"
+        threading.Thread(target=self._log_writer_loop, daemon=True).start()
+
         self.set_default_size(settings.get("width", 740), settings.get("height", 880))
         self.connect("close-request", self._on_close)
 
@@ -92,6 +103,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         root.append(self._stack)
         root.append(self._log_widget)
 
+        startup_ms = (time.time() - start_time) * 1000
+        self._log(f"ℹ Startup time: {startup_ms:.2f} ms\n")
+
     def _build_header(self):
         header = Adw.HeaderBar()
         self._stack = Adw.ViewStack()
@@ -99,14 +113,29 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         header.set_title_widget(sw)
         
         menu = Gio.Menu()
+        
         menu.append("Проверить обновления", "win.check_update")
-        menu.append("О приложении", "win.about")
-        menu.append("Очистить лог", "win.clear_log")
-        menu.append("Очистить кэш", "win.reset_state")
-        menu.append("Сбросить сохраненный пароль", "win.reset_password")
-        menu.append("Сброс настроек приложения", "win.reset_config")
-        menu.append("Экспорт настроек", "win.export_settings")
-        menu.append("Импорт настроек", "win.import_settings")
+        
+        section_settings = Gio.Menu()
+        section_settings.append("Импорт настроек", "win.import_settings")
+        section_settings.append("Экспорт настроек", "win.export_settings")
+        menu.append_section(None, section_settings)
+
+        section_diag = Gio.Menu()
+        section_diag.append("Посмотреть логи", "win.open_log")
+        section_diag.append("Очистить лог", "win.clear_log")
+        section_diag.append("Очистить кэш", "win.reset_state")
+        menu.append_section(None, section_diag)
+
+        section_reset = Gio.Menu()
+        section_reset.append("Сбросить сохраненный пароль", "win.reset_password")
+        section_reset.append("Сброс настроек приложения", "win.reset_config")
+        menu.append_section(None, section_reset)
+
+        section_about = Gio.Menu()
+        section_about.append("О приложении", "win.about")
+        menu.append_section(None, section_about)
+
         mb = Gtk.MenuButton(); mb.set_icon_name("open-menu-symbolic"); mb.set_menu_model(menu)
         header.pack_end(mb)
         
@@ -117,6 +146,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             ("reset_state", self._reset_state),
             ("reset_password", self._reset_password),
             ("reset_config", self._reset_config),
+            ("open_log", self._open_log_file),
             ("export_settings", self._export_settings),
             ("import_settings", self._import_settings),
         ]
@@ -194,15 +224,58 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         
         return self._log_container
 
+    def _setup_logging(self):
+        try:
+            os.makedirs(config.CONFIG_DIR, exist_ok=True)
+            # Ротация логов: если больше 2 МБ, бэкапим старый и начинаем новый
+            if self._log_file.exists() and self._log_file.stat().st_size > 2 * 1024 * 1024:
+                backup = self._log_file.with_suffix(".log.old")
+                shutil.move(self._log_file, backup)
+            
+            # Сбор информации о системе
+            sys_info = [f"v{config.VERSION}"]
+            try:
+                sys_info.append(f"Kernel: {platform.release()}")
+                sys_info.append(f"DE: {os.environ.get('XDG_CURRENT_DESKTOP', 'Unknown')}")
+                with open("/proc/meminfo") as f:
+                    for line in f:
+                        if "MemTotal" in line:
+                            sys_info.append(f"Mem: {line.split(':')[1].strip()}")
+                            break
+            except Exception:
+                pass
+
+            with open(self._log_file, "a", encoding="utf-8") as f:
+                f.write(f"\n=== Session started {datetime.datetime.now()} [{' | '.join(sys_info)}] ===\n")
+        except Exception as e:
+            print(f"Log setup failed: {e}")
+
     # ── Пароль ───────────────────────────────────────────────────────────────
 
     def ask_password(self):
         self._maint.set_sensitive_all(False)
 
         def _check():
-            # Быстрый путь: sudo работает без пароля (кэш сессии)
+            # 0. Если sudo нет в системе — сразу переключаемся на pkexec
+            if not shutil.which("sudo"):
+                GLib.idle_add(self._log, "ℹ Sudo не найден. Включен режим pkexec.\n")
+                GLib.idle_add(self._use_pkexec_auth)
+                return
+
+            # 0.1. Проверка группы wheel (ALT Linux)
+            try:
+                wheel_gid = grp.getgrnam("wheel").gr_gid
+                if wheel_gid not in os.getgroups() and wheel_gid != os.getgid():
+                    GLib.idle_add(self._log, "ℹ Пользователь не в группе wheel. Включен режим pkexec.\n")
+                    GLib.idle_add(self._use_pkexec_auth)
+                    return
+            except (KeyError, ImportError, OSError):
+                pass
+
+            # Быстрый путь: sudo работает без пароля (кэш сессии или NOPASSWD)
             try:
                 if subprocess.run(["sudo", "-n", "true"], capture_output=True, timeout=1).returncode == 0:
+                    backend.set_sudo_nopass(True)
                     GLib.idle_add(self._auth_ok)
                     return
             except Exception:
@@ -309,6 +382,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def _reset_password(self, *_):
         clear_saved_password()
         backend.set_sudo_password(None)
+        backend.set_sudo_nopass(False)
         backend.set_pkexec_mode(False)
         # Сбрасываем кэш sudo, чтобы гарантировать запрос пароля
         subprocess.run(["sudo", "-k"])
@@ -344,6 +418,35 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         dialog.connect("response", _on_response)
         dialog.present(self)
+
+    def _open_log_file(self, *_):
+        if not self._log_file.exists():
+            self.add_toast(Adw.Toast(title="Файл логов еще не создан"))
+            return
+
+        path = str(self._log_file)
+        cmd = []
+
+        # 1. Графические редакторы (gnome-text-editor, gedit)
+        if shutil.which("gnome-text-editor"):
+            cmd = ["gnome-text-editor", path]
+        elif shutil.which("gedit"):
+            cmd = ["gedit", path]
+        # 2. Терминал + nano (если нет GUI редактора)
+        elif shutil.which("nano"):
+            term = shutil.which("ptyxis") or shutil.which("gnome-terminal") or shutil.which("kgx")
+            if term:
+                cmd = [term, "--", "nano", path]
+        
+        if cmd:
+            try:
+                subprocess.Popen(cmd)
+                return
+            except Exception:
+                pass
+        
+        # 3. Fallback (системная ассоциация)
+        Gio.AppInfo.launch_default_for_uri(self._log_file.as_uri(), None)
 
     def _export_settings(self, *_):
         dialog = Gtk.FileDialog()
@@ -543,6 +646,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         stripped = text.strip()
         if stripped:
             self._last_log_line = stripped
+        
+        # Отправляем в очередь для записи в файл (чтобы не блокировать UI)
+        self._log_queue.put(text)
+
         end = self._buf.get_end_iter()
         self._buf.insert(end, text)
         end = self._buf.get_end_iter()
@@ -552,3 +659,17 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         else:
             self._buf.move_mark(mark, end)
         self._tv.scroll_mark_onscreen(mark)
+
+    def _log_writer_loop(self):
+        """Фоновый поток для записи логов в файл."""
+        # Выполняем ротацию и запись заголовка в этом потоке, чтобы не тормозить старт
+        self._setup_logging()
+        
+        while True:
+            text = self._log_queue.get()
+            if not hasattr(self, "_log_file"): continue
+            try:
+                with open(self._log_file, "a", encoding="utf-8") as f:
+                    f.write(text)
+            except Exception:
+                pass

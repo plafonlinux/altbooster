@@ -5,11 +5,13 @@ privileges.py — Повышение привилегий и работа с sud
 from __future__ import annotations
 
 import os
+import shlex
 import stat
 import subprocess
 import tempfile
 import threading
 import time
+import uuid
 from typing import Callable, Sequence
 
 from gi.repository import GLib
@@ -25,6 +27,7 @@ OnDone = Callable[[bool], None]
 
 _sudo_password: str | None = None
 _sudo_lock = threading.Lock()
+_sudo_nopass: bool = False  # True когда sudo работает без пароля (NOPASSWD / кэш)
 
 
 def set_sudo_password(pw: str) -> None:
@@ -38,17 +41,123 @@ def get_sudo_password() -> str:
     with _sudo_lock:
         return _sudo_password or ""
 
+def set_sudo_nopass(enabled: bool) -> None:
+    """Переключает режим sudo без пароля (для NOPASSWD или кэшированной сессии)."""
+    global _sudo_nopass
+    _sudo_nopass = enabled
+
 # ── pkexec режим ──────────────────────────────────────────────────────────────
 
 _use_pkexec: bool = False
+_pkexec_shell_proc: subprocess.Popen | None = None
+_pkexec_shell_lock = threading.Lock()
+
+def _get_pkexec_shell() -> subprocess.Popen | None:
+    """Возвращает (или запускает) долгоживущий root-шелл через pkexec."""
+    global _pkexec_shell_proc
+    
+    # Если процесс мертв, сбрасываем переменную
+    if _pkexec_shell_proc and _pkexec_shell_proc.poll() is not None:
+        _pkexec_shell_proc = None
+
+    if _pkexec_shell_proc is None:
+        try:
+            # Запускаем bash через pkexec. Это вызовет диалог пароля ОДИН раз.
+            _pkexec_shell_proc = subprocess.Popen(
+                ["pkexec", "bash"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, # Объединяем stderr с stdout для простоты
+                text=True,
+                bufsize=0 # Без буферизации
+            )
+        except Exception:
+            return None
+            
+    return _pkexec_shell_proc
 
 def set_pkexec_mode(enabled: bool) -> None:
     """Переключает на pkexec вместо sudo -S (когда sudo не настроен)."""
     global _use_pkexec
     _use_pkexec = enabled
 
+def start_pkexec_shell() -> tuple[bool, bool]:
+    """Запускает и верифицирует постоянный pkexec bash-шелл.
+
+    Вызывается из диалога подтверждения pkexec. Блокирует вызывающий поток
+    до тех пор, пока пользователь не ответит на диалог polkit (или не истечёт
+    60-секундный таймаут).
+
+    Возвращает:
+        (ok, is_cancel)
+        ok        — шелл запущен и ответил на тест
+        is_cancel — пользователь закрыл диалог polkit (returncode == 126)
+    """
+    global _pkexec_shell_proc
+
+    with _pkexec_shell_lock:
+        # Шелл уже работает — ничего не нужно делать
+        if _pkexec_shell_proc and _pkexec_shell_proc.poll() is None:
+            return True, False
+
+        try:
+            proc = subprocess.Popen(
+                ["pkexec", "bash"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=0,
+            )
+        except Exception:
+            return False, False
+
+        # Отправляем тестовую команду с уникальным маркером
+        test_marker = f"---READY-{uuid.uuid4()}---"
+        try:
+            proc.stdin.write(f'echo "{test_marker}"\n')
+            proc.stdin.flush()
+        except OSError:
+            proc.terminate()
+            return False, False
+
+        # Читаем stdout в отдельном потоке, чтобы задать жёсткий таймаут
+        found: list[bool | None] = [None]
+
+        def _reader() -> None:
+            try:
+                while True:
+                    line = proc.stdout.readline()
+                    if not line:            # EOF — процесс завершился
+                        found[0] = False
+                        return
+                    if test_marker in line:
+                        found[0] = True
+                        return
+            except Exception:
+                found[0] = False
+
+        reader = threading.Thread(target=_reader, daemon=True)
+        reader.start()
+        reader.join(timeout=60)
+
+        if found[0] is True:
+            _pkexec_shell_proc = proc
+            return True, False
+
+        # Таймаут или ошибка — завершаем процесс
+        is_cancel = False
+        if proc.poll() is not None:
+            is_cancel = (proc.returncode == 126)
+        try:
+            proc.terminate()
+            proc.wait(timeout=3)
+        except Exception:
+            proc.kill()
+        return False, is_cancel
+
 def sudo_check(pw: str) -> bool:
-    """Проверяет корректность sudo-пароля через вызов id -u."""
+    """Проверяет корректность sudo-пароля."""
     try:
         result = subprocess.run(
             ["sudo", "-k", "-S", "id", "-u"],
@@ -121,36 +230,78 @@ def _apt_dedup_filter(on_line: OnLine) -> OnLine:
 
 # ── Выполнение привилегированных команд ───────────────────────────────────────
 
+def _wrap_epm_auto_install(cmd: Sequence[str]) -> Sequence[str]:
+    """Оборачивает команду epm в скрипт авто-установки eepm."""
+    if not cmd or cmd[0] not in ("epm", "epmi"):
+        return cmd
+    
+    script = (
+        "if ! rpm -q eepm >/dev/null 2>&1; then "
+        "echo -e '▶ EPM не найден. Выполняется установка eepm...\\n'; "
+        "export DEBIAN_FRONTEND=noninteractive; "
+        "apt-get install -y eepm; "
+        "fi && \"$@\""
+    )
+    return ["bash", "-c", script, "--", *cmd]
+
 def _run_pkexec(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
     """Запускает команду через pkexec (polkit). Пароль не нужен — спрашивает polkit."""
     def _worker() -> None:
-        proc = subprocess.Popen(
-            ["pkexec", *cmd],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        # Проверяем блокировку APT, если команда похожа на пакетный менеджер
+        check_lock = False
+        if cmd:
+            if cmd[0] in ("apt", "apt-get", "flatpak", "epm", "epmi"):
+                check_lock = True
+            elif cmd[0] == "bash" and len(cmd) >= 3:
+                # Эвристика для обернутых команд
+                if "apt-get" in cmd[2] or "epm" in cmd[2] or "flatpak" in cmd[2]:
+                    check_lock = True
+        if check_lock:
+            _wait_for_apt_lock(on_line)
 
-        def _drain_stderr() -> None:
-            if not proc.stderr:
+        # Используем глобальную блокировку, чтобы команды не перемешались в шелле
+        with _pkexec_shell_lock:
+            proc = _get_pkexec_shell()
+            
+            # Если не удалось запустить (например, отмена пароля)
+            if not proc or proc.poll() is not None:
+                GLib.idle_add(on_line, "⚠  Root-сессия не активна (pkexec).\n")
+                GLib.idle_add(on_done, False)
                 return
-            for line in proc.stderr:
-                low = line.lower()
-                if "pkexec" in low or "authentication" in low:
-                    continue
-                GLib.idle_add(on_line, line)
 
-        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
-        stderr_thread.start()
+            # Формируем команду с маркером окончания
+            delimiter = f"---END-{uuid.uuid4()}---"
+            cmd_str = shlex.join(cmd)
+            # Запускаем команду в подоболочке, перенаправляем stderr и печатаем код возврата
+            script = f"({cmd_str}) 2>&1; echo \"{delimiter} $?\"\n"
 
-        if proc.stdout:
-            for line in proc.stdout:
-                GLib.idle_add(on_line, line)
-
-        stderr_thread.join()
-        proc.wait()
-        GLib.idle_add(on_done, proc.returncode == 0)
+            success = False
+            try:
+                if proc.stdin:
+                    proc.stdin.write(script)
+                    proc.stdin.flush()
+                
+                # Читаем вывод до маркера
+                if proc.stdout:
+                    while True:
+                        line = proc.stdout.readline()
+                        if not line: break # EOF — шелл упал
+                        
+                        if delimiter in line:
+                            # Парсим код возврата: "---END-uuid--- 0"
+                            try:
+                                code = int(line.strip().split(" ")[-1])
+                                success = (code == 0)
+                            except (ValueError, IndexError):
+                                success = False
+                            break
+                        
+                        GLib.idle_add(on_line, line)
+            except (BrokenPipeError, OSError):
+                # Шелл умер (например, был убит)
+                GLib.idle_add(on_line, "⚠  Root-сессия была прервана.\n")
+            
+            GLib.idle_add(on_done, success)
 
     threading.Thread(target=_worker, daemon=True).start()
 
@@ -162,37 +313,48 @@ def run_privileged(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None
         _run_pkexec(cmd, on_line, on_done)
         return
 
-    if cmd and cmd[0] in ("epm", "epmi"):
-        cmd = [
-            "bash", "-c",
-            "if ! rpm -q eepm >/dev/null 2>&1; then echo -e '▶ EPM не найден. Выполняется установка eepm...\\n'; apt-get install -y eepm; fi && \"$@\"",
-            "--", *cmd
-        ]
-
-    if cmd and cmd[0] in ("apt", "apt-get"):
+    # Фильтруем вывод apt и epm (до того как cmd превратится в bash-скрипт)
+    if cmd and cmd[0] in ("apt", "apt-get", "epm", "epmi"):
         on_line = _apt_dedup_filter(on_line)
+
+    cmd = _wrap_epm_auto_install(cmd)
 
     def _worker() -> None:
         password = get_sudo_password()
 
-        if cmd and cmd[0] in ("apt", "apt-get", "flatpak"):
+        check_lock = False
+        if cmd:
+            if cmd[0] in ("apt", "apt-get", "flatpak"):
+                check_lock = True
+            elif cmd[0] == "bash" and len(cmd) >= 3:
+                if "apt-get" in cmd[2] or "epm" in cmd[2] or "flatpak" in cmd[2]:
+                    check_lock = True
+        if check_lock:
             _wait_for_apt_lock(on_line)
 
-        proc = subprocess.Popen(
-            ["sudo", "-S", *cmd],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        if proc.stdin:
-            try:
-                proc.stdin.write(password + "\n")
-                proc.stdin.flush()
-            except BrokenPipeError:
-                pass
-            proc.stdin.close()
+        if _sudo_nopass:
+            proc = subprocess.Popen(
+                ["sudo", "-n", *cmd],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        else:
+            proc = subprocess.Popen(
+                ["sudo", "-S", *cmd],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            if proc.stdin:
+                try:
+                    proc.stdin.write(password + "\n")
+                    proc.stdin.flush()
+                except BrokenPipeError:
+                    pass
+                proc.stdin.close()
 
         def _drain_stderr() -> None:
             if not proc.stderr:
@@ -249,46 +411,56 @@ def run_epm_sync(cmd: Sequence[str], on_line: OnLine) -> bool:
 def run_epm(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
     """Запускает epm через sudo -A."""
 
-    if cmd and cmd[0] in ("epm", "epmi"):
-        cmd = [
-            "bash", "-c",
-            "if ! rpm -q eepm >/dev/null 2>&1; then echo -e '▶ EPM не найден. Выполняется установка eepm...\\n'; apt-get install -y eepm; fi && \"$@\"",
-            "--", *cmd
-        ]
+    cmd = _wrap_epm_auto_install(cmd)
 
     on_line = _apt_dedup_filter(on_line)
 
+    if _use_pkexec:
+        _run_pkexec(cmd, on_line, on_done)
+        return
+
     def _worker() -> None:
-        password = get_sudo_password()
-        env = os.environ.copy()
+        _wait_for_apt_lock(on_line)
 
-        fd, askpass_path = tempfile.mkstemp(suffix=".sh")
-        with os.fdopen(fd, "w") as script:
-            script.write("#!/bin/sh\n")
-            script.write(f"echo {password!r}\n")
-
-        os.chmod(askpass_path, stat.S_IRWXU)
-        env["SUDO_ASKPASS"] = askpass_path
-
+        askpass_path: str | None = None
         try:
-            _wait_for_apt_lock(on_line)
-            proc = subprocess.Popen(
-                ["sudo", "-A", *cmd],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,
-                text=True,
-                env=env,
-            )
+            if _sudo_nopass:
+                proc = subprocess.Popen(
+                    ["sudo", "-n", *cmd],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL,
+                    text=True,
+                )
+            else:
+                password = get_sudo_password()
+                env = os.environ.copy()
+                fd, askpass_path = tempfile.mkstemp(suffix=".sh")
+                with os.fdopen(fd, "w") as script:
+                    script.write("#!/bin/sh\n")
+                    script.write(f"echo {password!r}\n")
+                # Устанавливаем права 0700 (rwx------)
+                os.chmod(askpass_path, stat.S_IRWXU)
+                env["SUDO_ASKPASS"] = askpass_path
+                proc = subprocess.Popen(
+                    ["sudo", "-A", *cmd],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL,
+                    text=True,
+                    env=env,
+                )
+
             if proc.stdout:
                 for line in proc.stdout:
                     GLib.idle_add(on_line, line)
             proc.wait()
             GLib.idle_add(on_done, proc.returncode == 0)
         finally:
-            try:
-                os.unlink(askpass_path)
-            except OSError:
-                pass
+            if askpass_path:
+                try:
+                    os.unlink(askpass_path)
+                except OSError:
+                    pass
 
     threading.Thread(target=_worker, daemon=True).start()
