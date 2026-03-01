@@ -48,15 +48,15 @@ def set_pkexec_mode(enabled: bool) -> None:
     _use_pkexec = enabled
 
 def sudo_check(pw: str) -> bool:
-    """Проверяет корректность sudo-пароля через вызов /bin/true."""
+    """Проверяет корректность sudo-пароля через вызов id -u."""
     try:
         result = subprocess.run(
-            ["sudo", "-k", "-S", "/bin/true"],
+            ["sudo", "-k", "-S", "id", "-u"],
             input=pw + "\n",
             capture_output=True,
             text=True,
         )
-        return result.returncode == 0
+        return result.returncode == 0 and result.stdout.strip() == "0"
     except (OSError, subprocess.SubprocessError):
         return False
 
