@@ -9,31 +9,34 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .privileges import get_sudo_password
+import sys
+
+from .privileges import get_sudo_password, run_privileged_sync
 from .gsettings import gsettings_get
 import config
 
 def is_sudo_enabled() -> bool:
     """Проверяет статус sudo через control sudowheel в ALT Linux."""
 
-    # Способ 1: Проверка через sudo -n (неинтерактивно).
-    # Работает если в системе ещё действует кэш sudo-сессии.
+    # Способ 1: sudo -n true.
+    # В GNOME-сессии (нет TTY) sudo -n true возвращает 0 из-за PAM-bypass:
+    # сессионный агент аутентифицирует автоматически, даже если sudowheel отключён.
+    # Поэтому returncode == 0 доверяем только при запуске из терминала (isatty).
+    # "password is required" в stderr надёжен в любом режиме — sudo выдаёт его
+    # до обращения к PAM, когда знает что пароль нужен, но -n запрещает спрашивать.
     try:
         env = os.environ.copy()
         env["LC_ALL"] = "C"
         res = subprocess.run(["sudo", "-n", "true"], capture_output=True, text=True, env=env, timeout=2)
-        if res.returncode == 0:
+        if sys.stdin.isatty() and res.returncode == 0:
             return True
-        # Если sudo настроен, но требует пароль, он вернёт ошибку "a password is required".
-        # Если не настроен — "user is not in the sudoers file".
         if "password is required" in res.stderr.lower():
             return True
     except Exception:
         pass
 
-    # Способ 2: Если пароль уже введён в приложении, проверяем control sudowheel.
-    # Это единственный надёжный способ: `control sudowheel` читает реальный /etc/sudoers,
-    # поэтому не даёт ложных срабатываний при отключении sudo через wheel-группу.
+    # Способ 2: sudo -S с сохранённым паролем → control sudowheel.
+    # control sudowheel читает реальный /etc/sudoers, не даёт ложных срабатываний.
     password = get_sudo_password()
     if password:
         try:
@@ -53,9 +56,15 @@ def is_sudo_enabled() -> bool:
         except Exception:
             pass
 
-    # Способ 3 (НЕ используем): проверка членства в группе wheel ненадёжна,
-    # потому что `control sudowheel disabled` не удаляет пользователя из группы,
-    # а лишь убирает её из /etc/sudoers — это приводило к ложному "Активировано".
+    # Способ 3: pkexec-режим (запуск из GNOME без TTY, пароль sudo не сохранён).
+    # Вызов из фонового потока SettingRow._refresh — блокировка безопасна.
+    if not sys.stdin.isatty():
+        control = shutil.which("control") or "/usr/sbin/control"
+        lines: list[str] = []
+        run_privileged_sync([control, "sudowheel"], lambda line: lines.append(line))
+        out = "".join(lines).lower()
+        if "enabled" in out or "wheelonly" in out:
+            return True
 
     return False
 
