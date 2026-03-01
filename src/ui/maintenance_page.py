@@ -168,18 +168,7 @@ class CacheTaskRow(Adw.ExpanderRow):
             win.start_progress("Очистка кэша...")
         
         GLib.timeout_add(110, self._pulse)
-        threading.Thread(target=self._run, args=(["bash", "-c", cmd_str],), daemon=True).start()
-
-    def _run(self, cmd):
-        import subprocess
-        try:
-            res = subprocess.run(cmd, capture_output=True, text=True)
-            if res.stdout: GLib.idle_add(self._log, res.stdout)
-            if res.stderr: GLib.idle_add(self._log, res.stderr)
-            GLib.idle_add(self._finish, res.returncode == 0)
-        except Exception as e:
-            GLib.idle_add(self._log, f"Error: {e}\n")
-            GLib.idle_add(self._finish, False)
+        backend.run_privileged(["bash", "-c", cmd_str], self._log, self._finish)
 
     def _pulse(self):
         if self._running:

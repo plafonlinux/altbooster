@@ -79,12 +79,12 @@ def sudo_check(pw: str) -> bool:
     """Проверяет корректность sudo-пароля."""
     try:
         result = subprocess.run(
-            ["sudo", "-k", "-S", "id", "-u"],
+            ["sudo", "-k", "-S", "-v"],
             input=pw + "\n",
             capture_output=True,
             text=True,
         )
-        return result.returncode == 0 and result.stdout.strip() == "0"
+        return result.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
 
@@ -184,7 +184,7 @@ def _run_pkexec(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
             
             # Если не удалось запустить (например, отмена пароля)
             if not proc or proc.poll() is not None:
-                GLib.idle_add(on_line, "⚠  Не удалось получить доступ root (pkexec).\n")
+                GLib.idle_add(on_line, "⚠  Root-сессия не активна (pkexec).\n")
                 GLib.idle_add(on_done, False)
                 return
 
@@ -339,6 +339,7 @@ def run_epm(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
             script.write("#!/bin/sh\n")
             script.write(f"echo {password!r}\n")
 
+        # Устанавливаем права 0700 (rwx------)
         os.chmod(askpass_path, stat.S_IRWXU)
         env["SUDO_ASKPASS"] = askpass_path
 
