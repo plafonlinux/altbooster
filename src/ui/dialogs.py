@@ -120,20 +120,24 @@ class PasswordDialog(Adw.AlertDialog):
                 # Проверяем реальную авторизацию через pkexec
                 res = subprocess.run(["pkexec", "/bin/true"], capture_output=True, text=True)
                 ok = (res.returncode == 0)
+                # Код 126 = Authorization dismissed (Отмена пользователем)
+                is_cancel = (res.returncode == 126)
             except Exception:
                 ok = False
-            GLib.idle_add(self._check_pkexec_done, ok)
+                is_cancel = False
+            GLib.idle_add(self._check_pkexec_done, ok, is_cancel)
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _check_pkexec_done(self, ok):
+    def _check_pkexec_done(self, ok, is_cancel=False):
         if ok:
             self._submitted = True
             self.close()
             if self._on_pkexec:
                 self._on_pkexec()
         else:
-            self.set_body("❌ Ошибка авторизации pkexec. Попробуйте снова.")
+            msg = "⚠ Отменено пользователем." if is_cancel else "❌ Ошибка авторизации pkexec. Попробуйте снова."
+            self.set_body(msg)
             self.set_response_enabled("pkexec", True)
             self.set_response_enabled("ok", bool(self._entry.get_text()))
 
