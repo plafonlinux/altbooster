@@ -440,7 +440,7 @@ def run_epm(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
                 fd, askpass_path = tempfile.mkstemp(suffix=".sh")
                 with os.fdopen(fd, "w") as script:
                     script.write("#!/bin/sh\n")
-                    script.write(f"echo {password!r}\n")
+                    script.write(f"printf '%s\\n' {shlex.quote(password)}\n")
                 # Устанавливаем права 0700 (rwx------)
                 os.chmod(askpass_path, stat.S_IRWXU)
                 env["SUDO_ASKPASS"] = askpass_path
