@@ -1,10 +1,14 @@
 """Главное окно приложения ALT Booster."""
 
+import datetime
 import json
 import os
 import shutil
 import subprocess
+import sys
 import threading
+import zipfile
+import tempfile
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -15,7 +19,7 @@ import config
 import backend
 from dynamic_page import DynamicPage
 from ui.common import load_module
-from ui.dialogs import PasswordDialog, get_saved_password
+from ui.dialogs import PasswordDialog, get_saved_password, clear_saved_password
 from ui.setup_page import SetupPage
 from ui.apps_page import AppsPage
 from ui.extensions_page import ExtensionsPage
@@ -46,7 +50,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self.connect("close-request", self._on_close)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.set_content(root)
+        
+        self._toast_overlay = Adw.ToastOverlay()
+        self._toast_overlay.set_child(root)
+        self.set_content(self._toast_overlay)
+
         root.append(self._build_header())
 
         self._setup = SetupPage(self._log)
@@ -95,6 +103,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         menu.append("О приложении", "win.about")
         menu.append("Очистить лог", "win.clear_log")
         menu.append("Очистить кэш", "win.reset_state")
+        menu.append("Сбросить сохраненный пароль", "win.reset_password")
+        menu.append("Сброс настроек приложения", "win.reset_config")
+        menu.append("Экспорт настроек", "win.export_settings")
+        menu.append("Импорт настроек", "win.import_settings")
         mb = Gtk.MenuButton(); mb.set_icon_name("open-menu-symbolic"); mb.set_menu_model(menu)
         header.pack_end(mb)
         
@@ -103,6 +115,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             ("about", self._show_about),
             ("clear_log", self._clear_log),
             ("reset_state", self._reset_state),
+            ("reset_password", self._reset_password),
+            ("reset_config", self._reset_config),
+            ("export_settings", self._export_settings),
+            ("import_settings", self._import_settings),
         ]
         for name, cb in actions:
             a = Gio.SimpleAction.new(name, None)
@@ -121,7 +137,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._log_container.append(sep)
 
         # 1. Статус
-        self._status_label = Gtk.Label(label="Готов к работе")
+        self._status_label = Gtk.Label(label="Ожидание авторизации...")
         self._status_label.set_halign(Gtk.Align.START)
         self._status_label.set_margin_start(12)
         self._status_label.set_margin_top(12)
@@ -221,6 +237,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._maint.set_sensitive_all(True)
         self._maint.refresh_checks()
         self._log("👋 Добро пожаловать в ALT Booster. С чего начнём?\n")
+        self._status_label.set_label("Готов к работе")
 
     # ── Настройки окна ───────────────────────────────────────────────────────
 
@@ -289,8 +306,173 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 self._log("🔄 Кэш статусов очищен.\n") # <--- Текст в терминале
                 GLib.timeout_add(1500, self.close)
 
-        d.connect("response", _on_response)
-        d.present(self)
+    def _reset_password(self, *_):
+        clear_saved_password()
+        backend.set_sudo_password(None)
+        backend.set_pkexec_mode(False)
+        # Сбрасываем кэш sudo, чтобы гарантировать запрос пароля
+        subprocess.run(["sudo", "-k"])
+        self._log("🔑 Сохраненный пароль сброшен.\n")
+        self.add_toast(Adw.Toast(title="Пароль сброшен"))
+        
+        # Сразу предлагаем войти заново (или проверяем sudo -n)
+        self.ask_password()
+
+    def _reset_config(self, *_):
+        dialog = Adw.AlertDialog(
+            heading="Сброс настроек приложения?",
+            body="Внимание! Это действие удалит все ваши настройки, списки приложений и кэш.\nПриложение будет перезапущено в состоянии «как после установки».",
+        )
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("reset", "Сбросить")
+        dialog.set_response_appearance("reset", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        def _on_response(_d, response):
+            if response == "reset":
+                self._log("▶  Сброс конфигурации...\n")
+                try:
+                    if os.path.exists(config.CONFIG_DIR):
+                        shutil.rmtree(config.CONFIG_DIR)
+                    self._log("✔  Конфигурация удалена. Перезапуск...\n")
+                    os.execl(sys.executable, sys.executable, *sys.argv)
+                except Exception as e:
+                    self._log(f"✘  Ошибка сброса: {e}\n")
+            else:
+                self._log("ℹ  Пользователь отменил действие.\n")
+
+        dialog.connect("response", _on_response)
+        dialog.present(self)
+
+    def _export_settings(self, *_):
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Экспорт настроек")
+        filename = f"altbooster_backup_{datetime.datetime.now().strftime('%Y-%m-%d')}.zip"
+        dialog.set_initial_name(filename)
+        
+        def _on_save(d, res):
+            try:
+                file = d.save_finish(res)
+                if file:
+                    self._do_export(file.get_path())
+            except Exception as e:
+                self._log(f"✘ Ошибка экспорта: {e}\n")
+
+        dialog.save(self, None, _on_save)
+
+    def _do_export(self, zip_path):
+        try:
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                # Сохраняем версию приложения для проверки совместимости
+                zf.writestr("version", config.VERSION)
+
+                if os.path.exists(config.CONFIG_DIR):
+                    for root, _, files in os.walk(config.CONFIG_DIR):
+                        for file in files:
+                            full_path = os.path.join(root, file)
+                            
+                            # Пропускаем битые символические ссылки, чтобы не сломать экспорт
+                            if os.path.islink(full_path) and not os.path.exists(full_path):
+                                self._log(f"⚠ Пропущен битый symlink: {file}\n")
+                                continue
+
+                            rel_path = os.path.relpath(full_path, config.CONFIG_DIR)
+                            zf.write(full_path, rel_path)
+            self._log(f"✔ Настройки экспортированы в {zip_path}\n")
+            self.add_toast(Adw.Toast(title="Экспорт завершен"))
+        except Exception as e:
+            self._log(f"✘ Ошибка создания архива: {e}\n")
+
+    def _import_settings(self, *_):
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Импорт настроек")
+        f = Gtk.FileFilter()
+        f.set_name("ZIP архивы")
+        f.add_pattern("*.zip")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(f)
+        dialog.set_filters(filters)
+
+        def _on_open(d, res):
+            try:
+                file = d.open_finish(res)
+                if file:
+                    self._confirm_import(file.get_path())
+            except Exception as e:
+                self._log(f"✘ Ошибка выбора файла: {e}\n")
+
+        dialog.open(self, None, _on_open)
+
+    def _confirm_import(self, zip_path):
+        # Проверяем версию архива
+        imported_ver = "неизвестно"
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                if "version" in zf.namelist():
+                    imported_ver = zf.read("version").decode("utf-8").strip()
+        except Exception as e:
+            self._log(f"✘ Ошибка чтения архива: {e}\n")
+            return
+
+        body = "Текущие настройки будут перезаписаны. Приложение перезапустится."
+        if imported_ver != config.VERSION:
+            body += f"\n\n⚠ Внимание: Версия настроек ({imported_ver}) отличается от текущей ({config.VERSION}). Возможны ошибки совместимости."
+
+        dialog = Adw.AlertDialog(
+            heading="Импортировать настройки?",
+            body=body,
+        )
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("import", "Импортировать")
+        dialog.set_response_appearance("import", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        
+        def _on_response(_d, res):
+            if res == "import":
+                try:
+                    # Безопасный импорт: сначала распаковываем во временную папку
+                    with tempfile.TemporaryDirectory() as tmp_dir:
+                        with zipfile.ZipFile(zip_path, 'r') as zf:
+                            zf.extractall(tmp_dir)
+                        
+                        # Удаляем файл версии, чтобы не мусорить в конфиге
+                        ver_file = os.path.join(tmp_dir, "version")
+                        if os.path.exists(ver_file):
+                            os.remove(ver_file)
+                        
+                        # Безопасная замена: делаем бэкап текущего конфига
+                        backup_dir = config.CONFIG_DIR.with_suffix(".bak_restore")
+                        if os.path.exists(config.CONFIG_DIR):
+                            if os.path.exists(backup_dir):
+                                shutil.rmtree(backup_dir)
+                            shutil.move(config.CONFIG_DIR, backup_dir)
+
+                        try:
+                            shutil.copytree(tmp_dir, config.CONFIG_DIR)
+                            # Если успешно, удаляем бэкап
+                            if os.path.exists(backup_dir):
+                                shutil.rmtree(backup_dir)
+                        except Exception:
+                            # При ошибке восстанавливаем старый конфиг
+                            if os.path.exists(backup_dir):
+                                if os.path.exists(config.CONFIG_DIR):
+                                    shutil.rmtree(config.CONFIG_DIR)
+                                shutil.move(backup_dir, config.CONFIG_DIR)
+                            raise
+
+                    self._log("✔ Настройки импортированы. Перезапуск...\n")
+                    os.execl(sys.executable, sys.executable, *sys.argv)
+                except Exception as e:
+                    self._log(f"✘ Ошибка импорта: {e}\n")
+        
+        dialog.connect("response", _on_response)
+        dialog.present(self)
+
+    def add_toast(self, toast):
+        self._toast_overlay.add_toast(toast)
+
 
     # ── Лог ──────────────────────────────────────────
 
