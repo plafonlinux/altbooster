@@ -5,11 +5,13 @@ privileges.py — Повышение привилегий и работа с sud
 from __future__ import annotations
 
 import os
+import shlex
 import stat
 import subprocess
 import tempfile
 import threading
 import time
+import uuid
 from typing import Callable, Sequence
 
 from gi.repository import GLib
@@ -41,6 +43,32 @@ def get_sudo_password() -> str:
 # ── pkexec режим ──────────────────────────────────────────────────────────────
 
 _use_pkexec: bool = False
+_pkexec_shell_proc: subprocess.Popen | None = None
+_pkexec_shell_lock = threading.Lock()
+
+def _get_pkexec_shell() -> subprocess.Popen | None:
+    """Возвращает (или запускает) долгоживущий root-шелл через pkexec."""
+    global _pkexec_shell_proc
+    
+    # Если процесс мертв, сбрасываем переменную
+    if _pkexec_shell_proc and _pkexec_shell_proc.poll() is not None:
+        _pkexec_shell_proc = None
+
+    if _pkexec_shell_proc is None:
+        try:
+            # Запускаем bash через pkexec. Это вызовет диалог пароля ОДИН раз.
+            _pkexec_shell_proc = subprocess.Popen(
+                ["pkexec", "bash"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, # Объединяем stderr с stdout для простоты
+                text=True,
+                bufsize=0 # Без буферизации
+            )
+        except Exception:
+            return None
+            
+    return _pkexec_shell_proc
 
 def set_pkexec_mode(enabled: bool) -> None:
     """Переключает на pkexec вместо sudo -S (когда sudo не настроен)."""
@@ -48,7 +76,7 @@ def set_pkexec_mode(enabled: bool) -> None:
     _use_pkexec = enabled
 
 def sudo_check(pw: str) -> bool:
-    """Проверяет корректность sudo-пароля через вызов id -u."""
+    """Проверяет корректность sudo-пароля."""
     try:
         result = subprocess.run(
             ["sudo", "-k", "-S", "id", "-u"],
@@ -150,39 +178,49 @@ def _run_pkexec(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
         if check_lock:
             _wait_for_apt_lock(on_line)
 
-        proc = subprocess.Popen(
-            ["pkexec", *cmd],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        def _drain_stderr() -> None:
-            if not proc.stderr:
+        # Используем глобальную блокировку, чтобы команды не перемешались в шелле
+        with _pkexec_shell_lock:
+            proc = _get_pkexec_shell()
+            
+            # Если не удалось запустить (например, отмена пароля)
+            if not proc or proc.poll() is not None:
+                GLib.idle_add(on_line, "⚠  Не удалось получить доступ root (pkexec).\n")
+                GLib.idle_add(on_done, False)
                 return
-            for line in proc.stderr:
-                low = line.lower()
-                if "pkexec" in low or "authentication" in low:
-                    continue
-                if "request dismissed" in low:
-                    continue
-                GLib.idle_add(on_line, line)
 
-        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
-        stderr_thread.start()
+            # Формируем команду с маркером окончания
+            delimiter = f"---END-{uuid.uuid4()}---"
+            cmd_str = shlex.join(cmd)
+            # Запускаем команду в подоболочке, перенаправляем stderr и печатаем код возврата
+            script = f"({cmd_str}) 2>&1; echo \"{delimiter} $?\"\n"
 
-        if proc.stdout:
-            for line in proc.stdout:
-                GLib.idle_add(on_line, line)
-
-        stderr_thread.join()
-        proc.wait()
-        if proc.returncode == 126:
-            GLib.idle_add(on_line, "⚠  Действие отменено пользователем.\n")
-        elif proc.returncode == 127:
-            GLib.idle_add(on_line, f"✘  Команда не найдена: {cmd[0]}\n")
-        GLib.idle_add(on_done, proc.returncode == 0)
+            success = False
+            try:
+                if proc.stdin:
+                    proc.stdin.write(script)
+                    proc.stdin.flush()
+                
+                # Читаем вывод до маркера
+                if proc.stdout:
+                    while True:
+                        line = proc.stdout.readline()
+                        if not line: break # EOF — шелл упал
+                        
+                        if delimiter in line:
+                            # Парсим код возврата: "---END-uuid--- 0"
+                            try:
+                                code = int(line.strip().split(" ")[-1])
+                                success = (code == 0)
+                            except (ValueError, IndexError):
+                                success = False
+                            break
+                        
+                        GLib.idle_add(on_line, line)
+            except (BrokenPipeError, OSError):
+                # Шелл умер (например, был убит)
+                GLib.idle_add(on_line, "⚠  Root-сессия была прервана.\n")
+            
+            GLib.idle_add(on_done, success)
 
     threading.Thread(target=_worker, daemon=True).start()
 
