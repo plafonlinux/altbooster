@@ -47,6 +47,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         # 1. Лог собирается самым первым
         self._pulse_timer_id = None
+        self._reset_status_timer_id = None
         self._log_queue = queue.SimpleQueue()
         self._log_widget = self._build_log_panel()
         
@@ -660,6 +661,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             if self._pulse_timer_id:
                 GLib.source_remove(self._pulse_timer_id)
             self._pulse_timer_id = GLib.timeout_add(100, self._pulse_progress)
+            # Отменяем отложенный сброс статуса, если он ещё не сработал
+            if self._reset_status_timer_id:
+                GLib.source_remove(self._reset_status_timer_id)
+                self._reset_status_timer_id = None
         GLib.idle_add(_do)
 
     def _on_stop_clicked(self, _):
@@ -703,7 +708,16 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 self._stop_btn.set_sensitive(False)
                 self._stop_btn.set_visible(False)
                 self._on_cancel_cb = None
+                # Через 4 секунды возвращаем статус в «Готов к работе»
+                if self._reset_status_timer_id:
+                    GLib.source_remove(self._reset_status_timer_id)
+                self._reset_status_timer_id = GLib.timeout_add(4000, self._reset_status_label)
         GLib.idle_add(_do)
+
+    def _reset_status_label(self):
+        self._reset_status_timer_id = None
+        self._status_label.set_label("Готов к работе")
+        return False
 
     def _log(self, text):
         GLib.idle_add(self._log_internal, text)

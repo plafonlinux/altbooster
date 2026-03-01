@@ -474,7 +474,11 @@ class TaskRow(Adw.ActionRow):
         right.append(self._btn)
         self.add_suffix(right)
 
+        self._state_key = f"task_check_{task['id']}" if "id" in task and "check" in task else None
+
         if "check" in task:
+            if self._state_key and config.state_get(self._state_key) is True:
+                GLib.idle_add(self._mark_done_init)
             threading.Thread(target=self._initial_check, daemon=True).start()
 
     def refresh_check(self):
@@ -484,14 +488,19 @@ class TaskRow(Adw.ActionRow):
     def _initial_check(self):
         check = self._task["check"]
         ok = False
+        can_verify = True  # False если не хватает прав и проверить невозможно
+
         if check.get("type") == "path":
             path = os.path.expanduser(check["value"])
             if os.path.exists(path):
                 ok = True
-            elif backend.get_sudo_password():
-                # Если прав нет, пробуем через sudo (для системных путей)
-                if backend.run_privileged_sync(["test", "-e", path], lambda _: None):
-                    ok = True
+            else:
+                pw = backend.get_sudo_password()
+                if pw:
+                    ok = backend.run_privileged_sync(["test", "-e", path], lambda _: None)
+                else:
+                    can_verify = False
+
         elif check.get("type") == "file_contains":
             path = os.path.expanduser(check["path"])
             needle = check["value"]
@@ -508,10 +517,17 @@ class TaskRow(Adw.ActionRow):
                         )
                         ok = needle in res.stdout
                     except Exception:
-                        ok = False
+                        can_verify = False
+                else:
+                    can_verify = False
 
         if ok:
+            if self._state_key:
+                config.state_set(self._state_key, True)
             GLib.idle_add(self._mark_done_init)
+        elif can_verify and self._state_key:
+            # Проверка прошла и подтвердила: патч не применён
+            config.state_set(self._state_key, False)
 
     def _mark_done_init(self):
         self.result = True
@@ -584,12 +600,12 @@ class TaskRow(Adw.ActionRow):
             self._btn.remove_css_class("suggested-action")
             self._btn.add_css_class("flat")
 
-            # Если у задачи есть проверка, перепроверяем реальное состояние
             if "check" in self._task:
                 self._on_log(f"✔  Готово: {self._task['label']}\n")
                 if hasattr(win, "stop_progress"): win.stop_progress(ok)
-                self._on_progress()
-                threading.Thread(target=self._initial_check, daemon=True).start()
+                if self._state_key:
+                    config.state_set(self._state_key, True)
+                self._mark_done_init()
                 return
         else:
             set_status_error(self._status)
