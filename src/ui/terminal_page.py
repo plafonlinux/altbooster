@@ -32,7 +32,7 @@ alias tml="sudo timeshift --list"
 #
 # Neofetch
 #
-alias n="fastfetch -c '/mnt/datassd/holmes/Документы/Fastftech/2025/plafonfetch.jsonc'"
+alias n="fastfetch -c ~/.config/fastfetch/plafonfetch.jsonc"
 alias k="uname -rs"
 alias g="gnome-shell --version"
 alias f="lsb_release -sd"
@@ -54,7 +54,7 @@ alias find="epmqp"
 alias poisk="epms"
 alias up="epm update && epm full-upgrade && flatpak update --noninteractive -y"
 alias cc="sudo apt-get clean && sudo apt-get autoclean && sudo apt-get check && sudo remove-old-kernels -a && flatpak uninstall --unused -y && sudo journalctl --vacuum-time=1weeks"
-alias ccc='/home/plafon/.config/mainteencer/maintenance.sh'
+alias ccc='~/.config/mainteencer/maintenance.sh'
 alias c="clear"
 #
 # PC
@@ -110,43 +110,131 @@ alias adav="sh /mnt/datassd/holmes/Документы/DAVINCI/davinci_alt.sh"
 # ---------------------------
 """
 
-_FASTFETCH_CONFIG = """{
-  "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
-  "logo": {
-    "type": "auto",
-    "padding": { "top": 2 }
-  },
-  "modules": [
-    "title",
-    "separator",
-    "os",
-    "host",
-    "kernel",
-    "uptime",
-    "packages",
-    "shell",
-    "display",
-    "de",
-    "wm",
-    "wmtheme",
-    "theme",
-    "icons",
-    "font",
-    "cursor",
-    "terminal",
-    "terminalfont",
-    "cpu",
-    "gpu",
-    "memory",
-    "swap",
-    "disk",
-    "localip",
-    "battery",
-    "poweradapter",
-    "locale",
-    "break",
-    "colors"
-  ]
+_FASTFETCH_CONFIG = r"""{
+    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+    "logo": {
+      "source": "/mnt/datassd/holmes/Документы/Fastftech/2025/alt2simple.txt",
+      "height": 6,
+      "width": 12,
+      "padding": {
+          "top": 0,
+          "left": 1
+      }
+    },
+    "display": {
+		"separator": "\u001b[90m ▐ "
+    },
+    "modules": [
+        {
+            "type": "os",
+            "key": "",
+            "keyColor": "94",
+            "format": "{2} {#2}[p11]"
+        },
+        {
+            "type": "kernel",
+            "key": "",
+            "keyColor": "39"
+        },
+        {
+            "type": "packages",
+            "key": "󰏖",
+            "keyColor": "33"
+        },
+        {
+            "type": "shell",
+            "key": "",
+            "keyColor": "94",
+            "format": "{1} {#2}[{4}] {#2}"
+        },
+        {
+            "type": "terminal",
+            "key": "",
+            "keyColor": "39",
+            "format": "{1} {#2}[{6}]"
+        },
+        "break",
+
+        {
+            "type": "wm",
+            "key": "󱍜",
+            "keyColor": "34"
+        },
+        {
+            "type": "wmtheme",
+            "key": "󰉼",
+            "keyColor": "33"
+        },
+        {
+            "type": "icons",
+            "key": "",
+            "keyColor": "93"
+        },
+
+        "break",
+        {
+            "type": "host",
+            "key": "󰌢",
+            "keyColor": "92"
+        },
+        {
+            "type": "display",
+            "key": "󰹑",
+            "keyColor": "32"
+        },
+        {
+            "type": "cpu",
+            "key": "󰍛",
+            "keyColor": "96"
+        },
+        {
+            "type": "gpu",
+            "key": "󰢮",
+            "keyColor": "96"
+        },
+        {
+            "type": "memory",
+            "key": "",
+            "keyColor": "36"
+        },
+        {
+            "type": "disk",
+            "key": "󰋊",
+            // "format": "{size-used} / {size-total} ({size-percentage})"
+        },
+
+        "break",
+        {
+            "type": "uptime",
+            "key": "󱤦",
+            "keyColor": "39"
+        },
+        {
+            "type": "command",
+            "key": "󱦟",
+            "keyColor": "31",
+            "text": "birth_install=$(stat -c %W /); current=$(date +%s); time_progression=$((current - birth_install)); days_difference=$((time_progression / 86400)); echo $days_difference день",
+            "format": "Этой системе {1}"
+        },
+
+        "break",
+        {
+            "type": "poweradapter",
+            "key": "{#90}{$1}│ {#91}Power       {#90}│",
+            "format": "{$2}{$3}{name}",
+            // fastfetch -h poweradapter-format
+            // {2}: PowerAdapter name - name
+            // The default is something similar to "{1}W".
+        },
+        {
+            "type": "battery",
+            "key": "Battery",
+            "temp": true,
+        },
+
+        "break",
+        "colors"
+    ]
 }
 """
 
