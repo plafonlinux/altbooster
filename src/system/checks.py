@@ -19,7 +19,14 @@ def is_sudo_enabled() -> bool:
     # Способ 1: Проверка через sudo -n (неинтерактивно).
     # Работает если в системе ещё действует кэш sudo-сессии.
     try:
-        if subprocess.run(["sudo", "-n", "true"], capture_output=True, timeout=1).returncode == 0:
+        env = os.environ.copy()
+        env["LANG"] = "C"
+        res = subprocess.run(["sudo", "-n", "true"], capture_output=True, text=True, env=env, timeout=2)
+        if res.returncode == 0:
+            return True
+        # Если sudo настроен, но требует пароль, он вернёт ошибку "a password is required".
+        # Если не настроен — "user is not in the sudoers file".
+        if "password is required" in res.stderr.lower():
             return True
     except Exception:
         pass
