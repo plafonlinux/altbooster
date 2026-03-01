@@ -159,8 +159,6 @@ class ExtensionsPage(Gtk.Box):
         box.set_margin_end(12)
         self._body.append(box)
 
-        self._id_status = make_status_icon()
-
         self._id_entry = Gtk.Entry()
         self._id_entry.set_valign(Gtk.Align.CENTER)
         self._id_entry.set_placeholder_text("Поиск расширений или ID...")
@@ -170,12 +168,10 @@ class ExtensionsPage(Gtk.Box):
         self._id_entry.connect("activate", self._on_search_activate)
         self._id_entry.connect("notify::text", self._on_search_text_changed)
 
-        self._id_btn = make_button("Найти", width=110)
-        self._id_btn.connect("clicked", self._on_search_activate)
+        self._id_status = make_status_icon()
 
-        box.append(self._id_status)
         box.append(self._id_entry)
-        box.append(self._id_btn)
+        box.append(self._id_status)
 
     def _on_search_text_changed(self, entry, _):
         """Скрывает результаты поиска, если поле ввода очищено."""
@@ -195,8 +191,7 @@ class ExtensionsPage(Gtk.Box):
             self._search_extensions(text)
 
     def _install_by_id(self, ext_id):
-        self._id_btn.set_sensitive(False)
-        self._id_btn.set_label("…")
+        self._id_entry.set_sensitive(False)
         clear_status(self._id_status)
         self._log(f"\n▶  Установка расширения {ext_id}...\n")
         win = self.get_root()
@@ -215,8 +210,7 @@ class ExtensionsPage(Gtk.Box):
                         self._log(f"✘  Не удалось установить gext: {r_pip.stderr.strip()}\n")
                         if hasattr(win, "stop_progress"): win.stop_progress(False)
                         set_status_error(self._id_status)
-                        self._id_btn.set_label("Установить")
-                        self._id_btn.set_sensitive(True)
+                        self._id_entry.set_sensitive(True)
                     GLib.idle_add(_fail_gext)
                     return
                 GLib.idle_add(self._log, "✔  gext установлен!\n")
@@ -238,16 +232,14 @@ class ExtensionsPage(Gtk.Box):
                     self._log(f"✘  Ошибка: {r.stderr.strip()}\n")
                     if hasattr(win, "stop_progress"): win.stop_progress(False)
                     set_status_error(self._id_status)
-                self._id_btn.set_label("Найти")
-                self._id_btn.set_sensitive(True)
+                self._id_entry.set_sensitive(True)
 
             GLib.idle_add(_finish)
 
         threading.Thread(target=_do, daemon=True).start()
 
     def _search_extensions(self, query):
-        self._id_btn.set_sensitive(False)
-        self._id_btn.set_label("Поиск...")
+        self._id_entry.set_sensitive(False)
         clear_status(self._id_status)
         
         # Очищаем предыдущие результаты
@@ -281,8 +273,7 @@ class ExtensionsPage(Gtk.Box):
                 GLib.idle_add(self._log, f"✘ Ошибка поиска: {e}\n")
                 GLib.idle_add(set_status_error, self._id_status)
             
-            GLib.idle_add(self._id_btn.set_label, "Найти")
-            GLib.idle_add(self._id_btn.set_sensitive, True)
+            GLib.idle_add(self._id_entry.set_sensitive, True)
 
         threading.Thread(target=_do, daemon=True).start()
 

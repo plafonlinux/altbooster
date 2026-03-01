@@ -38,25 +38,22 @@ class AppsPage(Gtk.Box):
         self._json_path = config.CONFIG_DIR / "apps.json"
         self._data = {}
 
-        scroll, body = make_scrolled_page()
-        self._body = body
+        scroll, self._body = make_scrolled_page()
         self.append(scroll)
 
-        self._btns_box = Gtk.CenterBox()
+        self._btns_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=32)
         self._body.append(self._btns_box)
 
-        self._btn_all = make_button("Установить всё")
+        self._btn_all = Gtk.Button(label="Установить всё")
+        self._btn_all.add_css_class("pill")
         self._btn_all.add_css_class("success")
+        self._btn_all.add_css_class("suggested-action")
         self._btn_all.connect("clicked", self._on_install_all_clicked)
+        self._btns_box.append(self._btn_all)
 
-        start_box = Gtk.Box()
-        start_box.set_halign(Gtk.Align.START)
-        start_box.append(self._btn_all)
-        self._btns_box.set_start_widget(start_box)
-
-        # Поиск пакетов (Center)
         self._pkg_search_groups = []
         search_box = Gtk.Box(spacing=6)
+        search_box.set_hexpand(True)
 
         self._branch_combo = Gtk.DropDown()
         self._branch_combo.set_model(Gtk.StringList.new(["p11", "Sisyphus", "epm play", "Flathub"]))
@@ -68,7 +65,7 @@ class AppsPage(Gtk.Box):
 
         self._search_entry = Gtk.Entry()
         self._search_entry.set_hexpand(True)
-        self._search_entry.set_placeholder_text("Поиск пакетов ALT...")
+        self._search_entry.set_placeholder_text("Поиск приложений для ALT Linux")
         self._search_entry.set_valign(Gtk.Align.CENTER)
         self._search_entry.connect("activate", self._on_pkg_search)
         self._search_entry.connect("notify::text", self._on_search_text_changed)
@@ -76,19 +73,14 @@ class AppsPage(Gtk.Box):
 
         self._search_status = make_status_icon()
         search_box.append(self._search_status)
-
-        self._btns_box.set_center_widget(search_box)
+        self._btns_box.append(search_box)
 
         self._btn_reset = Gtk.Button(label="Вернуть стандартный список")
         self._btn_reset.set_tooltip_text("Сбросить список к стандартному (обновить)")
         self._btn_reset.add_css_class("destructive-action")
         self._btn_reset.add_css_class("pill")
         self._btn_reset.connect("clicked", self._on_factory_reset)
-
-        end_box = Gtk.Box()
-        end_box.set_halign(Gtk.Align.END)
-        end_box.append(self._btn_reset)
-        self._btns_box.set_end_widget(end_box)
+        self._btns_box.append(self._btn_reset)
 
         self._load_and_build()
         GLib.idle_add(self._refresh_btn_all)
