@@ -256,13 +256,30 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._maint.set_sensitive_all(False)
 
         def _check():
-            # 0. Если sudo нет в системе — сразу переключаемся на pkexec
+            # 1. sudo не установлен в системе → pkexec
             if not shutil.which("sudo"):
                 GLib.idle_add(self._log, "ℹ Sudo не найден. Включен режим pkexec.\n")
                 GLib.idle_add(self._use_pkexec_auth)
                 return
 
-            # 0.1. Проверка группы wheel (ALT Linux)
+            # 2. sudo работает без пароля (NOPASSWD / кэш сессии)
+            try:
+                if subprocess.run(["sudo", "-n", "true"], capture_output=True, timeout=1).returncode == 0:
+                    backend.set_sudo_nopass(True)
+                    GLib.idle_add(self._auth_ok)
+                    return
+            except Exception:
+                pass
+
+            # 3. Пробуем сохранённый пароль
+            saved_pw = get_saved_password()
+            if saved_pw and backend.sudo_check(saved_pw):
+                backend.set_sudo_password(saved_pw)
+                GLib.idle_add(self._log, "✔ Вход выполнен автоматически.\n")
+                GLib.idle_add(self._auth_ok)
+                return
+
+            # 4. Пользователь не в группе wheel → pkexec (постоянный режим)
             try:
                 wheel_gid = grp.getgrnam("wheel").gr_gid
                 if wheel_gid not in os.getgroups() and wheel_gid != os.getgid():
@@ -272,39 +289,88 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             except (KeyError, ImportError, OSError):
                 pass
 
-            # Быстрый путь: sudo работает без пароля (кэш сессии или NOPASSWD)
-            try:
-                if subprocess.run(["sudo", "-n", "true"], capture_output=True, timeout=1).returncode == 0:
-                    backend.set_sudo_nopass(True)
-                    GLib.idle_add(self._auth_ok)
-                    return
-            except Exception:
-                pass
+            # 5. Пользователь в wheel, но sudo не работает.
+            #    Если sudowheel отключён — предлагаем включить через pkexec и перезапуститься.
+            if shutil.which("control"):
+                try:
+                    res = subprocess.run(
+                        ["control", "sudowheel"], capture_output=True, text=True, timeout=3
+                    )
+                    if res.stdout.strip().lower() != "enabled":
+                        GLib.idle_add(self._offer_sudowheel_setup)
+                        return
+                except Exception:
+                    pass
 
-            # Пробуем сохранённый пароль
-            saved_pw = get_saved_password()
-            if saved_pw:
-                if backend.sudo_check(saved_pw):
-                    backend.set_sudo_password(saved_pw)
-                    GLib.idle_add(self._log, "✔ Вход выполнен автоматически.\n")
-                    GLib.idle_add(self._auth_ok)
-                    return
-
-            # Показываем диалог; если pkexec доступен — предлагаем его как альтернативу
-            has_pkexec = bool(shutil.which("pkexec"))
-            GLib.idle_add(self._show_password_dialog, has_pkexec)
+            # 6. sudowheel включён, пароль не сохранён → диалог ввода пароля
+            GLib.idle_add(self._show_password_dialog)
 
         threading.Thread(target=_check, daemon=True).start()
 
-    def _show_password_dialog(self, offer_pkexec=False):
-        on_pkexec = self._use_pkexec_auth if offer_pkexec else None
-        PasswordDialog(self, self._auth_ok, self.close, on_pkexec)
+    def _show_password_dialog(self):
+        PasswordDialog(self, self._auth_ok, self.close)
 
     def _use_pkexec_auth(self):
         """Активирует pkexec-режим вместо sudo."""
         backend.set_pkexec_mode(True)
         self._log("🔑 Используется pkexec (polkit) для привилегированных команд.\n")
         self._auth_ok()
+
+    def _offer_sudowheel_setup(self):
+        """Предлагает включить sudowheel через pkexec и перезапустить утилиту."""
+        d = Adw.MessageDialog(
+            heading="Настройка sudo",
+            body=(
+                "Ваш пользователь входит в группу wheel, но sudo для wheel не активирован.\n\n"
+                "Нажмите «Настроить», чтобы включить sudo через polkit — "
+                "утилита автоматически перезапустится."
+            ),
+        )
+        d.set_transient_for(self)
+        d.add_response("cancel", "Отмена")
+        d.add_response("setup", "Настроить")
+        d.set_response_appearance("setup", Adw.ResponseAppearance.SUGGESTED)
+        d.set_default_response("setup")
+        d.connect("response", self._on_sudowheel_response)
+        d.present()
+
+    def _on_sudowheel_response(self, dialog, rid):
+        dialog.close()
+        if rid == "setup":
+            self._log("⚙ Включение sudowheel через pkexec...\n")
+            threading.Thread(target=self._do_sudowheel_setup, daemon=True).start()
+        else:
+            # Отмена → работаем через pkexec на этот сеанс
+            self._use_pkexec_auth()
+
+    def _do_sudowheel_setup(self):
+        """Запускает pkexec control sudowheel enabled и перезапускает утилиту."""
+        try:
+            result = subprocess.run(
+                ["pkexec", "control", "sudowheel", "enabled"],
+                capture_output=True, text=True, timeout=60,
+            )
+            if result.returncode == 0:
+                GLib.idle_add(self._log, "✔ sudowheel включён. Перезапуск...\n")
+                GLib.idle_add(self._restart_app)
+            else:
+                GLib.idle_add(self._log, "❌ Не удалось включить sudowheel. Переключение на pkexec.\n")
+                GLib.idle_add(self._use_pkexec_auth)
+        except Exception as e:
+            GLib.idle_add(self._log, f"❌ Ошибка настройки sudowheel: {e}\n")
+            GLib.idle_add(self._use_pkexec_auth)
+
+    def _restart_app(self):
+        """Перезапускает процесс приложения."""
+        GLib.timeout_add(600, self._do_restart)
+
+    def _do_restart(self):
+        try:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        except Exception:
+            subprocess.Popen([sys.executable] + sys.argv)
+            self.get_application().quit()
+        return False
 
     def _auth_ok(self):
         self._maint.set_sensitive_all(True)
