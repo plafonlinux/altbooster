@@ -309,17 +309,25 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             except Exception:
                 pass
 
-            # 2.5. Проверяем наличие управляющего терминала.
-            # PAM-модули GNOME (polkit, gnome-keyring и т.п.) проверяют PAM_TTY
-            # при инициализации: без TTY они подключаются к агенту сессии и принимают
-            # ЛЮБОЙ пароль через stdin. С TTY (терминал) — проверяют честно через
-            # pam_unix.so. sys.stdin.isatty() False означает запуск из GNOME-ярлыка.
+            # 2.5. Нет управляющего терминала → запуск из GNOME-ярлыка.
+            # PAM-модули GNOME (polkit, gnome-keyring и т.п.) проверяют PAM_TTY при
+            # инициализации: без TTY они обходят проверку пароля через агент сессии —
+            # sudo -S принимает любой пароль. Правильное решение для GUI-запуска:
+            # показать системный polkit-диалог через start_pkexec_shell().
+            # start_pkexec_shell блокирует фоновый поток до ответа пользователя — это
+            # нормально, мы находимся в _check(), а не в GTK-потоке.
             if not sys.stdin.isatty():
-                GLib.idle_add(
-                    self._log,
-                    "ℹ Запуск без терминала (GNOME). Используется pkexec.\n",
-                )
-                GLib.idle_add(self._use_pkexec_auth)
+                GLib.idle_add(self._log, "ℹ Запуск из GNOME (без терминала). Инициализация pkexec...\n")
+                backend.set_pkexec_mode(True)
+                ok, is_cancel = backend.start_pkexec_shell()
+                if ok:
+                    GLib.idle_add(self._auth_ok)
+                elif is_cancel:
+                    GLib.idle_add(self._log, "⚠ Аутентификация отменена пользователем.\n")
+                    GLib.idle_add(self.close)
+                else:
+                    GLib.idle_add(self._log, "⚠ pkexec недоступен. Закрытие приложения.\n")
+                    GLib.idle_add(self.close)
                 return
 
             # 3. Пробуем сохранённый в keyring пароль — это бесшумный автовход
