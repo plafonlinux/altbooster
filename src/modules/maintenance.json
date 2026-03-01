@@ -93,7 +93,7 @@
       "cmd": [
         "bash",
         "-c",
-        "mkdir -p /etc/polkit-1/rules.d && echo 'polkit.addRule(function(action, subject) { if (subject.user == \"gdm\") { if (action.id == \"org.freedesktop.udisks2.filesystem-mount\" || action.id == \"org.freedesktop.udisks2.encrypted-unlock\" || action.id == \"org.freedesktop.udisks2.loop-setup\") { return polkit.Result.NO; } } });' > /etc/polkit-1/rules.d/49-no-usb-mount-gdm.rules && chmod 644 /etc/polkit-1/rules.d/49-no-usb-mount-gdm.rules"
+        "mkdir -p /etc/polkit-1/rules.d && echo 'polkit.addRule(function(action, subject) { if (subject.user == \"gdm\") { if (action.id == \"org.freedesktop.udisks2.filesystem-mount\" || action.id == \"org.freedesktop.udisks2.filesystem-mount-other-seat\" || action.id == \"org.freedesktop.udisks2.encrypted-unlock\" || action.id == \"org.freedesktop.udisks2.encrypted-unlock-other-seat\" || action.id == \"org.freedesktop.udisks2.loop-setup\") { return polkit.Result.NO; } } });' > /etc/polkit-1/rules.d/49-no-usb-mount-gdm.rules && chmod 644 /etc/polkit-1/rules.d/49-no-usb-mount-gdm.rules"
       ]
     },
     {

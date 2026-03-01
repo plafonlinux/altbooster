@@ -46,16 +46,18 @@ def save_password(pw):
 class PasswordDialog(Adw.AlertDialog):
     """Диалог ввода пароля sudo."""
 
-    def __init__(self, parent, on_success, on_cancel):
-        super().__init__(
-            heading="Требуется пароль sudo",
-            body=(
-                "ALT Booster выполняет системные команды от имени root.\n"
-                "Пароль сохраняется только на время сессии."
-            ),
+    def __init__(self, parent, on_success, on_cancel, on_pkexec=None):
+        body = (
+            "ALT Booster выполняет системные команды от имени root.\n"
+            "Введите пароль sudo или нажмите «pkexec» для входа через polkit."
+            if on_pkexec else
+            "ALT Booster выполняет системные команды от имени root.\n"
+            "Пароль сохраняется только на время сессии."
         )
+        super().__init__(heading="Требуется пароль sudo", body=body)
         self._on_success = on_success
         self._on_cancel = on_cancel
+        self._on_pkexec = on_pkexec
         self._attempts = 0
         self._submitted = False
 
@@ -75,6 +77,8 @@ class PasswordDialog(Adw.AlertDialog):
             self.set_extra_child(self._entry)
 
         self.add_response("cancel", "Отмена")
+        if on_pkexec:
+            self.add_response("pkexec", "Использовать pkexec")
         self.add_response("ok", "Войти")
         self.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
         self.set_default_response("ok")
@@ -87,6 +91,9 @@ class PasswordDialog(Adw.AlertDialog):
             return
         if rid == "ok":
             self._submit()
+        elif rid == "pkexec" and self._on_pkexec:
+            self._submitted = True
+            self._on_pkexec()
         else:
             self._on_cancel()
 
