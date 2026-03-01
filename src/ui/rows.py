@@ -492,7 +492,14 @@ class TaskRow(Adw.ActionRow):
                 # Если прав нет, пробуем через sudo (для системных путей)
                 if backend.run_privileged_sync(["test", "-e", path], lambda _: None):
                     ok = True
-        
+        elif check.get("type") == "file_contains":
+            path = os.path.expanduser(check["path"])
+            needle = check["value"]
+            try:
+                ok = needle in open(path, encoding="utf-8", errors="ignore").read()
+            except OSError:
+                ok = False
+
         if ok:
             GLib.idle_add(self._mark_done_init)
 
