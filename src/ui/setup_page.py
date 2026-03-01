@@ -327,6 +327,7 @@ class SetupPage(Gtk.Box):
                 orig_set_ui(enabled)
                 if not enabled:
                     self._r_f3d._btn.set_sensitive(False)
+                    self._r_f3d._btn.set_tooltip_text("Пакет f3d доступен только в репозитории Sisyphus.\nВ стабильных ветках (p10/p11) он на данный момент отсутствует.")
             self._r_f3d._set_ui = _disabled_set_ui
 
         for r in (self._r_naut, self._r_dirty, self._r_naut_admin, self._r_sushi, self._r_f3d):
