@@ -2,6 +2,8 @@
 
 import json
 import os
+import shutil
+import subprocess
 import threading
 
 import gi
@@ -180,24 +182,40 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
     def ask_password(self):
         self._maint.set_sensitive_all(False)
-        
-        # Пробуем авто-вход
-        saved_pw = get_saved_password()
-        if saved_pw:
-            self._log("🔑 Найден сохранённый пароль, проверка...\n")
-            def _check():
+
+        def _check():
+            # Быстрый путь: sudo работает без пароля (кэш сессии)
+            try:
+                if subprocess.run(["sudo", "-n", "true"], capture_output=True, timeout=1).returncode == 0:
+                    GLib.idle_add(self._auth_ok)
+                    return
+            except Exception:
+                pass
+
+            # Пробуем сохранённый пароль
+            saved_pw = get_saved_password()
+            if saved_pw:
                 if backend.sudo_check(saved_pw):
                     backend.set_sudo_password(saved_pw)
-                    GLib.idle_add(self._auth_ok)
                     GLib.idle_add(self._log, "✔ Вход выполнен автоматически.\n")
-                else:
-                    GLib.idle_add(self._show_password_dialog)
-            threading.Thread(target=_check, daemon=True).start()
-        else:
-            self._show_password_dialog()
+                    GLib.idle_add(self._auth_ok)
+                    return
 
-    def _show_password_dialog(self):
-        PasswordDialog(self, self._auth_ok, self.close)
+            # Показываем диалог; если pkexec доступен — предлагаем его как альтернативу
+            has_pkexec = bool(shutil.which("pkexec"))
+            GLib.idle_add(self._show_password_dialog, has_pkexec)
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _show_password_dialog(self, offer_pkexec=False):
+        on_pkexec = self._use_pkexec_auth if offer_pkexec else None
+        PasswordDialog(self, self._auth_ok, self.close, on_pkexec)
+
+    def _use_pkexec_auth(self):
+        """Активирует pkexec-режим вместо sudo."""
+        backend.set_pkexec_mode(True)
+        self._log("🔑 Используется pkexec (polkit) для привилегированных команд.\n")
+        self._auth_ok()
 
     def _auth_ok(self):
         self._maint.set_sensitive_all(True)

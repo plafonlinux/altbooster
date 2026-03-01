@@ -38,6 +38,15 @@ def get_sudo_password() -> str:
     with _sudo_lock:
         return _sudo_password or ""
 
+# ── pkexec режим ──────────────────────────────────────────────────────────────
+
+_use_pkexec: bool = False
+
+def set_pkexec_mode(enabled: bool) -> None:
+    """Переключает на pkexec вместо sudo -S (когда sudo не настроен)."""
+    global _use_pkexec
+    _use_pkexec = enabled
+
 def sudo_check(pw: str) -> bool:
     """Проверяет корректность sudo-пароля через вызов /bin/true."""
     try:
@@ -108,8 +117,46 @@ def _apt_dedup_filter(on_line: OnLine) -> OnLine:
 
 # ── Выполнение привилегированных команд ───────────────────────────────────────
 
+def _run_pkexec(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
+    """Запускает команду через pkexec (polkit). Пароль не нужен — спрашивает polkit."""
+    def _worker() -> None:
+        proc = subprocess.Popen(
+            ["pkexec", *cmd],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        def _drain_stderr() -> None:
+            if not proc.stderr:
+                return
+            for line in proc.stderr:
+                low = line.lower()
+                if "pkexec" in low or "authentication" in low:
+                    continue
+                GLib.idle_add(on_line, line)
+
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_thread.start()
+
+        if proc.stdout:
+            for line in proc.stdout:
+                GLib.idle_add(on_line, line)
+
+        stderr_thread.join()
+        proc.wait()
+        GLib.idle_add(on_done, proc.returncode == 0)
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
 def run_privileged(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
-    """Запускает команду через sudo -S."""
+    """Запускает команду через sudo -S или pkexec (если sudo не настроен)."""
+
+    if _use_pkexec:
+        _run_pkexec(cmd, on_line, on_done)
+        return
 
     if cmd and cmd[0] in ("epm", "epmi"):
         cmd = [
