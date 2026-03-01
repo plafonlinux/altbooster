@@ -156,17 +156,76 @@ def start_pkexec_shell() -> tuple[bool, bool]:
             proc.kill()
         return False, is_cancel
 
-def sudo_check(pw: str) -> bool:
-    """Проверяет корректность sudo-пароля."""
+def _minimal_env() -> dict[str, str]:
+    """Возвращает минимальное окружение для запуска sudo без PAM-агентов GNOME.
+
+    Подход «белого списка»: только то, что нужно sudo и pam_unix.so для работы.
+    Все переменные графической сессии (DISPLAY, WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS
+    и др.) отсутствуют по умолчанию — не нужно знать их исчерпывающий список.
+    """
+    return {
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "HOME": os.environ.get("HOME", "/root"),
+        "USER": os.environ.get("USER", ""),
+        "LOGNAME": os.environ.get("LOGNAME", ""),
+        "LANG": "C",
+        "LC_ALL": "C",
+    }
+
+
+def sudo_reliable() -> bool:
+    """Проверяет, что sudo реально отклоняет неправильные пароли.
+
+    В GNOME-сессии PAM-стек sudo может быть настроен так, что принимает ЛЮБОЙ
+    пароль через агента сессии (polkit, gnome-keyring и т.п.) — даже с минимальным
+    env. Это определяется тестом с заведомо неправильным паролем.
+
+    Возвращает True  → sudo надёжен, можно показывать диалог ввода пароля.
+    Возвращает False → sudo принимает всё, нужно переключиться на pkexec.
+    """
     try:
+        env = _minimal_env()
+        # Сбрасываем кэш, чтобы тест был честным
+        subprocess.run(["sudo", "-k"], env=env, capture_output=True, timeout=3)
         result = subprocess.run(
-            ["sudo", "-k", "-S", "id", "-u"],
+            ["sudo", "-S", "id", "-u"],
+            input=f"__altbooster_wrong_pw_{uuid.uuid4()}__\n",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            timeout=5,
+        )
+        # Если заведомо неправильный пароль прошёл — PAM-bypass активен
+        return not (result.returncode == 0 and result.stdout.strip() == "0")
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return True  # При ошибке считаем надёжным (консервативное поведение)
+
+
+def sudo_check(pw: str) -> bool:
+    """Проверяет корректность sudo-пароля.
+
+    Использует минимальный env (_minimal_env) чтобы исключить PAM-агентов GNOME.
+    Разделяем sudo -k (сброс кэша) и sudo -S (проверка пароля) на два вызова,
+    так как в некоторых версиях sudo комбинация -k -S работает непредсказуемо.
+    encoding="utf-8" нужен для паролей с Unicode (кириллица и т.д.).
+    """
+    try:
+        env = _minimal_env()
+        # Шаг 1: явно сбрасываем кэш timestamp (отдельный вызов для надёжности)
+        subprocess.run(["sudo", "-k"], env=env, capture_output=True, timeout=3)
+        # Шаг 2: проверяем пароль через stdin
+        result = subprocess.run(
+            ["sudo", "-S", "id", "-u"],
             input=pw + "\n",
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env=env,
+            timeout=10,
         )
         return result.returncode == 0 and result.stdout.strip() == "0"
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, UnicodeError):
         return False
 
 # ── Ожидание APT-блокировки ───────────────────────────────────────────────────
@@ -335,20 +394,25 @@ def run_privileged(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None
             _wait_for_apt_lock(on_line)
 
         if _sudo_nopass:
+            # NOPASSWD или кэш сессии — sudo работает без пароля, stdin не нужен
             proc = subprocess.Popen(
                 ["sudo", "-n", *cmd],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
             )
         else:
+            # Передаём пароль через stdin. encoding="utf-8" важен для паролей
+            # с Unicode-символами (кириллица и т.д.) при любой системной locale.
             proc = subprocess.Popen(
                 ["sudo", "-S", *cmd],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
             )
             if proc.stdin:
                 try:
@@ -427,29 +491,37 @@ def run_epm(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
         askpass_path: str | None = None
         try:
             if _sudo_nopass:
+                # NOPASSWD — пароль не нужен
                 proc = subprocess.Popen(
                     ["sudo", "-n", *cmd],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL,
                     text=True,
+                    encoding="utf-8",
                 )
             else:
                 password = get_sudo_password()
                 env = os.environ.copy()
                 fd, askpass_path = tempfile.mkstemp(suffix=".sh")
-                with os.fdopen(fd, "w") as script:
+                # Скрипт-заглушка, которую sudo -A вызовет вместо интерактивного
+                # запроса пароля. Пишем UTF-8 явно, чтобы printf корректно вывел
+                # пароль с Unicode-символами.
+                with os.fdopen(fd, "w", encoding="utf-8") as script:
                     script.write("#!/bin/sh\n")
                     script.write(f"printf '%s\\n' {shlex.quote(password)}\n")
                 # Устанавливаем права 0700 (rwx------)
                 os.chmod(askpass_path, stat.S_IRWXU)
                 env["SUDO_ASKPASS"] = askpass_path
+                # -A заставляет sudo вызвать скрипт из SUDO_ASKPASS для получения
+                # пароля. Так epm получает пароль без интерактивного stdin.
                 proc = subprocess.Popen(
                     ["sudo", "-A", *cmd],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL,
                     text=True,
+                    encoding="utf-8",
                     env=env,
                 )
 
