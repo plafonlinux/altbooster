@@ -121,9 +121,35 @@ def _apt_dedup_filter(on_line: OnLine) -> OnLine:
 
 # ── Выполнение привилегированных команд ───────────────────────────────────────
 
+def _wrap_epm_auto_install(cmd: Sequence[str]) -> Sequence[str]:
+    """Оборачивает команду epm в скрипт авто-установки eepm."""
+    if not cmd or cmd[0] not in ("epm", "epmi"):
+        return cmd
+    
+    script = (
+        "if ! rpm -q eepm >/dev/null 2>&1; then "
+        "echo -e '▶ EPM не найден. Выполняется установка eepm...\\n'; "
+        "export DEBIAN_FRONTEND=noninteractive; "
+        "apt-get install -y eepm; "
+        "fi && \"$@\""
+    )
+    return ["bash", "-c", script, "--", *cmd]
+
 def _run_pkexec(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
     """Запускает команду через pkexec (polkit). Пароль не нужен — спрашивает polkit."""
     def _worker() -> None:
+        # Проверяем блокировку APT, если команда похожа на пакетный менеджер
+        check_lock = False
+        if cmd:
+            if cmd[0] in ("apt", "apt-get", "flatpak", "epm", "epmi"):
+                check_lock = True
+            elif cmd[0] == "bash" and len(cmd) >= 3:
+                # Эвристика для обернутых команд
+                if "apt-get" in cmd[2] or "epm" in cmd[2] or "flatpak" in cmd[2]:
+                    check_lock = True
+        if check_lock:
+            _wait_for_apt_lock(on_line)
+
         proc = subprocess.Popen(
             ["pkexec", *cmd],
             stdin=subprocess.DEVNULL,
@@ -139,6 +165,8 @@ def _run_pkexec(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
                 low = line.lower()
                 if "pkexec" in low or "authentication" in low:
                     continue
+                if "request dismissed" in low:
+                    continue
                 GLib.idle_add(on_line, line)
 
         stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
@@ -150,6 +178,10 @@ def _run_pkexec(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
 
         stderr_thread.join()
         proc.wait()
+        if proc.returncode == 126:
+            GLib.idle_add(on_line, "⚠  Действие отменено пользователем.\n")
+        elif proc.returncode == 127:
+            GLib.idle_add(on_line, f"✘  Команда не найдена: {cmd[0]}\n")
         GLib.idle_add(on_done, proc.returncode == 0)
 
     threading.Thread(target=_worker, daemon=True).start()
@@ -162,20 +194,23 @@ def run_privileged(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None
         _run_pkexec(cmd, on_line, on_done)
         return
 
-    if cmd and cmd[0] in ("epm", "epmi"):
-        cmd = [
-            "bash", "-c",
-            "if ! rpm -q eepm >/dev/null 2>&1; then echo -e '▶ EPM не найден. Выполняется установка eepm...\\n'; apt-get install -y eepm; fi && \"$@\"",
-            "--", *cmd
-        ]
-
-    if cmd and cmd[0] in ("apt", "apt-get"):
+    # Фильтруем вывод apt и epm (до того как cmd превратится в bash-скрипт)
+    if cmd and cmd[0] in ("apt", "apt-get", "epm", "epmi"):
         on_line = _apt_dedup_filter(on_line)
+
+    cmd = _wrap_epm_auto_install(cmd)
 
     def _worker() -> None:
         password = get_sudo_password()
 
-        if cmd and cmd[0] in ("apt", "apt-get", "flatpak"):
+        check_lock = False
+        if cmd:
+            if cmd[0] in ("apt", "apt-get", "flatpak"):
+                check_lock = True
+            elif cmd[0] == "bash" and len(cmd) >= 3:
+                if "apt-get" in cmd[2] or "epm" in cmd[2] or "flatpak" in cmd[2]:
+                    check_lock = True
+        if check_lock:
             _wait_for_apt_lock(on_line)
 
         proc = subprocess.Popen(
@@ -249,14 +284,13 @@ def run_epm_sync(cmd: Sequence[str], on_line: OnLine) -> bool:
 def run_epm(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
     """Запускает epm через sudo -A."""
 
-    if cmd and cmd[0] in ("epm", "epmi"):
-        cmd = [
-            "bash", "-c",
-            "if ! rpm -q eepm >/dev/null 2>&1; then echo -e '▶ EPM не найден. Выполняется установка eepm...\\n'; apt-get install -y eepm; fi && \"$@\"",
-            "--", *cmd
-        ]
+    cmd = _wrap_epm_auto_install(cmd)
 
     on_line = _apt_dedup_filter(on_line)
+
+    if _use_pkexec:
+        _run_pkexec(cmd, on_line, on_done)
+        return
 
     def _worker() -> None:
         password = get_sudo_password()
