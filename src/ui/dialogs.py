@@ -1,5 +1,6 @@
 """Диалоговые окна: PasswordDialog, AppEditDialog."""
 
+import subprocess
 import threading
 
 import gi
@@ -43,6 +44,14 @@ def save_password(pw):
     except Exception:
         pass
 
+def clear_saved_password():
+    if not _HAS_SECRET:
+        return
+    try:
+        Secret.password_clear_sync(_SECRET_SCHEMA, {"type": "sudo_password"}, None)
+    except Exception:
+        pass
+
 class PasswordDialog(Adw.AlertDialog):
     """Диалог ввода пароля sudo."""
 
@@ -65,6 +74,7 @@ class PasswordDialog(Adw.AlertDialog):
         self._entry.set_show_peek_icon(True)
         self._entry.set_property("placeholder-text", "Пароль пользователя")
         self._entry.connect("activate", lambda _: self._submit())
+        self._entry.connect("notify::text", self._on_text_changed)
 
         if _HAS_SECRET:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -81,10 +91,14 @@ class PasswordDialog(Adw.AlertDialog):
             self.add_response("pkexec", "Использовать pkexec")
         self.add_response("ok", "Войти")
         self.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+        self.set_response_enabled("ok", False)
         self.set_default_response("ok")
         self.set_close_response("cancel")
         self.connect("response", self._on_response)
         self.present(parent)
+
+    def _on_text_changed(self, *args):
+        self.set_response_enabled("ok", bool(self._entry.get_text()))
 
     def _on_response(self, _d, rid):
         if self._submitted:
@@ -92,10 +106,36 @@ class PasswordDialog(Adw.AlertDialog):
         if rid == "ok":
             self._submit()
         elif rid == "pkexec" and self._on_pkexec:
-            self._submitted = True
-            self._on_pkexec()
+            self._submit_pkexec()
         else:
             self._on_cancel()
+
+    def _submit_pkexec(self):
+        self.set_response_enabled("pkexec", False)
+        self.set_response_enabled("ok", False)
+        self.set_body("⏳ Пожалуйста, подтвердите доступ в появившемся окне...")
+        
+        def _worker():
+            try:
+                # Проверяем реальную авторизацию через pkexec
+                res = subprocess.run(["pkexec", "/bin/true"], capture_output=True, text=True)
+                ok = (res.returncode == 0)
+            except Exception:
+                ok = False
+            GLib.idle_add(self._check_pkexec_done, ok)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _check_pkexec_done(self, ok):
+        if ok:
+            self._submitted = True
+            self.close()
+            if self._on_pkexec:
+                self._on_pkexec()
+        else:
+            self.set_body("❌ Ошибка авторизации pkexec. Попробуйте снова.")
+            self.set_response_enabled("pkexec", True)
+            self.set_response_enabled("ok", bool(self._entry.get_text()))
 
     def _submit(self):
         pw = self._entry.get_text()
