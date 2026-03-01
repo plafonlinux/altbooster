@@ -54,19 +54,15 @@ def clear_saved_password():
 class PasswordDialog(Adw.MessageDialog):
     """Диалог ввода пароля sudo."""
 
-    def __init__(self, parent, on_success, on_cancel, on_pkexec=None):
-        body = (
-            "ALT Booster выполняет системные команды от имени root.\n"
-            "Введите пароль sudo или нажмите «pkexec» для входа через polkit."
-            if on_pkexec else
-            "ALT Booster выполняет системные команды от имени root.\n"
-            "Пароль сохраняется только на время сессии."
+    def __init__(self, parent, on_success, on_cancel):
+        super().__init__(
+            heading="Требуется пароль sudo",
+            body="ALT Booster выполняет системные команды от имени root.\n"
+                 "Пароль сохраняется только на время сессии.",
         )
-        super().__init__(heading="Требуется пароль sudo", body=body)
         self.set_transient_for(parent)
         self._on_success = on_success
         self._on_cancel = on_cancel
-        self._on_pkexec = on_pkexec
         self._attempts = 0
         self._submitted = False
 
@@ -89,8 +85,6 @@ class PasswordDialog(Adw.MessageDialog):
             self.set_extra_child(self._entry)
 
         self.add_response("cancel", "Отмена")
-        if on_pkexec:
-            self.add_response("pkexec", "Использовать pkexec")
         self.add_response("ok", "Войти")
         self.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
         self.set_response_enabled("ok", False)
@@ -107,37 +101,9 @@ class PasswordDialog(Adw.MessageDialog):
             return
         if rid == "ok":
             self._submit()
-        elif rid == "pkexec" and self._on_pkexec:
-            self._submit_pkexec()
         else:
             self.close()
             self._on_cancel()
-
-    def _submit_pkexec(self):
-        self.set_response_enabled("pkexec", False)
-        self.set_response_enabled("ok", False)
-        self.set_body("⏳ Пожалуйста, подтвердите доступ в появившемся окне...")
-
-        def _worker():
-            # Запускаем persistent bash-шелл через pkexec.
-            # Это показывает диалог polkit ОДИН РАЗ, и шелл остаётся
-            # живым для всех последующих привилегированных команд.
-            ok, is_cancel = backend.start_pkexec_shell()
-            GLib.idle_add(self._check_pkexec_done, ok, is_cancel)
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _check_pkexec_done(self, ok, is_cancel=False):
-        if ok:
-            self._submitted = True
-            self.close()
-            if self._on_pkexec:
-                self._on_pkexec()
-        else:
-            msg = "⚠ Отменено пользователем." if is_cancel else "❌ Ошибка авторизации pkexec. Попробуйте снова."
-            self.set_body(msg)
-            self.set_response_enabled("pkexec", True)
-            self.set_response_enabled("ok", bool(self._entry.get_text()))
 
     def _submit(self):
         pw = self._entry.get_text()

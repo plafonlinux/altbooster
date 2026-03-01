@@ -70,8 +70,8 @@ RECOMMENDED = [
     (
         "rounded-window-corners@fxgn",
         "Rounded Window Corners Reborn",
-        "Скругление углов окон и мониторов",
-        "5237",
+        "Скругление углов окон (форк flexagoon)",
+        "7048",
     ),
     (
         "pipewire-settings@tuxor1337",
@@ -493,10 +493,10 @@ class ExtensionsPage(Gtk.Box):
             if hasattr(win, "start_progress"): win.start_progress(f"Установка {pkg}...")
             def _done(ok):
                 if ok:
-                    GLib.idle_add(self._log, "✔  Установлено!\n")
+                    self._log("✔  Установлено!\n")
                     GLib.idle_add(self._refresh_installed)
                 else:
-                    GLib.idle_add(self._log, f"✘  Ошибка установки {pkg}\n")
+                    self._log(f"✘  Ошибка установки {pkg}\n")
                     GLib.idle_add(set_status_error, status)
                     GLib.idle_add(btn.set_label, "Повторить")
                     GLib.idle_add(btn.set_sensitive, True)
@@ -553,10 +553,10 @@ class ExtensionsPage(Gtk.Box):
             ok = r.returncode == 0
             
             if ok:
-                GLib.idle_add(self._log, "✔  Установлено!\n")
+                self._log("✔  Установлено!\n")
                 GLib.idle_add(self._refresh_installed)
             else:
-                GLib.idle_add(self._log, f"✘  Ошибка: {r.stderr.strip()}\n")
+                self._log(f"✘  Ошибка: {r.stderr.strip()}\n")
                 GLib.idle_add(set_status_error, status)
                 GLib.idle_add(btn.set_label, "Повторить")
                 GLib.idle_add(btn.set_sensitive, True)
@@ -576,9 +576,9 @@ class ExtensionsPage(Gtk.Box):
             if ok:
                 GLib.idle_add(switch.set_state, state)
                 action = "включено" if state else "выключено"
-                GLib.idle_add(self._log, f"✔  {uuid.split('@')[0]} {action}\n")
+                self._log(f"✔  {uuid.split('@')[0]} {action}\n")
             else:
-                GLib.idle_add(self._log, f"✘  Ошибка: {r.stderr.strip()}\n")
+                self._log(f"✘  Ошибка: {r.stderr.strip()}\n")
             if hasattr(win, "stop_progress"): win.stop_progress(ok)
 
         threading.Thread(target=_do, daemon=True).start()
@@ -632,15 +632,15 @@ class ExtensionsPage(Gtk.Box):
 
                 if ext_path.exists():
                     shutil.rmtree(ext_path)
-                    GLib.idle_add(self._log, f"✔  {uuid} удалён!\n")
-                    GLib.idle_add(self._log, "ℹ  Для полного эффекта перезайдите в сессию.\n")
+                    self._log(f"✔  {uuid} удалён!\n")
+                    self._log("ℹ  Для полного эффекта перезайдите в сессию.\n")
                 else:
-                    GLib.idle_add(self._log, "ℹ  Папка расширения не найдена (возможно, уже удалено).\n")
+                    self._log("ℹ  Папка расширения не найдена (возможно, уже удалено).\n")
 
                 GLib.idle_add(self._refresh_installed)
                 if hasattr(win, "stop_progress"): win.stop_progress(True)
             except Exception as e:
-                GLib.idle_add(self._log, f"✘  Ошибка удаления: {e}\n")
+                self._log(f"✘  Ошибка удаления: {e}\n")
                 if hasattr(win, "stop_progress"): win.stop_progress(False)
 
         threading.Thread(target=_do, daemon=True).start()
@@ -675,8 +675,7 @@ class ExtensionsPage(Gtk.Box):
                     and "no package" not in deps_out.lower()
                 )
                 if has_deps:
-                    GLib.idle_add(
-                        self._log,
+                    self._log(
                         f"✘  Удаление невозможно — от «{pkg_name}» зависят:\n"
                         + "\n".join(f"    • {d}" for d in deps_out.splitlines())
                         + "\n",
@@ -693,10 +692,10 @@ class ExtensionsPage(Gtk.Box):
                 ok = backend.run_privileged_sync(["rm", "-rf", str(ext_path)], self._log)
 
             if ok:
-                GLib.idle_add(self._log, f"✔  {uuid} удалён!\n")
+                self._log(f"✔  {uuid} удалён!\n")
                 GLib.idle_add(self._refresh_installed)
             else:
-                GLib.idle_add(self._log, "✘  Ошибка удаления\n")
+                self._log("✘  Ошибка удаления\n")
             if hasattr(win, "stop_progress"): win.stop_progress(ok)
 
         threading.Thread(target=_do, daemon=True).start()
