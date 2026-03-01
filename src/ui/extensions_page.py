@@ -70,8 +70,8 @@ RECOMMENDED = [
     (
         "rounded-window-corners@fxgn",
         "Rounded Window Corners Reborn",
-        "Скругление углов окон и мониторов",
-        "5237",
+        "Скругление углов окон (форк flexagoon)",
+        "7048",
     ),
     (
         "pipewire-settings@tuxor1337",
