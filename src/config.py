@@ -109,7 +109,7 @@ def is_btrfs() -> bool:
 
 
 def check_update(on_result):
-    """Проверяет наличие новой версии на GitHub."""
+    """Проверяет наличие новой версии на GitHub. Вызывает on_result(version_str | None)."""
     def _worker():
         try:
             url = "https://api.github.com/repos/plafonlinux/altbooster/releases/latest"
@@ -117,7 +117,7 @@ def check_update(on_result):
             with urllib.request.urlopen(req, timeout=5) as response:
                 data = json.loads(response.read().decode())
                 tag = data.get("tag_name", "").lstrip("v")
-                on_result(tag, data.get("html_url"))
+                on_result(tag)
         except Exception:
-            on_result(None, None)
+            on_result(None)
     threading.Thread(target=_worker, daemon=True).start()
