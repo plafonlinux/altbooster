@@ -104,6 +104,8 @@ altbooster/
 ├── install.sh             # Скрипт установки
 ├── uninstall.sh           # Скрипт удаления
 ├── pyproject.toml         # Метаданные проекта и зависимости (PEP 621)
+├── CHANGELOG.md           # История изменений
+├── CONTRIBUTING.md        # Руководство для участников
 └── README.md              # Этот файл
 ```
 
