@@ -4,7 +4,7 @@ version = "5.6"
 description = "Утилита настройки и обслуживания ALT Linux"
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "PLAFON", url = "https://github.com/plafonlinux" }]
+authors = [{ name = "PLAFON" }]
 requires-python = ">=3.11"
 
 # Внешних Python-зависимостей нет — только GTK4/Adwaita через систему
