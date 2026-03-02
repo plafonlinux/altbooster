@@ -271,17 +271,18 @@ def _apt_dedup_filter(on_line: OnLine) -> OnLine:
         "оставите только одну его версию",
         "Чтобы оставить установленными несколько версий",
     )
-    in_warn = [False]
+    in_warn = False
 
     def _filtered(line: str) -> None:
+        nonlocal in_warn
         if "There are multiple versions of" in line:
-            in_warn[0] = True
-        if in_warn[0]:
+            in_warn = True
+        if in_warn:
             if not line.strip():
                 return
             if any(pat in line for pat in _WARN_PATTERNS):
                 return
-            in_warn[0] = False
+            in_warn = False
         on_line(line)
 
     return _filtered

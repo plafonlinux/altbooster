@@ -108,6 +108,28 @@ def run_check(check: dict | None) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# _SafePage — обёртка page для вызовов из фоновых потоков
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _SafePage:
+    """Делает log() потокобезопасным через GLib.idle_add.
+
+    Builtin-функции вызываются из фонового потока ActionDispatcher._run.
+    Прямые вызовы page.log() из них нарушали бы GTK-thread-safety.
+    Все остальные атрибуты делегируются реальному объекту page.
+    """
+
+    def __init__(self, real_page: "DynamicPage") -> None:
+        self._page = real_page
+
+    def log(self, text: str) -> None:
+        GLib.idle_add(self._page.log, text)
+
+    def __getattr__(self, name: str):
+        return getattr(self._page, name)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ActionDispatcher — выполнение action из JSON
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -161,19 +183,7 @@ class ActionDispatcher:
                 fn_name = action.get("fn", "")
                 fn = BUILTIN_REGISTRY.get(fn_name)
                 if fn:
-                    # Создаем "безопасную" обертку, чтобы встроенные функции не роняли GTK
-                    class SafePage:
-                        def __init__(self, real_page):
-                            self._page = real_page
-                            
-                        def log(self, text):
-                            GLib.idle_add(self._page.log, text)
-                            
-                        def __getattr__(self, name):
-                            return getattr(self._page, name)
-                            
-                    safe_page = SafePage(page)
-                    ok = bool(fn(safe_page, arg))
+                    ok = bool(fn(_SafePage(page), arg))
                 else:
                     GLib.idle_add(page.log, f"\n✘  Неизвестная builtin: {fn_name}\n")
 
@@ -326,7 +336,7 @@ class RowFactory:
 
         action = rd.get("action", {})
         state_key = rd.get("state_key")
-        selected_path: list[str] = [""]
+        selected_path = ""
 
         if state_key:
             saved = config.state_get(state_key)
@@ -349,11 +359,12 @@ class RowFactory:
             dialog.open(root, None, _on_picked)
 
         def _on_picked(dialog: Gtk.FileDialog, res: Gio.AsyncResult) -> None:
+            nonlocal selected_path
             try:
                 f = dialog.open_finish(res)
                 if f:
                     path = f.get_path()
-                    selected_path[0] = path
+                    selected_path = path
                     row.set_subtitle(os.path.basename(path))
                     apply_btn.set_sensitive(True)
                     clear_status(status)
@@ -363,8 +374,8 @@ class RowFactory:
         def _on_apply(_b: Gtk.Button) -> None:
             apply_btn.set_sensitive(False)
             apply_btn.set_label("…")
-            self._page.log(f"\n▶  Применение: {os.path.basename(selected_path[0])}...\n")
-            self._dispatcher.dispatch(action, on_done=_on_done, arg=selected_path[0])
+            self._page.log(f"\n▶  Применение: {os.path.basename(selected_path)}...\n")
+            self._dispatcher.dispatch(action, on_done=_on_done, arg=selected_path)
 
         def _on_done(ok: bool) -> None:
             if ok:
@@ -377,7 +388,7 @@ class RowFactory:
                 apply_btn.remove_css_class("suggested-action")
                 apply_btn.add_css_class("flat")
                 if state_key:
-                    row.set_subtitle(f"Применён: {os.path.basename(selected_path[0])}")
+                    row.set_subtitle(f"Применён: {os.path.basename(selected_path)}")
             else:
                 apply_btn.set_sensitive(True)
 
@@ -431,7 +442,9 @@ class DynamicPage(Gtk.Box):
 
     def _build(self, body: Gtk.Box) -> None:
         for group_data in self._page_data.get("groups", []):
-            if "requires" in group_data and subprocess.run(["which", group_data["requires"]], capture_output=True).returncode != 0:
+            # shutil.which вместо subprocess.run(["which"...]) — не создаёт процесс,
+            # не блокирует GTK-поток при сборке интерфейса
+            if "requires" in group_data and shutil.which(group_data["requires"]) is None:
                 continue
 
             group = Adw.PreferencesGroup()
@@ -441,7 +454,7 @@ class DynamicPage(Gtk.Box):
             body.append(group)
 
             for row_data in group_data.get("rows", []):
-                if "requires" in row_data and subprocess.run(["which", row_data["requires"]], capture_output=True).returncode != 0:
+                if "requires" in row_data and shutil.which(row_data["requires"]) is None:
                     continue
                 row = self._factory.build(row_data)
                 group.add(row)

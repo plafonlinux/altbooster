@@ -450,13 +450,15 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             return {}
 
     def _on_close(self, _):
-        """Сохраняет текущие размеры окна перед закрытием."""
+        """Сохраняет текущие размеры окна и сигнализирует лог-потоку о завершении."""
         try:
             os.makedirs(config.CONFIG_DIR, exist_ok=True)
             with open(config.CONFIG_FILE, "w") as f:
                 json.dump({"width": self.get_width(), "height": self.get_height()}, f)
         except OSError:
             pass
+        # Сентинел None останавливает _log_writer_loop и закрывает файл
+        self._log_queue.put(None)
         return False
 
     # ── Действия меню ─────────────────────────────────────────────────────────
@@ -516,11 +518,13 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         backend.set_sudo_password(None)
         backend.set_sudo_nopass(False)
         backend.set_pkexec_mode(False)
-        # sudo -k инвалидирует кэш сессии, чтобы следующий sudo точно попросил пароль
-        subprocess.run(["sudo", "-k"])
         self._log("🔑 Сохраненный пароль сброшен.\n")
         self.add_toast(Adw.Toast(title="Пароль сброшен"))
-        self.ask_password()
+        # sudo -k инвалидирует кэш сессии — запускаем в потоке, чтобы не тормозить GTK
+        def _invalidate_and_reauth():
+            subprocess.run(["sudo", "-k"], capture_output=True)
+            GLib.idle_add(self.ask_password)
+        threading.Thread(target=_invalidate_and_reauth, daemon=True).start()
 
     def _reset_config(self, *_):
         """Предупреждает и полностью удаляет директорию конфига с перезапуском."""
@@ -679,6 +683,12 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 # При ошибке на шаге 3 — восстанавливаем бэкап
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     with zipfile.ZipFile(zip_path, "r") as zf:
+                        # Защита от zip slip: пути не должны быть абсолютными
+                        # или содержать компоненты ".." — иначе extractall
+                        # запишет файлы за пределами tmp_dir.
+                        for name in zf.namelist():
+                            if os.path.isabs(name) or os.path.normpath(name).startswith(".."):
+                                raise ValueError(f"Небезопасный путь в архиве: {name!r}")
                         zf.extractall(tmp_dir)
 
                     ver_file = os.path.join(tmp_dir, "version")
@@ -838,14 +848,30 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         """Фоновый поток: читает из очереди и пишет строки в лог-файл.
 
         Также выполняет ротацию и запись заголовка сессии при первом запуске.
+        Файл держится открытым на протяжении всей сессии — это снижает накладные
+        расходы при высоком темпе вывода (apt/epm могут выдавать сотни строк).
         """
         self._setup_logging()
+        try:
+            log_f = open(self._log_file, "a", encoding="utf-8")
+        except Exception:
+            log_f = None
+
         while True:
             text = self._log_queue.get()
-            if not hasattr(self, "_log_file"):
+            if text is None:
+                # Сентинел: корректное завершение потока при закрытии приложения
+                break
+            if log_f is None:
                 continue
             try:
-                with open(self._log_file, "a", encoding="utf-8") as f:
-                    f.write(text)
+                log_f.write(text)
+                log_f.flush()
+            except Exception:
+                pass
+
+        if log_f:
+            try:
+                log_f.close()
             except Exception:
                 pass
