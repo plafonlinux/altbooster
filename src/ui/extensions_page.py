@@ -79,6 +79,18 @@ RECOMMENDED = [
         "Настройка частоты и буфера звука",
         "7699",
     ),
+    (
+        "ding@rastersoft.com",
+        "Desktop Icons NG (DING)",
+        "Иконки на рабочем столе с поддержкой перетаскивания и контекстного меню",
+        "2087",
+    ),
+    (
+        "no-overview@fthx",
+        "No Overview at Startup",
+        "Не показывать обзор активностей при запуске GNOME Shell",
+        "4099",
+    ),
 ]
 
 _USER_EXT_DIR   = Path.home() / ".local" / "share" / "gnome-shell" / "extensions"

@@ -101,7 +101,7 @@
       "id": "fix_gsconnect",
       "icon": "phone-symbolic",
       "label": "Фикс GSConnect",
-      "desc": "Перезапуск daemon.js при входе (лечит ошибки соединения)",
+      "desc": "Убивает daemon.js GSConnect при входе (лечит ложное включение)",
       "type": "user",
       "check": {
         "type": "path",
@@ -110,7 +110,7 @@
       "cmd": [
         "bash",
         "-c",
-        "mkdir -p ~/.local/bin ~/.config/autostart; echo -e '#!/bin/sh\\nsleep 8\\nkillall daemon.js' > ~/.local/bin/kill-daemonjs.sh; chmod +x ~/.local/bin/kill-daemonjs.sh; echo -e '[Desktop Entry]\\nType=Application\\nName=Kill daemon.js\\nExec='\"$HOME\"'/.local/bin/kill-daemonjs.sh\\nX-GNOME-Autostart-enabled=true\\nNoDisplay=true' > ~/.config/autostart/kill-daemonjs.desktop"
+        "mkdir -p ~/.local/bin ~/.config/autostart; printf '#!/bin/sh\\nsleep 8\\npkill -f \"/usr/share/gnome-shell/extensions/gsconnect@andyholmes.github.io/service/daemon.js\"\\n' > ~/.local/bin/kill-daemonjs.sh; chmod +x ~/.local/bin/kill-daemonjs.sh; printf '[Desktop Entry]\\nType=Application\\nName=Kill daemon.js\\nExec=%s/.local/bin/kill-daemonjs.sh\\nX-GNOME-Autostart-enabled=true\\nNoDisplay=true\\n' \"$HOME\" > ~/.config/autostart/kill-daemonjs.desktop"
       ]
     },
     {
