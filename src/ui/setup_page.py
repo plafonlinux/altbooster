@@ -15,7 +15,7 @@ from gi.repository import Adw, GLib, Gtk
 
 import backend
 import config
-from widgets import make_button, make_scrolled_page
+from widgets import make_button, make_icon, make_scrolled_page
 from ui.rows import SettingRow
 
 
@@ -223,7 +223,7 @@ class SetupPage(Gtk.Box):
                             GLib.idle_add(self._on_epm, row)
                         else:
                             self._log("\n✘ Не удалось установить EPM\n")
-                    backend.run_privileged(["apt-get", "install", "-y", "eepm"], self._log, _after_install)
+                    backend.run_privileged(["apt-get", "install", "-y", "eepm", "epmgpi", "eepm-play-gui"], self._log, _after_install)
 
             d.connect("response", _on_response)
             d.present()
@@ -270,7 +270,7 @@ class SetupPage(Gtk.Box):
         def _done(ok):
             row.set_done(ok)
             if hasattr(win, "stop_progress"): win.stop_progress(ok)
-        backend.run_privileged(["apt-get", "install", "-y", "eepm"], self._log, _done)
+        backend.run_privileged(["apt-get", "install", "-y", "eepm", "epmgpi", "eepm-play-gui"], self._log, _done)
 
     def _on_remove_epm(self, row):
         row.set_working()
@@ -315,12 +315,12 @@ class SetupPage(Gtk.Box):
         self._r_sudo, self._r_gnome_sw, self._r_trim, self._r_journal, self._r_scale = [
             SettingRow(*r) for r in sys_rows
         ]
-        
+
         for r in (
-            self._r_sudo, 
-            self._r_gnome_sw, 
-            self._r_trim, 
-            self._r_journal, 
+            self._r_sudo,
+            self._r_gnome_sw,
+            self._r_trim,
+            self._r_journal,
             self._r_scale
         ):
             sys_group.add(r)
@@ -364,7 +364,9 @@ class SetupPage(Gtk.Box):
                     self._r_f3d._btn.set_tooltip_text("Пакет f3d доступен только в репозитории Sisyphus.\nВ стабильных ветках (p10/p11) он на данный момент отсутствует.")
             self._r_f3d._set_ui = _disabled_set_ui
 
-        for r in (self._r_naut, self._r_dirty, self._r_naut_admin, self._r_sushi, self._r_f3d):
+        self._papirus_row = self._create_papirus_row()
+
+        for r in (self._papirus_row, self._r_naut, self._r_dirty, self._r_naut_admin, self._r_sushi, self._r_f3d):
             group.add(r)
 
     def _on_nautilus(self, row):
@@ -822,5 +824,138 @@ class SetupPage(Gtk.Box):
             GLib.idle_add(self._r_alt._set_ui, False)
             GLib.idle_add(self._r_caps._set_ui, False)
             GLib.idle_add(self._log, "✔  Ctrl+Shift готов!\n" if ok else "✘  Ошибка\n")
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    # ── Papirus иконки ────────────────────────────────────────────────────────
+
+    # Ключи цветов папок Papirus (lowercase = имя темы после capitalize())
+    _PAPIRUS_COLOR_KEYS = [
+        "adwaita", "yaru", "nordic", "breeze", "blue", "bluegrey",
+        "brown", "cyan", "deeporange", "green", "grey", "indigo",
+        "magenta", "orange", "palebrown", "pink", "purple", "red",
+        "teal", "violet", "white", "yellow",
+    ]
+
+    def _create_papirus_row(self):
+        """Строка установки/применения иконок Papirus.
+
+        Фаза 1 (пакет не установлен): кнопка «Установить».
+        Фаза 2 (пакет есть): dropdown цвета + корзина + «Применить».
+        Тема: Papirus-{Dark|Light}-{SelectedColor} по системной цветовой схеме.
+        """
+        row = Adw.ActionRow()
+        row.set_title("Иконки Papirus")
+        row.set_subtitle("Пакет papirus-remix-icon-theme — тема подбирается по светлой/тёмной схеме")
+        row.add_prefix(make_icon("application-x-addon-symbolic"))
+
+        # Dropdown выбора цвета папок
+        model = Gtk.StringList.new([k.capitalize() for k in self._PAPIRUS_COLOR_KEYS])
+        self._papirus_color_drop = Gtk.DropDown.new(model, None)
+        self._papirus_color_drop.set_valign(Gtk.Align.CENTER)
+        self._papirus_color_drop.set_visible(False)  # виден только после установки
+
+        self._papirus_trash_btn = Gtk.Button.new_from_icon_name("user-trash-symbolic")
+        self._papirus_trash_btn.add_css_class("destructive-action")
+        self._papirus_trash_btn.add_css_class("circular")
+        self._papirus_trash_btn.set_valign(Gtk.Align.CENTER)
+        self._papirus_trash_btn.connect("clicked", lambda _: self._on_uninstall_papirus())
+        self._papirus_trash_btn.set_visible(False)
+
+        self._papirus_btn = make_button("Установить", width=130)
+        self._papirus_btn.set_sensitive(False)  # ждём результата фоновой проверки
+        self._papirus_btn.connect("clicked", self._on_papirus_btn_clicked)
+
+        suffix = Gtk.Box(spacing=8)
+        suffix.set_valign(Gtk.Align.CENTER)
+        suffix.append(self._papirus_color_drop)
+        suffix.append(self._papirus_trash_btn)
+        suffix.append(self._papirus_btn)
+        row.add_suffix(suffix)
+
+        self._papirus_installed = False
+        threading.Thread(target=self._check_papirus, daemon=True).start()
+        return row
+
+    def _check_papirus(self):
+        installed = backend.check_app_installed({"check": ["rpm", "papirus-remix-icon-theme"]})
+        config.state_set("app_papirus_icons", installed)
+        GLib.idle_add(self._set_papirus_ui, installed)
+
+    def _set_papirus_ui(self, installed):
+        self._papirus_installed = installed
+        if installed:
+            self._papirus_color_drop.set_visible(True)
+            self._papirus_trash_btn.set_visible(True)
+            self._papirus_trash_btn.set_sensitive(True)
+            self._papirus_btn.set_label("Применить")
+            self._papirus_btn.set_sensitive(True)
+            self._papirus_btn.add_css_class("suggested-action")
+        else:
+            self._papirus_color_drop.set_visible(False)
+            self._papirus_trash_btn.set_visible(False)
+            self._papirus_btn.set_label("Установить")
+            self._papirus_btn.set_sensitive(True)
+            self._papirus_btn.add_css_class("suggested-action")
+
+    def _on_papirus_btn_clicked(self, _):
+        if self._papirus_installed:
+            self._on_apply_papirus()
+        else:
+            self._on_install_papirus()
+
+    def _on_install_papirus(self):
+        self._papirus_btn.set_sensitive(False)
+        self._papirus_btn.set_label("…")
+        self._log("\n▶  Установка papirus-remix-icon-theme...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Установка иконок Papirus...")
+
+        def _done(ok):
+            if ok:
+                self._log("✔  Papirus установлен!\n")
+                if hasattr(win, "stop_progress"): win.stop_progress(ok)
+                GLib.idle_add(self._set_papirus_ui, True)
+                GLib.idle_add(self._on_apply_papirus)
+            else:
+                self._log("✘  Ошибка установки papirus-remix-icon-theme\n")
+                if hasattr(win, "stop_progress"): win.stop_progress(ok)
+                GLib.idle_add(self._set_papirus_ui, False)
+                GLib.idle_add(self._papirus_btn.set_label, "Повторить")
+
+        backend.run_privileged(["apt-get", "install", "-y", "papirus-remix-icon-theme"], self._log, _done)
+
+    def _on_uninstall_papirus(self):
+        self._papirus_trash_btn.set_sensitive(False)
+        self._papirus_btn.set_sensitive(False)
+        self._log("\n▶  Удаление papirus-remix-icon-theme...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Удаление иконок Papirus...")
+
+        def _done(ok):
+            if ok:
+                self._log("✔  Papirus удалён!\n")
+            else:
+                self._log("✘  Ошибка удаления papirus-remix-icon-theme\n")
+            if hasattr(win, "stop_progress"): win.stop_progress(ok)
+            GLib.idle_add(self._set_papirus_ui, not ok)
+
+        backend.run_privileged(["apt-get", "remove", "-y", "papirus-remix-icon-theme"], self._log, _done)
+
+    def _on_apply_papirus(self):
+        """Применяет Papirus-{Dark|Light}-{Color} по системной схеме и выбранному цвету папок."""
+        idx = self._papirus_color_drop.get_selected()
+        color = self._PAPIRUS_COLOR_KEYS[idx].capitalize() if idx != Gtk.INVALID_LIST_POSITION else "Adwaita"
+
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Применение темы Papirus...")
+
+        def _do():
+            scheme = backend.gsettings_get("org.gnome.desktop.interface", "color-scheme")
+            dark = "dark" in scheme.lower()
+            theme = f"Papirus-{'Dark' if dark else 'Light'}-{color}"
+            ok = backend.run_gsettings(["set", "org.gnome.desktop.interface", "icon-theme", theme])
+            GLib.idle_add(self._log, f"✔  Тема {theme} применена!\n" if ok else "✘  Ошибка применения темы Papirus\n")
+            if hasattr(win, "stop_progress"): GLib.idle_add(win.stop_progress, ok)
 
         threading.Thread(target=_do, daemon=True).start()

@@ -63,11 +63,100 @@
               "io.github.IshuSinghSE.aurynk"
             ]
           }
+        }
+      ]
+    },
+    {
+      "id": "удалённый_доступ",
+      "title": "Удалённый доступ",
+      "items": [
+        {
+          "id": "gnome_connections",
+          "label": "GNOME Connections",
+          "desc": "Подключение к удалённым рабочим столам (RDP, VNC)",
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.gnome.Connections"
+              ],
+              "check": [
+                "flatpak",
+                "org.gnome.Connections"
+              ]
+            },
+            {
+              "label": "EPM install",
+              "cmd": [
+                "epm",
+                "-i",
+                "gnome-connections"
+              ],
+              "check": [
+                "rpm",
+                "gnome-connections"
+              ]
+            }
+          ]
         },
         {
-          "id": "cassette",
-          "label": "Cassette",
-          "desc": "Неофициальный клиент Яндекс Музыки",
+          "id": "remmina",
+          "label": "Remmina",
+          "desc": "Клиент удалённого рабочего стола (RDP, VNC, SSH, SPICE)",
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.remmina.Remmina"
+              ],
+              "check": [
+                "flatpak",
+                "org.remmina.Remmina"
+              ]
+            },
+            {
+              "label": "EPM install",
+              "cmd": [
+                "epm",
+                "-i",
+                "remmina"
+              ],
+              "check": [
+                "rpm",
+                "remmina"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "freerdp",
+          "label": "FreeRDP",
+          "desc": "RDP-клиент с нативной поддержкой Wayland (wlfreerdp)",
+          "source": {
+            "label": "EPM install",
+            "cmd": [
+              "epm",
+              "-i",
+              "freerdp"
+            ],
+            "check": [
+              "which",
+              "wlfreerdp"
+            ]
+          }
+        },
+        {
+          "id": "rustdesk",
+          "label": "RustDesk",
+          "desc": "Открытый аналог TeamViewer с поддержкой Wayland",
           "source": {
             "label": "Flathub",
             "cmd": [
@@ -75,11 +164,11 @@
               "install",
               "-y",
               "flathub",
-              "space.rirusha.Cassette"
+              "com.rustdesk.RustDesk"
             ],
             "check": [
               "flatpak",
-              "space.rirusha.Cassette"
+              "com.rustdesk.RustDesk"
             ]
           }
         }
@@ -256,6 +345,25 @@
       "title": "Мультимедиа",
       "items": [
         {
+          "id": "cassette",
+          "label": "Cassette",
+          "desc": "Неофициальный клиент Яндекс Музыки",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "space.rirusha.Cassette"
+            ],
+            "check": [
+              "flatpak",
+              "space.rirusha.Cassette"
+            ]
+          }
+        },
+        {
           "id": "obs",
           "label": "OBS Studio",
           "desc": "Запись и стриминг",
@@ -362,6 +470,25 @@
             "check": [
               "flatpak",
               "org.inkscape.Inkscape"
+            ]
+          }
+        },
+        {
+          "id": "gradia",
+          "label": "Gradia",
+          "desc": "Аннотирование и оформление скриншотов (GTK4)",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "be.alexandervanhee.gradia"
+            ],
+            "check": [
+              "flatpak",
+              "be.alexandervanhee.gradia"
             ]
           }
         },
@@ -579,6 +706,59 @@
           }
         },
         {
+          "id": "solaar",
+          "label": "Solaar",
+          "desc": "Управление устройствами Logitech",
+          "source": {
+            "label": "EPM",
+            "cmd": [
+              "epm",
+              "-i",
+              "solaar"
+            ],
+            "check": [
+              "rpm",
+              "solaar"
+            ]
+          }
+        },
+        {
+          "id": "piper",
+          "label": "Piper",
+          "desc": "Настройка игровых мышей (libratbag)",
+          "source": {
+            "label": "EPM",
+            "cmd": [
+              "epm",
+              "-i",
+              "piper"
+            ],
+            "check": [
+              "rpm",
+              "piper"
+            ]
+          }
+        },
+        {
+          "id": "localsend",
+          "label": "LocalSend",
+          "desc": "Передача файлов по локальной сети (AirDrop-аналог)",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.localsend.localsend_app"
+            ],
+            "check": [
+              "flatpak",
+              "org.localsend.localsend_app"
+            ]
+          }
+        },
+        {
           "id": "monic",
           "label": "Monic",
           "desc": "Управление монитором (DDC/CI)",
@@ -592,6 +772,64 @@
             "check": [
               "path",
               "~/.local/share/monitor-control/run_monitor_control.sh"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "обход_блокировок",
+      "title": "Обход блокировок",
+      "items": [
+        {
+          "id": "v2ray",
+          "label": "v2ray",
+          "desc": "Прокси-платформа для обхода блокировок",
+          "source": {
+            "label": "EPM",
+            "cmd": [
+              "epm",
+              "-i",
+              "-y",
+              "v2ray"
+            ],
+            "check": [
+              "which",
+              "v2ray"
+            ]
+          }
+        },
+        {
+          "id": "v2rayn",
+          "label": "v2rayN",
+          "desc": "Графический клиент v2ray/xray",
+          "source": {
+            "label": "EPM Play",
+            "cmd": [
+              "epm",
+              "play",
+              "v2rayn"
+            ],
+            "check": [
+              "which",
+              "v2rayn"
+            ]
+          }
+        },
+        {
+          "id": "amneziavpn",
+          "label": "Amnezia VPN",
+          "desc": "VPN с защитой от DPI — последняя версия с GitHub",
+          "source": {
+            "label": "GitHub",
+            "cmd": [
+              "bash",
+              "-c",
+              "set -e; REAL_USER=${SUDO_USER:-$USER}; HOME_DIR=$(getent passwd $REAL_USER | cut -d: -f6); mkdir -p \"$HOME_DIR/Applications\"; API=$(curl -sf https://api.github.com/repos/amnezia-vpn/amnezia-client/releases/latest); URL=$(echo \"$API\" | python3 -c \"import sys,json; r=json.load(sys.stdin); print(next((a['browser_download_url'] for a in r['assets'] if a['name'].endswith('.AppImage')), ''))\"); [ -n \"$URL\" ] || (echo 'AppImage не найден в релизе'; exit 1); curl -L -o \"$HOME_DIR/Applications/AmneziaVPN.AppImage\" \"$URL\"; chmod +x \"$HOME_DIR/Applications/AmneziaVPN.AppImage\"; chown $REAL_USER:$REAL_USER \"$HOME_DIR/Applications/AmneziaVPN.AppImage\"; sudo -u $REAL_USER mkdir -p \"$HOME_DIR/.local/share/applications\"; printf '[Desktop Entry]\\nType=Application\\nName=Amnezia VPN\\nExec=%s/Applications/AmneziaVPN.AppImage\\nIcon=network-vpn\\nCategories=Network;\\nTerminal=false\\n' \"$HOME_DIR\" > \"$HOME_DIR/.local/share/applications/amneziavpn.desktop\"; chown $REAL_USER:$REAL_USER \"$HOME_DIR/.local/share/applications/amneziavpn.desktop\""
+            ],
+            "check": [
+              "path",
+              "~/Applications/AmneziaVPN.AppImage"
             ]
           }
         }

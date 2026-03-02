@@ -120,11 +120,15 @@ def is_vm_dirty_optimized() -> bool:
         return False
 
 def is_drive_menu_patched() -> bool:
-    """Проверяет, пропатчено ли расширение drive-menu."""
+    """Проверяет, пропатчено ли расширение drive-menu.
+
+    Признак нового патча: наличие this._mounts.some в файле расширения
+    (проверка дубликатов монтирований перед добавлением в меню).
+    """
     try:
         ext_path = "/usr/share/gnome-shell/extensions/drive-menu@gnome-shell-extensions.gcampax.github.com/extension.js"
         content = Path(ext_path).read_text(encoding="utf-8")
-        return "GLib.timeout_add_seconds" in content
+        return "this._mounts.some" in content
     except OSError:
         return False
 

@@ -27,7 +27,6 @@ from ui.dialogs import PasswordDialog, get_saved_password, clear_saved_password
 from ui.setup_page import SetupPage
 from ui.apps_page import AppsPage
 from ui.extensions_page import ExtensionsPage
-from ui.appearance_page import AppearancePage
 from ui.terminal_page import TerminalPage
 from ui.davinci_page import DaVinciPage
 from ui.maintenance_page import MaintenancePage
@@ -78,7 +77,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._setup = SetupPage(self._log)
         self._apps = AppsPage(self._log)
         self._extensions = ExtensionsPage(self._log)
-        self._appearance = AppearancePage(self._log)
         self._terminal = TerminalPage(self._log)
         self._davinci = DaVinciPage(self._log)
         self._maint = MaintenancePage(self._log)
@@ -99,7 +97,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             (self._setup,       "setup",       "Начало",          "go-home-symbolic"),
             (self._apps,        "apps",        "Приложения",      "flathub-symbolic"),
             (self._extensions,  "extensions",  "Расширения",      "application-x-addon-symbolic"),
-            (self._appearance,  "appearance",  "Внешний вид",     "preferences-desktop-wallpaper-symbolic"),
             (self._terminal,   "terminal",    "Терминал",        "utilities-terminal-symbolic"),
             (self._amd,        "amd",         "AMD Radeon",      "video-display-symbolic"),
             (self._davinci,    "davinci",     "DaVinci Resolve", "davinci-symbolic"),
