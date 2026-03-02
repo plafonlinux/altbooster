@@ -32,7 +32,7 @@ alias tml="sudo timeshift --list"
 #
 # Neofetch
 #
-alias n="fastfetch -c ~/.config/fastfetch/config.jsonc"
+alias n="fastfetch"
 alias k="uname -rs"
 alias g="gnome-shell --version"
 alias f="lsb_release -sd"
@@ -54,7 +54,6 @@ alias find="epmqp"
 alias poisk="epms"
 alias up="epm update && epm full-upgrade && flatpak update --noninteractive -y"
 alias cc="sudo apt-get clean && sudo apt-get autoclean && sudo apt-get check && sudo remove-old-kernels -a && flatpak uninstall --unused -y && sudo journalctl --vacuum-time=1weeks"
-alias ccc='~/.config/mainteencer/maintenance.sh'
 alias c="clear"
 #
 # PC
@@ -91,20 +90,6 @@ alias sn="sudo nautilus"
 alias v4="sudo modprobe v4l2loopback"
 alias modeprobe="sudo modprobe v4l2loopback"
 alias vmax="sudo sysctl -w vm.max_map_count=2147483642"
-#
-#
-#
-# DaVinci Resolve
-#
-alias convertmp4="find . -name '*.[mM][pP]4' -execdir ffmpeg -i '{}' -c:v mpeg4 -qscale:v 1 -c:a pcm_s32le {}-davinci.mov \;"
-alias convertmkv="find . -name '*.[mM][kK][vV]' -execdir ffmpeg -i '{}' -c:v mpeg4 -qscale:v 1 -c:a pcm_s32le {}-davinci.mov \;"
-alias convertmov="find . -name '*.[mM][oO][vV]' -execdir ffmpeg -i '{}' -c:v mpeg4 -qscale:v 1 -c:a pcm_s32le {}-davinci.mov \;"
-alias davinciconvdir="mkdir davinci;find . -name '*davinci.mov' -execdir mv {} ./davinci/ \;"
-alias davdirm="cd davinci; rm -rf *'davinci.mov-davinci.mov'"
-alias convertall="convertmp4 && convertmkv && convertmov && davinciconvdir && davdirm"
-alias dav="convertmp4 && convertmkv && convertmov && davinciconvdir && davdirm"
-alias adav="sh /mnt/datassd/holmes/Документы/DAVINCI/davinci_alt.sh"
-#
 #
 #
 # ---------------------------

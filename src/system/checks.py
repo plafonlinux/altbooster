@@ -137,13 +137,17 @@ def is_journal_optimized() -> bool:
     paths = ["/etc/systemd/journald.conf", "/etc/systemd/journald.conf.d/99-altbooster.conf"]
     for p in paths:
         try:
-            if "SystemMaxUse=100M" in Path(p).read_text(encoding="utf-8"): return True
-        except OSError: continue
+            if "SystemMaxUse=100M" in Path(p).read_text(encoding="utf-8"):
+                return True
+        except OSError:
+            continue
     return False
 
 def is_davinci_installed() -> bool:
     """Проверяет, установлен ли DaVinci Resolve."""
-    return os.path.exists("/opt/resolve/bin/resolve") or subprocess.run(["rpm", "-q", "davinci-resolve"], capture_output=True).returncode == 0
+    if os.path.exists("/opt/resolve/bin/resolve"):
+        return True
+    return subprocess.run(["rpm", "-q", "davinci-resolve"], capture_output=True).returncode == 0
 
 def is_aac_installed() -> bool:
     """Проверяет, установлен ли кодек AAC для DaVinci Resolve."""

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -51,7 +52,7 @@ def setup_lact_wheel(page, _arg: Any) -> bool:
         return False
     cmd = [
         "bash", "-c",
-        f"usermod -aG wheel {username} && "
+        f"usermod -aG wheel {shlex.quote(username)} && "
         "sed -i 's|\"admin_group\":.*|\"admin_group\": \"wheel\",|' /etc/lact/config.json 2>/dev/null || true",
     ]
     log_fn = page.log if page else lambda _: None
@@ -68,7 +69,7 @@ def apply_lact_config(page, src_path: str) -> bool:
         return False
     cmd = [
         "bash", "-c",
-        f"mkdir -p /etc/lact && cp '{src_path}' /etc/lact/config.json && "
+        f"mkdir -p /etc/lact && cp {shlex.quote(src_path)} /etc/lact/config.json && "
         "systemctl restart lactd 2>/dev/null || true",
     ]
     log_fn = page.log if page else lambda _: None
