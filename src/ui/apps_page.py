@@ -13,7 +13,8 @@ import urllib.request
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk
+gi.require_version("Gdk", "4.0")
+from gi.repository import Adw, Gdk, GLib, Gtk
 
 import backend
 import config
@@ -33,6 +34,7 @@ class AppsPage(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._log = log_fn
         self._rows = []
+        self._group_checkboxes = []  # [(Gtk.CheckButton, [AppRow, ...])]
         self._busy = False
         self._system_json_path = _MODULES_DIR / "apps.json"
         self._json_path = config.CONFIG_DIR / "apps.json"
@@ -65,8 +67,10 @@ class AppsPage(Gtk.Box):
 
         self._search_entry = Gtk.Entry()
         self._search_entry.set_hexpand(True)
-        self._search_entry.set_placeholder_text("Поиск приложений для ALT Linux")
+        self._search_entry.set_placeholder_text("Найти приложения в репозиториях и на Flathub")
         self._search_entry.set_valign(Gtk.Align.CENTER)
+        self._search_entry.set_icon_from_icon_name(Gtk.EntryIconPosition.SECONDARY, "edit-clear-symbolic")
+        self._search_entry.connect("icon-press", lambda e, p, *_: e.set_text("") if p == Gtk.EntryIconPosition.SECONDARY else None)
         self._search_entry.connect("activate", self._on_pkg_search)
         self._search_entry.connect("notify::text", self._on_search_text_changed)
         search_box.append(self._search_entry)
@@ -82,23 +86,87 @@ class AppsPage(Gtk.Box):
         self._btn_reset.connect("clicked", self._on_factory_reset)
         self._btns_box.append(self._btn_reset)
 
+        # CSS для плавающего баннера (один раз для всего приложения)
+        _banner_css = Gtk.CssProvider()
+        _banner_css.load_from_data(b"""
+            .ab-float-banner {
+                background-color: alpha(@card_bg_color, 0.9);
+                border-radius: 20px;
+                padding: 5px 14px 5px 16px;
+                border: 1px solid alpha(@borders, 0.4);
+            }
+            .ab-float-banner label {
+                font-size: 0.82em;
+            }
+        """)
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), _banner_css,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+        )
+
+        # Внешний контейнер: центрирует баннер и задаёт прозрачность
+        self._banner_dismissed = False
+        banner_outer = Gtk.Box()
+        banner_outer.set_halign(Gtk.Align.CENTER)
+        banner_outer.set_margin_bottom(10)
+        banner_outer.set_margin_top(4)
+        banner_outer.set_opacity(0.6)
+
+        banner_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        banner_box.add_css_class("ab-float-banner")
+
+        banner_label = Gtk.Label()
+        banner_label.set_text(
+            "Список изменён — обновления не применятся автоматически."
+            " Нажмите «Вернуть стандартный список», чтобы получить актуальный набор приложений."
+        )
+        banner_label.set_wrap(True)
+        banner_label.set_xalign(0.0)
+
+        close_btn = Gtk.Button()
+        close_btn.set_icon_name("window-close-symbolic")
+        close_btn.add_css_class("flat")
+        close_btn.add_css_class("circular")
+        close_btn.set_valign(Gtk.Align.CENTER)
+
+        banner_box.append(banner_label)
+        banner_box.append(close_btn)
+        banner_outer.append(banner_box)
+
+        self._banner_revealer = Gtk.Revealer()
+        self._banner_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
+        self._banner_revealer.set_transition_duration(300)
+        self._banner_revealer.set_child(banner_outer)
+        self._banner_revealer.set_reveal_child(False)
+
+        def _on_close(_):
+            self._banner_dismissed = True
+            self._banner_revealer.set_reveal_child(False)
+        close_btn.connect("clicked", _on_close)
+
+        self.append(self._banner_revealer)
+
         self._load_and_build()
         GLib.idle_add(self._refresh_btn_all)
 
     def _update_reset_button_ui(self, is_default):
-        """Обновляет кнопку сброса в зависимости от того, стандартный ли список."""
+        """Обновляет кнопку сброса и баннер в зависимости от того, стандартный ли список."""
         if is_default:
             self._btn_reset.set_label("✓ Список по умолчанию")
             self._btn_reset.set_tooltip_text("Список приложений соответствует стандартному")
             self._btn_reset.remove_css_class("destructive-action")
             self._btn_reset.add_css_class("success")
             self._btn_reset.set_sensitive(False)
+            self._banner_revealer.set_reveal_child(False)
+            self._banner_dismissed = False  # сброс: при следующем изменении покажем снова
         else:
             self._btn_reset.set_label("Вернуть стандартный список")
             self._btn_reset.set_tooltip_text("Сбросить список к стандартному (обновить)")
             self._btn_reset.remove_css_class("success")
             self._btn_reset.add_css_class("destructive-action")
             self._btn_reset.set_sensitive(True)
+            if not self._banner_dismissed:
+                self._banner_revealer.set_reveal_child(True)
 
     def _on_search_text_changed(self, entry, _):
         if not entry.get_text():
@@ -359,7 +427,7 @@ class AppsPage(Gtk.Box):
             }
         else:
             # Для epm install используем название ветки
-            label = branch if branch in ["p11", "Sisyphus"] else "EPM install"
+            label = branch if branch in ["p11", "Sisyphus"] else "EPM"
             source = {
                 "label": label,
                 "cmd": ["epm", "-i", "-y", install_id],
@@ -451,6 +519,7 @@ class AppsPage(Gtk.Box):
                 self._body.remove(child)
             child = nxt
         self._rows.clear()
+        self._group_checkboxes.clear()
         self._pkg_search_groups = []
 
     def _load_and_build(self):
@@ -502,6 +571,14 @@ class AppsPage(Gtk.Box):
             self._update_reset_button_ui(False)
 
     def _build(self):
+        heading = Gtk.Label()
+        heading.set_markup("<b>Выбрать и установить приложения</b>")
+        heading.set_halign(Gtk.Align.START)
+        heading.set_margin_top(8)
+        heading.set_margin_start(4)
+        heading.set_margin_bottom(2)
+        self._body.append(heading)
+
         groups = self._data.get("groups", [])
         if not groups:
             self._log("⚠ Список групп приложений пуст или не загружен.\n")
@@ -516,11 +593,44 @@ class AppsPage(Gtk.Box):
             exp.set_expanded(False)
             pg.add(exp)
 
+            gid = gdata.get("id", "")
+
+            # Чекбокс группового выбора
+            group_rows = []
+            grp_cb = Gtk.CheckButton()
+            grp_cb.set_valign(Gtk.Align.CENTER)
+            grp_cb.set_tooltip_text("Выбрать / снять все в группе")
+
+            def _on_grp_cb_toggled(cb, rows=group_rows):
+                if getattr(self, "_refreshing_btn", False):
+                    return
+                if cb.get_inconsistent():
+                    cb.set_inconsistent(False)
+                    cb.set_active(True)
+                want = cb.get_active()
+                uninstalled = [r for r in rows if not r.is_installed()]
+                for r in uninstalled:
+                    r.set_selected(want)
+                self._refresh_btn_all()
+
+            grp_cb.connect("toggled", _on_grp_cb_toggled)
+
+            # Галочка «все установлены» — в одной колонке с чекбоксом
+            grp_status = make_status_icon()
+            grp_status.set_visible(False)
+
+            _grp_prefix = Gtk.Box()
+            _grp_prefix.set_valign(Gtk.Align.CENTER)
+            _grp_prefix.append(grp_cb)
+            _grp_prefix.append(grp_status)
+            exp.add_prefix(_grp_prefix)
+
+            self._group_checkboxes.append((grp_cb, grp_status, group_rows))
+
             add_btn = Gtk.Button()
             add_btn.set_icon_name("list-add-symbolic")
             add_btn.set_tooltip_text("Добавить приложение в эту группу")
             add_btn.add_css_class("flat")
-            gid = gdata.get("id", "")
             add_btn.connect("clicked", lambda _b, g=gid: self._on_add(g))
             exp.add_suffix(add_btn)
 
@@ -531,7 +641,7 @@ class AppsPage(Gtk.Box):
                     sources = app["sources"]
                 elif "source" in app:
                     sources = [app["source"]]
-                
+
                 # Валидация источников (tuple check)
                 for s in sources:
                     chk = s.get("check", [])
@@ -540,6 +650,7 @@ class AppsPage(Gtk.Box):
                 app_n = dict(app, sources=sources)
                 row = AppRow(app_n, self._log, self._refresh_btn_all)
                 self._rows.append(row)
+                group_rows.append(row)
                 exp.add_row(row)
 
                 gid2 = gdata.get("id", "")
@@ -717,11 +828,12 @@ class AppsPage(Gtk.Box):
     # ── Массовая установка ───────────────────────────────────────────────────
 
     def _on_install_all_clicked(self, btn):
+        n = sum(1 for r in self._rows if r.is_selected())
         dialog = Adw.AlertDialog(
-            heading="Установить все приложения?",
+            heading=f"Установить выбранные приложения ({n})?",
             body=(
-                "Будет выполнена установка всех приложений из списка.\n"
-                "Основной источник — Flathub (требуется интернет). Это может занять продолжительное время."
+                f"Будет выполнена установка {n} выбранных приложений.\n"
+                "Это может занять продолжительное время."
             ),
         )
         dialog.add_response("cancel", "Отмена")
@@ -738,15 +850,50 @@ class AppsPage(Gtk.Box):
         dialog.present(self.get_root())
 
     def _refresh_btn_all(self):
-        has_missing = any(not r.is_installed() for r in self._rows)
-        self._btn_all.set_sensitive(has_missing)
-        if has_missing:
-            self._btn_all.set_label("Установить всё")
+        # Охранник от рекурсии (toggled → _refresh_btn_all → set_active → toggled → ...)
+        if getattr(self, "_refreshing_btn", False):
+            return
+        self._refreshing_btn = True
+        try:
+            # Синхронизируем состояние групповых чекбоксов
+            for grp_cb, grp_status, rows in self._group_checkboxes:
+                uninstalled = [r for r in rows if not r.is_installed()]
+                if not uninstalled:
+                    # Все установлены — чекбокс → зелёная галочка
+                    grp_cb.set_visible(False)
+                    set_status_ok(grp_status)
+                    grp_status.set_visible(True)
+                else:
+                    grp_status.set_visible(False)
+                    grp_cb.set_visible(True)
+                    n_sel = sum(1 for r in uninstalled if r.is_selected())
+                    if n_sel == 0:
+                        grp_cb.set_inconsistent(False)
+                        grp_cb.set_active(False)
+                    elif n_sel == len(uninstalled):
+                        grp_cb.set_inconsistent(False)
+                        grp_cb.set_active(True)
+                    else:
+                        grp_cb.set_inconsistent(True)
+        finally:
+            self._refreshing_btn = False
+
+        n_selected = sum(1 for r in self._rows if r.is_selected())
+        if n_selected > 0:
+            self._btn_all.set_label(f"Установить выбранные ({n_selected})")
+            self._btn_all.set_sensitive(True)
             self._btn_all.add_css_class("suggested-action")
             self._btn_all.add_css_class("success")
             self._btn_all.remove_css_class("flat")
-        else:
+        elif all(r.is_installed() for r in self._rows) and self._rows:
             self._btn_all.set_label("✓ Все приложения установлены")
+            self._btn_all.set_sensitive(False)
+            self._btn_all.remove_css_class("suggested-action")
+            self._btn_all.add_css_class("success")
+            self._btn_all.remove_css_class("flat")
+        else:
+            self._btn_all.set_label("Установить всё")
+            self._btn_all.set_sensitive(False)
             self._btn_all.remove_css_class("suggested-action")
             self._btn_all.add_css_class("success")
             self._btn_all.remove_css_class("flat")
@@ -798,15 +945,16 @@ class AppsPage(Gtk.Box):
         self._log("\n⚠  Запрос отмены. Завершаю текущую операцию и останавливаюсь...\n")
 
     def _worker(self):
-        for row in (r for r in self._rows if not r.is_installed()):
+        to_install = [r for r in self._rows if r.is_selected() and not r.is_installed()]
+        for row in to_install:
             if self._cancel_install:
                 break
             # Ждем, пока предыдущая установка (если была) сбросит флаг
             while row._installing:
                 time.sleep(0.5)
-            
+
             GLib.idle_add(row._on_install)
-            
+
             # Даем время на запуск установки в основном потоке
             time.sleep(1.0)
             while row._installing:

@@ -7,7 +7,27 @@ import threading
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk
+gi.require_version("Gdk", "4.0")
+from gi.repository import Adw, Gdk, GLib, Gtk
+
+# CSS для бейджика источника (в префиксе) и MenuButton выбора источника
+_badge_css = Gtk.CssProvider()
+_badge_css.load_from_data(b"""
+    .ab-source-badge {
+        font-size: 0.72em;
+        min-height: 0;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background-color: alpha(currentColor, 0.10);
+    }
+    .ab-source-badge.success {
+        color: @success_color;
+        background-color: alpha(@success_color, 0.15);
+    }
+    .ab-source-badge.dim-label {
+        opacity: 0.55;
+    }
+""")
 
 import backend
 import config
@@ -162,9 +182,22 @@ class AppRow(Adw.ActionRow):
         self.set_title(app["label"])
         self.set_subtitle(app["desc"])
 
-        self._status = make_status_icon()
-        self.add_prefix(self._status)
+        # ── Префикс (слева): чекбокс ИЛИ галочка статуса — в одной позиции ─
+        # Они взаимоисключающие: если установлено → галочка, иначе → чекбокс
+        self._checkbox = Gtk.CheckButton()
+        self._checkbox.set_valign(Gtk.Align.CENTER)
+        self._checkbox.connect("toggled", self._on_checkbox_toggled)
 
+        self._status = make_status_icon()
+        self._status.set_visible(False)  # скрыт до завершения проверки
+
+        _prefix_box = Gtk.Box()
+        _prefix_box.set_valign(Gtk.Align.CENTER)
+        _prefix_box.append(self._checkbox)
+        _prefix_box.append(self._status)
+        self.add_prefix(_prefix_box)
+
+        # ── Суффикс (справа): бейдж → прогресс → MenuButton → Установить → Корзина ──
         self._btn = make_button("Установить", width=120)
         self._btn.connect("clicked", self._on_install)
         self._btn.set_sensitive(False)
@@ -172,6 +205,7 @@ class AppRow(Adw.ActionRow):
         self._trash_btn = Gtk.Button.new_from_icon_name("user-trash-symbolic")
         self._trash_btn.add_css_class("destructive-action")
         self._trash_btn.set_valign(Gtk.Align.CENTER)
+        self._trash_btn.set_tooltip_text("Удалить приложение")
         self._trash_btn.connect("clicked", self._on_uninstall)
         self._trash_btn.set_visible(False)
 
@@ -180,20 +214,39 @@ class AppRow(Adw.ActionRow):
         self._prog.set_valign(Gtk.Align.CENTER)
         self._prog.set_visible(False)
 
+        # Бейдж источника — ПЕРВЫМ в суффиксе, фиксированная ширина,
+        # чтобы кнопки всех строк стояли в одной колонке, а бейдж — прямо после заголовка
+        self._source_label = Gtk.Label()
+        self._source_label.add_css_class("ab-source-badge")
+        self._source_label.set_valign(Gtk.Align.CENTER)
+        self._source_label.set_halign(Gtk.Align.START)
+        self._source_label.set_visible(False)
+        _badge_wrapper = Gtk.Box()
+        _badge_wrapper.set_size_request(72, -1)  # фиксированная ширина держит колонку кнопок
+        _badge_wrapper.set_valign(Gtk.Align.CENTER)
+        _badge_wrapper.append(self._source_label)
+
         suffix = Gtk.Box(spacing=8)
         suffix.set_valign(Gtk.Align.CENTER)
+        suffix.append(_badge_wrapper)            # ПЕРВЫМ — сразу правее заголовка
         suffix.append(self._prog)
 
-        # Контейнер для бейджиков источников
-        self._badges_box = Gtk.Box(spacing=4)
-        self._badges_box.set_valign(Gtk.Align.CENTER)
-        suffix.append(self._badges_box)
+        # MenuButton выбора источника — только для приложений с несколькими источниками
+        self._src_menu_btn = None
+        if len(self._sources) > 1:
+            self._src_menu_btn = self._build_source_menu()
+            suffix.append(self._src_menu_btn)
 
         suffix.append(self._btn)
         suffix.append(self._trash_btn)
         self.add_suffix(suffix)
 
-        self._update_badges()
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), _badge_css,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+        )
+
+        self._update_source_label()
         threading.Thread(target=self._check, daemon=True).start()
 
     def is_installed(self):
@@ -214,74 +267,134 @@ class AppRow(Adw.ActionRow):
         config.state_set(self._state_key, installed)
         GLib.idle_add(self._set_installed_ui, installed)
 
-    def _update_badges(self):
-        # Очищаем старые бейджики
-        child = self._badges_box.get_first_child()
-        while child:
-            next_child = child.get_next_sibling()
-            self._badges_box.remove(child)
-            child = next_child
+    def _on_checkbox_toggled(self, _):
+        """Чекбокс выбора приложения для пакетной установки."""
+        if self._on_change:
+            self._on_change()
 
-        if self.is_installed():
-            # Если установлено: показываем только один зеленый бейдж
-            idx = self._installed_source_index
-            if idx >= 0 and idx < len(self._sources):
-                src = self._sources[idx]
-                label = src.get("label", "Source")
+    def is_selected(self):
+        """Выбрано ли приложение для пакетной установки."""
+        return self._checkbox.get_active()
+
+    def set_selected(self, value):
+        """Устанавливает чекбокс без вызова on_change."""
+        self._checkbox.handler_block_by_func(self._on_checkbox_toggled)
+        self._checkbox.set_active(value)
+        self._checkbox.handler_unblock_by_func(self._on_checkbox_toggled)
+
+    def _build_source_menu(self):
+        """Строит MenuButton с popover для выбора источника (только multi-source)."""
+        popover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        popover_box.set_margin_top(6)
+        popover_box.set_margin_bottom(6)
+        popover_box.set_margin_start(8)
+        popover_box.set_margin_end(8)
+
+        self._src_radios = []
+        first = None
+        for i, src in enumerate(self._sources):
+            rb = Gtk.CheckButton(label=src.get("label", f"Источник {i + 1}"))
+            if first is None:
+                first = rb
             else:
-                label = "Установлено"
-                
-            btn = Gtk.Button(label=label)
-            btn.add_css_class("success") # Зеленый
-            btn.add_css_class("pill")    # Скругленный
-            btn.set_sensitive(False)     # Неактивный (просто индикатор)
-            self._badges_box.append(btn)
-        else:
-            # Если не установлено: показываем все варианты
-            # Если вариант всего один, можно показать его для информации или скрыть.
-            # Покажем всегда, чтобы было видно, откуда будет установка.
-            for i, src in enumerate(self._sources):
-                btn = Gtk.Button(label=src.get("label", "Source"))
-                btn.add_css_class("pill")
-                if i == self._selected_source_index:
-                    btn.add_css_class("suggested-action") # Синий (выбран)
-                else:
-                    btn.add_css_class("flat") # Бледный (не выбран)
-                
-                btn.connect("clicked", lambda _, idx=i: self.set_selected_source(idx))
-                self._badges_box.append(btn)
+                rb.set_group(first)
+            if i == self._selected_source_index:
+                rb.set_active(True)
+            rb.connect("toggled", self._on_src_radio_toggled, i)
+            popover_box.append(rb)
+            self._src_radios.append(rb)
 
-    def set_selected_source(self, idx):
-        if idx < 0 or idx >= len(self._sources):
+        popover = Gtk.Popover()
+        popover.set_child(popover_box)
+
+        btn = Gtk.MenuButton()
+        btn.set_popover(popover)
+        btn.add_css_class("flat")
+        btn.add_css_class("ab-source-badge")
+        btn.set_valign(Gtk.Align.CENTER)
+        btn.set_tooltip_text("Выбрать источник установки")
+        self._sync_src_menu_label(btn)
+        return btn
+
+    def _on_src_radio_toggled(self, radio, idx):
+        if radio.get_active():
+            self._selected_source_index = idx
+            self._sync_src_menu_label()
+            self._update_source_label()
+
+    def _sync_src_menu_label(self, btn=None):
+        if btn is None:
+            btn = self._src_menu_btn
+        if btn is None:
             return
-        self._selected_source_index = idx
-        self._update_badges()
+        idx = self._selected_source_index
+        if 0 <= idx < len(self._sources):
+            btn.set_label(self._sources[idx].get("label", ""))
+
+    @staticmethod
+    def _source_tooltip(src: dict) -> str:
+        """Возвращает человекочитаемую подсказку для источника установки."""
+        check = src.get("check", ())
+        cmd = src.get("cmd", [])
+        kind = check[0] if isinstance(check, (list, tuple)) and check else ""
+        if kind == "flatpak" or (cmd and cmd[0] == "flatpak"):
+            return "Приложение Flatpak"
+        if "play" in cmd:
+            return "Пакет через EPM Play"
+        return "Пакет из репозитория"
+
+    def _update_source_label(self):
+        """Обновляет бейдж источника (первый элемент суффикса, сразу после заголовка)."""
+        if self.is_installed():
+            # Установлено: зелёный бейдж с именем источника, MenuButton скрыт
+            idx = self._installed_source_index
+            text = self._sources[idx].get("label", "Установлено") if 0 <= idx < len(self._sources) else "Установлено"
+            self._source_label.set_text(text)
+            self._source_label.remove_css_class("dim-label")
+            self._source_label.add_css_class("success")
+            tooltip = self._source_tooltip(self._sources[idx]) if 0 <= idx < len(self._sources) else ""
+            self._source_label.set_tooltip_text(tooltip)
+            self._source_label.set_visible(True)
+            if self._src_menu_btn:
+                self._src_menu_btn.set_visible(False)
+        elif self._src_menu_btn:
+            # Не установлено, несколько источников: MenuButton показывает выбранный источник
+            self._source_label.set_visible(False)
+            self._src_menu_btn.set_visible(True)
+        else:
+            # Не установлено, один источник: приглушённый бейдж
+            idx = self._selected_source_index
+            text = self._sources[idx].get("label", "") if 0 <= idx < len(self._sources) else ""
+            self._source_label.set_text(text)
+            self._source_label.remove_css_class("success")
+            self._source_label.add_css_class("dim-label")
+            self._source_label.set_visible(bool(text))
 
     def _set_installed_ui(self, installed):
-        self._update_badges()
+        self._update_source_label()
         if installed:
+            # Установлено — чекбокс скрываем, показываем галочку на его месте.
+            # Кнопку «Установить» и менюшку источника скрываем — галочка и бейдж говорят сами за себя.
+            self._checkbox.set_visible(False)
+            self.set_selected(False)
+
+            self._status.set_visible(True)
             set_status_ok(self._status)
             self._prog.set_visible(False)
-            
-            # Кнопка остается видимой, но становится неактивной с текстом "Установлено"
-            self._btn.set_visible(True)
-            self._btn.set_label("Установлено")
-            self._btn.set_sensitive(False)
-            self._btn.remove_css_class("suggested-action")
-            self._btn.add_css_class("flat")
-            
+            self._btn.set_visible(False)
             self._trash_btn.set_visible(True)
             self._trash_btn.set_sensitive(True)
         else:
+            # Не установлено — показываем чекбокс, галочку скрываем
+            self._checkbox.set_visible(True)
+            self._status.set_visible(False)
+
             clear_status(self._status)
-            
-            # Возвращаем исходный вид кнопки "Установить"
             self._btn.set_visible(True)
             self._btn.set_label("Установить")
             self._btn.set_sensitive(True)
             self._btn.remove_css_class("flat")
             self._btn.add_css_class("suggested-action")
-            
             self._trash_btn.set_visible(False)
             
         if self._on_change:
@@ -304,7 +417,8 @@ class AppRow(Adw.ActionRow):
 
         self._installing = True
         self._btn.set_sensitive(False)
-        self._badges_box.set_sensitive(False)
+        if self._src_menu_btn:
+            self._src_menu_btn.set_sensitive(False)
         self._btn.set_label("…")
         self._prog.set_visible(True)
         self._prog.set_fraction(0.0)
@@ -430,7 +544,8 @@ class AppRow(Adw.ActionRow):
             self._log(f"✘  Ошибка установки {self._app['label']}\n")
             if hasattr(win, "stop_progress"): win.stop_progress(ok)
             self._btn.set_sensitive(True)
-            self._badges_box.set_sensitive(True)
+            if self._src_menu_btn:
+                self._src_menu_btn.set_sensitive(True)
             self._btn.set_label("Повторить")
 
     def _uninstall_done(self, ok):

@@ -232,6 +232,7 @@ class RowFactory:
         status = make_status_icon()
         style = rd.get("button_style", "suggested-action")
         btn = make_button(rd.get("button_label", "Запустить"), style=style)
+        self._page._btn_size_group.add_widget(btn)
         btn.set_sensitive(False)
 
         done_label = rd.get("button_done_label")
@@ -291,7 +292,7 @@ class RowFactory:
                 dropdown.set_selected(options.index(saved))
 
         status = make_status_icon()
-        btn = make_button(rd.get("button_label", "Применить"), width=120)
+        btn = make_button(rd.get("button_label", "Применить"))
         action = rd.get("action", {})
 
         def _on_click(_b: Gtk.Button) -> None:
@@ -330,8 +331,8 @@ class RowFactory:
             row.add_prefix(make_icon(rd["icon"]))
 
         status = make_status_icon()
-        pick_btn = make_button(rd.get("pick_label", "Выбрать файл"), width=150, style="flat")
-        apply_btn = make_button(rd.get("apply_label", "Применить"), width=170)
+        pick_btn = make_button(rd.get("pick_label", "Выбрать файл"), style="flat")
+        apply_btn = make_button(rd.get("apply_label", "Применить"))
         apply_btn.set_sensitive(False)
 
         action = rd.get("action", {})
@@ -419,6 +420,8 @@ class DynamicPage(Gtk.Box):
         self.log = log_fn
         self._page_data = page_data
         self._rows_with_checks: list[Adw.ActionRow] = []
+        # SizeGroup выравнивает все кнопки по ширине самой широкой — галочки выстраиваются в столбик
+        self._btn_size_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         self._factory = RowFactory(self)
 
         scroll = Gtk.ScrolledWindow()

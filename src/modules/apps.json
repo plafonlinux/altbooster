@@ -90,7 +90,7 @@
               ]
             },
             {
-              "label": "EPM install",
+              "label": "EPM",
               "cmd": [
                 "epm",
                 "-i",
@@ -123,7 +123,7 @@
               ]
             },
             {
-              "label": "EPM install",
+              "label": "EPM",
               "cmd": [
                 "epm",
                 "-i",
@@ -141,7 +141,7 @@
           "label": "FreeRDP",
           "desc": "RDP-клиент с нативной поддержкой Wayland (wlfreerdp)",
           "source": {
-            "label": "EPM install",
+            "label": "EPM",
             "cmd": [
               "epm",
               "-i",
@@ -198,7 +198,7 @@
               ]
             },
             {
-              "label": "EPM install",
+              "label": "EPM",
               "cmd": [
                 "epm",
                 "-i",
@@ -263,7 +263,7 @@
               ]
             },
             {
-              "label": "EPM install",
+              "label": "EPM",
               "cmd": [
                 "epm",
                 "-i",
@@ -337,6 +337,44 @@
               "cups-browsed"
             ]
           }
+        },
+        {
+          "id": "foliate",
+          "label": "Foliate",
+          "desc": "Читалка книг",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.github.johnfactotum.Foliate"
+            ],
+            "check": [
+              "flatpak",
+              "com.github.johnfactotum.Foliate"
+            ]
+          }
+        },
+        {
+          "id": "calibre",
+          "label": "Calibre",
+          "desc": "Управление библиотекой книг",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.calibre_ebook.calibre"
+            ],
+            "check": [
+              "flatpak",
+              "com.calibre_ebook.calibre"
+            ]
+          }
         }
       ]
     },
@@ -403,7 +441,7 @@
               ]
             },
             {
-              "label": "EPM install",
+              "label": "EPM",
               "cmd": [
                 "epm",
                 "-i",
@@ -493,6 +531,25 @@
           }
         },
         {
+          "id": "parabolic",
+          "label": "Parabolic",
+          "desc": "Загрузчик видео (YouTube и др.)",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.nickvision.tubeconverter"
+            ],
+            "check": [
+              "flatpak",
+              "org.nickvision.tubeconverter"
+            ]
+          }
+        },
+        {
           "id": "spotify",
           "label": "Spotify",
           "desc": "Музыкальный стриминг",
@@ -514,8 +571,8 @@
       ]
     },
     {
-      "id": "утилиты",
-      "title": "Утилиты",
+      "id": "системные_инструменты",
+      "title": "Системные инструменты",
       "items": [
         {
           "id": "extension_manager",
@@ -569,63 +626,6 @@
             "check": [
               "flatpak",
               "com.bitwarden.desktop"
-            ]
-          }
-        },
-        {
-          "id": "foliate",
-          "label": "Foliate",
-          "desc": "Читалка книг",
-          "source": {
-            "label": "Flathub",
-            "cmd": [
-              "flatpak",
-              "install",
-              "-y",
-              "flathub",
-              "com.github.johnfactotum.Foliate"
-            ],
-            "check": [
-              "flatpak",
-              "com.github.johnfactotum.Foliate"
-            ]
-          }
-        },
-        {
-          "id": "calibre",
-          "label": "Calibre",
-          "desc": "Управление библиотекой книг",
-          "source": {
-            "label": "Flathub",
-            "cmd": [
-              "flatpak",
-              "install",
-              "-y",
-              "flathub",
-              "com.calibre_ebook.calibre"
-            ],
-            "check": [
-              "flatpak",
-              "com.calibre_ebook.calibre"
-            ]
-          }
-        },
-        {
-          "id": "parabolic",
-          "label": "Parabolic",
-          "desc": "Загрузчик видео (YouTube и др.)",
-          "source": {
-            "label": "Flathub",
-            "cmd": [
-              "flatpak",
-              "install",
-              "-y",
-              "flathub",
-              "org.nickvision.tubeconverter"
-            ],
-            "check": [
-              "flatpak",
-              "org.nickvision.tubeconverter"
             ]
           }
         },
@@ -704,7 +704,13 @@
               "com.github.tchx84.Flatseal"
             ]
           }
-        },
+        }
+      ]
+    },
+    {
+      "id": "устройства_и_сеть",
+      "title": "Устройства и сеть",
+      "items": [
         {
           "id": "solaar",
           "label": "Solaar",

@@ -378,7 +378,7 @@ class AppEditDialog(Adw.PreferencesWindow):
 class SourceEditPage(Adw.NavigationPage):
     """Страница редактирования одного источника установки приложения."""
 
-    _SOURCE_LABELS = ["Flathub", "EPM install", "EPM play", "APT", "Скрипт"]
+    _SOURCE_LABELS = ["Flathub", "EPM", "EPM play", "APT", "Скрипт"]
     _SOURCE_KEYS   = ["flatpak", "epm_install", "epm_play", "apt", "script"]
 
     def __init__(self, src_data, on_apply):
