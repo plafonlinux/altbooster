@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=ALT Booster
+GenericName=System Maintenance
+Comment=Утилита обслуживания системы ALT Linux
+Exec=altbooster
+Icon=altbooster
+Terminal=false
+Type=Application
+Categories=System;Settings;
+Keywords=system;maintenance;clean;btrfs;trim;apt;flatpak;
+StartupNotify=true
+StartupWMClass=ru.altbooster.app
