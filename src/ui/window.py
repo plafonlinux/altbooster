@@ -72,6 +72,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self.set_content(self._toast_overlay)
 
         root.append(self._build_header())
+        root.append(self._build_update_banner())
 
         # ── Страницы приложения ───────────────────────────────────────────────
         self._setup = SetupPage(self._log)
@@ -127,7 +128,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         # ── Структура меню (гамбургер) ────────────────────────────────────────
         menu = Gio.Menu()
-        menu.append("Проверить обновления", "win.check_update")
 
         section_settings = Gio.Menu()
         section_settings.append("Импорт настроек", "win.import_settings")
@@ -154,6 +154,14 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         mb.set_menu_model(menu)
         header.pack_end(mb)
 
+        # Кнопка проверки обновлений — рядом с бургером (левее него)
+        self._update_check_btn = Gtk.Button()
+        self._update_check_btn.set_icon_name("software-update-available-symbolic")
+        self._update_check_btn.set_tooltip_text("Проверить обновления")
+        self._update_check_btn.add_css_class("flat")
+        self._update_check_btn.connect("clicked", self._check_for_updates)
+        header.pack_end(self._update_check_btn)
+
         # Регистрируем действия меню как GAction на уровне окна
         actions = [
             ("check_update",    self._check_for_updates),
@@ -172,6 +180,61 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             self.add_action(a)
 
         return header
+
+    def _build_update_banner(self):
+        """Плавающий баннер обновления под хедером — по аналогии с баннером в Приложениях."""
+        outer = Gtk.Box()
+        outer.set_halign(Gtk.Align.CENTER)
+        outer.set_margin_top(6)
+        outer.set_margin_bottom(4)
+        outer.set_opacity(0.92)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        box.add_css_class("ab-float-banner")
+
+        icon = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
+        icon.set_pixel_size(16)
+        box.append(icon)
+
+        self._update_banner_label = Gtk.Label()
+        self._update_banner_label.set_xalign(0.0)
+        box.append(self._update_banner_label)
+
+        go_btn = Gtk.Button(label="Обновить")
+        go_btn.add_css_class("suggested-action")
+        go_btn.add_css_class("pill")
+        go_btn.set_valign(Gtk.Align.CENTER)
+        go_btn.connect("clicked", self._go_to_update)
+        box.append(go_btn)
+
+        close_btn = Gtk.Button()
+        close_btn.set_icon_name("window-close-symbolic")
+        close_btn.add_css_class("flat")
+        close_btn.add_css_class("circular")
+        close_btn.set_valign(Gtk.Align.CENTER)
+        close_btn.connect("clicked", lambda _: self._update_banner_revealer.set_reveal_child(False))
+        box.append(close_btn)
+
+        outer.append(box)
+
+        self._update_banner_revealer = Gtk.Revealer()
+        self._update_banner_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self._update_banner_revealer.set_transition_duration(300)
+        self._update_banner_revealer.set_child(outer)
+        self._update_banner_revealer.set_reveal_child(False)
+        return self._update_banner_revealer
+
+    def _on_update_found_global(self, version):
+        """Показывает глобальный баннер обновления и подсвечивает кнопку в хедере."""
+        self._update_banner_label.set_text(f"Доступна новая версия {version}")
+        self._update_banner_revealer.set_reveal_child(True)
+        # Подсвечиваем кнопку, чтобы было заметно на любой вкладке
+        self._update_check_btn.add_css_class("suggested-action")
+
+    def _go_to_update(self, *_):
+        """Переходит на вкладку «Начало» и скрывает баннер."""
+        self._update_banner_revealer.set_reveal_child(False)
+        self._stack.set_visible_child_name("setup")
 
     # ── Панель лога (снизу окна) ──────────────────────────────────────────────
 
@@ -466,7 +529,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def _check_for_updates(self, *_):
         """Переключается на вкладку «Начало» и запускает проверку обновлений."""
         self._stack.set_visible_child_name("setup")
-        self._setup.check_for_updates(manual=True)
+        self._update_check_btn.remove_css_class("suggested-action")
+        self._setup.check_for_updates(manual=True, on_update_found=self._on_update_found_global)
 
     def _show_about(self, *_):
         d = Adw.AboutDialog()

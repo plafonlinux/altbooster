@@ -198,6 +198,28 @@ class CacheTaskRow(Adw.ExpanderRow):
             self._on_progress()
 
 
+class ConfirmTaskRow(TaskRow):
+    """Строка задачи с подтверждением перед запуском."""
+    def __init__(self, task, log_fn, on_progress, title, body):
+        super().__init__(task, log_fn, on_progress)
+        self._confirm_title = title
+        self._confirm_body = body
+
+    def start(self, *args):
+        if getattr(self, "_running", False):
+            return
+
+        dialog = Adw.AlertDialog(heading=self._confirm_title, body=self._confirm_body)
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("run", "Удалить")
+        dialog.set_response_appearance("run", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        dialog.connect("response", lambda d, r: super(ConfirmTaskRow, self).start() if r == "run" else None)
+        dialog.present(self.get_root())
+
+
 class MaintenancePage(Gtk.Box):
     def __init__(self, log_fn):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -214,7 +236,7 @@ class MaintenancePage(Gtk.Box):
         except (OSError, json.JSONDecodeError):
             all_tasks = []
 
-        flatpak_ids = ["flatpak", "flatpak_home"]
+        flatpak_ids = ["flatpak", "flatpak_repair", "flatpak_home"]
         fix_ids = ["fix_gdm_usb", "fix_gsconnect", "disable_tracker"]
 
         flatpak_tasks = [t for t in all_tasks if t["id"] in flatpak_ids]
@@ -264,7 +286,15 @@ class MaintenancePage(Gtk.Box):
 
         # 2. Задачи (Уборка, Доступ к Home)
         for task in tasks:
-            row = TaskRow(task, self._log, self._update_progress)
+            if task["id"] == "flatpak":
+                row = ConfirmTaskRow(
+                    task, self._log, self._update_progress,
+                    "Удалить мусор Flatpak?",
+                    "Будут удалены runtime-библиотеки, которые не требуются установленным приложениям.\n\n"
+                    "⚠ Внимание: Если вы устанавливали runtime вручную для сторонних программ (не из Flathub), они могут перестать работать."
+                )
+            else:
+                row = TaskRow(task, self._log, self._update_progress)
             self._rows.append(row)
             group.add(row)
 

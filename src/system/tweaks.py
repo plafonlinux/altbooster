@@ -89,24 +89,28 @@ echo "Текущий размер:      $CURRENT_SIZE"
 
 if [ "$CURRENT_SIZE" != "$ORIGINAL_SIZE" ]; then
     echo "Размер файла изменился. Патч НЕ применяется."
-else
-    if grep -q "this._mounts.some" "$TARGET"; then
-        echo "Патч уже применён."
-    else
-        echo "Создаю резервную копию: $BACKUP"
-        cp "$TARGET" "$BACKUP"
-
-        echo "Устанавливаю утилиту patch..."
-        apt-get install -y patch
-
-        echo "Применяю патч..."
-        patch -u -f "$TARGET" < {patch_path}
-
-        echo "Патч успешно применён."
-        echo "Очищаю кэш GNOME Shell..."
-        rm -rf {shlex.quote(home)}/.cache/gnome-shell/*
-    fi
+    rm -f {patch_path}
+    exit 0
 fi
+
+if grep -q "this._mounts.some" "$TARGET"; then
+    echo "Патч уже применён."
+    rm -f {patch_path}
+    exit 0
+fi
+
+echo "Создаю резервную копию: $BACKUP"
+cp "$TARGET" "$BACKUP"
+
+echo "Устанавливаю утилиту patch..."
+apt-get install -y patch
+
+echo "Применяю патч..."
+patch -u -f "$TARGET" < {patch_path}
+
+echo "Патч успешно применён."
+echo "Очищаю кэш GNOME Shell..."
+rm -rf {shlex.quote(home)}/.cache/gnome-shell/*
 
 rm -f {patch_path}
 echo "Готово!"

@@ -115,6 +115,34 @@ def _gext_path() -> str | None:
     return None
 
 
+def _fix_float_versions_in_metadata() -> list[str]:
+    """Исправляет float-версии в metadata.json установленных расширений.
+
+    gnome-extensions-cli использует pydantic для парсинга metadata.json.
+    Если поле "version" содержит float (например 7.6), pydantic v2 падает
+    с ValidationError — он ожидает str | int, но float не подходит ни под один тип.
+    Это ломает даже list_installed_extensions(), то есть gext крашится до установки.
+
+    Фикс: преобразуем float → str ("7.6"). GNOME Shell сам хранит версии
+    как строки, так что это безопасно.
+
+    Возвращает список исправленных файлов (для лога).
+    """
+    fixed = []
+    for meta_path in _USER_EXT_DIR.glob("*/metadata.json"):
+        try:
+            text = meta_path.read_text(encoding="utf-8")
+            data = json.loads(text)
+            ver = data.get("version")
+            if isinstance(ver, float):
+                data["version"] = str(ver)
+                meta_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                fixed.append(meta_path.parent.name)
+        except Exception:
+            pass
+    return fixed
+
+
 def _is_ext_installed(uuid: str) -> bool:
     """Проверяет установлено ли расширение (user или system)."""
     try:
@@ -260,6 +288,10 @@ class ExtensionsPage(Gtk.Box):
                     return
                 GLib.idle_add(self._log, "✔  gext установлен!\n")
                 gext = _gext_path() or "gext"
+
+            fixed = _fix_float_versions_in_metadata()
+            if fixed:
+                GLib.idle_add(self._log, f"⚠  Исправлены float-версии в metadata.json: {', '.join(fixed)}\n")
 
             r = subprocess.run([gext, "install", ext_id], capture_output=True, text=True)
             if r.stdout:
@@ -571,6 +603,10 @@ class ExtensionsPage(Gtk.Box):
                     return
                 GLib.idle_add(self._log, "✔  gext установлен!\n")
                 gext = _gext_path() or "gext"
+
+            fixed = _fix_float_versions_in_metadata()
+            if fixed:
+                GLib.idle_add(self._log, f"⚠  Исправлены float-версии в metadata.json: {', '.join(fixed)}\n")
 
             target = install_id if install_id else uuid
             r = subprocess.run([gext, "install", target], capture_output=True, text=True)

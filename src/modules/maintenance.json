@@ -15,7 +15,7 @@
     },
     {
       "id": "flatpak",
-      "icon": "application-x-addon-symbolic",
+      "icon": "user-trash-symbolic",
       "label": "Уборка Flatpak",
       "desc": "Удаляет неиспользуемые runtime-библиотеки",
       "cmd": [
@@ -23,6 +23,16 @@
         "uninstall",
         "--unused",
         "-y"
+      ]
+    },
+    {
+      "id": "flatpak_repair",
+      "icon": "application-x-addon-symbolic",
+      "label": "Лечение Flatpak",
+      "desc": "flatpak repair — устранение ошибок в базе данных",
+      "cmd": [
+        "flatpak",
+        "repair"
       ]
     },
     {

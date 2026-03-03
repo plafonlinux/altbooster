@@ -42,8 +42,12 @@ class SetupPage(Gtk.Box):
                 continue
         return False
 
-    def check_for_updates(self, manual=False):
-        """Проверяет наличие обновлений и показывает баннер или диалог."""
+    def check_for_updates(self, manual=False, on_update_found=None):
+        """Проверяет наличие обновлений и показывает баннер или диалог.
+
+        on_update_found(version) — опциональный внешний callback, вызывается
+        из главного потока когда найдена новая версия (например, для баннера окна).
+        """
         if manual:
             self._log("\n▶  Проверка обновлений...\n")
 
@@ -67,6 +71,8 @@ class SetupPage(Gtk.Box):
 
             # ВАЖНО: вызываем из главного потока, т.к. работаем с GTK-виджетами
             GLib.idle_add(self._on_update_found, version)
+            if on_update_found:
+                GLib.idle_add(on_update_found, version)
 
         config.check_update(on_result)
 

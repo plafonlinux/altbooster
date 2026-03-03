@@ -474,44 +474,6 @@
           }
         },
         {
-          "id": "krita",
-          "label": "Krita",
-          "desc": "Растровый графический редактор",
-          "source": {
-            "label": "Flathub",
-            "cmd": [
-              "flatpak",
-              "install",
-              "-y",
-              "flathub",
-              "org.kde.krita"
-            ],
-            "check": [
-              "flatpak",
-              "org.kde.krita"
-            ]
-          }
-        },
-        {
-          "id": "inkscape",
-          "label": "Inkscape",
-          "desc": "Векторный редактор",
-          "source": {
-            "label": "Flathub",
-            "cmd": [
-              "flatpak",
-              "install",
-              "-y",
-              "flathub",
-              "org.inkscape.Inkscape"
-            ],
-            "check": [
-              "flatpak",
-              "org.inkscape.Inkscape"
-            ]
-          }
-        },
-        {
           "id": "gradia",
           "label": "Gradia",
           "desc": "Аннотирование и оформление скриншотов (GTK4)",
@@ -565,6 +527,185 @@
             "check": [
               "flatpak",
               "com.spotify.Client"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "редакторы",
+      "title": "Редакторы",
+      "items": [
+        {
+          "id": "krita",
+          "label": "Krita",
+          "desc": "Растровый графический редактор",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.kde.krita"
+            ],
+            "check": [
+              "flatpak",
+              "org.kde.krita"
+            ]
+          }
+        },
+        {
+          "id": "inkscape",
+          "label": "Inkscape",
+          "desc": "Векторный редактор",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.inkscape.Inkscape"
+            ],
+            "check": [
+              "flatpak",
+              "org.inkscape.Inkscape"
+            ]
+          }
+        },
+        {
+          "id": "gimp",
+          "label": "GIMP",
+          "desc": "Растровый графический редактор",
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.gimp.GIMP"
+              ],
+              "check": [
+                "flatpak",
+                "org.gimp.GIMP"
+              ]
+            },
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "gimp"
+              ],
+              "check": [
+                "rpm",
+                "gimp"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "photogimp",
+          "label": "PhotoGIMP",
+          "desc": "Конфигурация GIMP в стиле Photoshop",
+          "source": {
+            "label": "GitHub",
+            "cmd": [
+              "bash",
+              "-c",
+              "set -e; REAL_USER=${SUDO_USER:-$USER}; HOME_DIR=$(getent passwd $REAL_USER | cut -d: -f6); TMP=$(mktemp -d); sudo -u $REAL_USER git clone --depth=1 https://github.com/Diolinux/PhotoGIMP.git \"$TMP/PhotoGIMP\"; SRC=\"$TMP/PhotoGIMP/.config/GIMP/3.0\"; for GIMP_DIR in \"$HOME_DIR/.var/app/org.gimp.GIMP/config/GIMP/3.0\" \"$HOME_DIR/.config/GIMP/3.0\"; do sudo -u $REAL_USER mkdir -p \"$GIMP_DIR\" && sudo -u $REAL_USER cp -r \"$SRC/.\" \"$GIMP_DIR/\"; done; sudo -u $REAL_USER touch \"$HOME_DIR/.config/photogimp-installed\"; rm -rf \"$TMP\""
+            ],
+            "check": [
+              "path",
+              "~/.config/photogimp-installed"
+            ]
+          }
+        },
+        {
+          "id": "darktable",
+          "label": "Darktable",
+          "desc": "Обработка RAW-фотографий",
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.darktable.Darktable"
+              ],
+              "check": [
+                "flatpak",
+                "org.darktable.Darktable"
+              ]
+            },
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "darktable"
+              ],
+              "check": [
+                "rpm",
+                "darktable"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "rawtherapee",
+          "label": "RawTherapee",
+          "desc": "Обработка RAW-фотографий с расширенными настройками",
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "com.rawtherapee.RawTherapee"
+              ],
+              "check": [
+                "flatpak",
+                "com.rawtherapee.RawTherapee"
+              ]
+            },
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "rawtherapee"
+              ],
+              "check": [
+                "rpm",
+                "rawtherapee"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "color_picker",
+          "label": "Color Picker",
+          "desc": "Выбор и определение цвета с экрана",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "nl.hjdskes.gcolor3"
+            ],
+            "check": [
+              "flatpak",
+              "nl.hjdskes.gcolor3"
             ]
           }
         }
@@ -878,6 +1019,25 @@
             "check": [
               "which",
               "occt"
+            ]
+          }
+        },
+        {
+          "id": "gtkstresstesting",
+          "label": "GtkStressTesting",
+          "desc": "Стресс-тест GTK и системных компонентов",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.leinardi.gst"
+            ],
+            "check": [
+              "flatpak",
+              "com.leinardi.gst"
             ]
           }
         }
