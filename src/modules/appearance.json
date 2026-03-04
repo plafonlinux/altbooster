@@ -23,7 +23,7 @@
           "id": "papirus_apply",
           "type": "command_row",
           "title": "Применить иконки Papirus",
-          "subtitle": "Papirus-Dark / Papirus — по текущей теме",
+          "subtitle": "Papirus-Dark-Adwaita / Papirus-Light-Adwaita — по текущей теме",
           "icon": "object-select-symbolic",
           "button_label": "Применить",
           "button_done_label": "Применено",
@@ -60,8 +60,7 @@
     {
       "id": "folders",
       "title": "Цветные папки Papirus",
-      "requires": "papirus-folders",
-      "description": "papirus-folders — выбор цвета папок",
+      "description": "Переключение темы Papirus-Remix по цвету папок",
       "rows": [
         {
           "id": "folder_color",
@@ -71,14 +70,14 @@
           "icon": "folder-symbolic",
           "button_label": "Применить",
           "state_key": "folder_color",
-          "options": ["adwaita","blue","bluegrey","breeze","cyan","darkcyan","green","grey","indigo","magenta","nordic","orange","palebrown","paleorange","pink","red","teal","violet","white","yellow","yaru"],
+          "options": ["adwaita","black","blue","breeze","brown","carmine","cyan","darkcyan","green","grey","indigo","magenta","nordic","orange","paleorange","pink","red","teal","violet","white","yellow","yaru"],
           "action": { "type": "builtin", "fn": "apply_folder_color", "arg_from": "selected_option" }
         },
         {
           "id": "folder_reset",
           "type": "command_row",
           "title": "Сбросить цвет папок",
-          "subtitle": "papirus-folders -D",
+          "subtitle": "Вернуть Papirus-*-Adwaita",
           "icon": "edit-undo-symbolic",
           "button_label": "Сбросить",
           "button_style": "destructive-action",

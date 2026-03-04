@@ -9,8 +9,6 @@ import shutil
 import subprocess
 import sys
 import threading
-import zipfile
-import tempfile
 import time
 import grp
 
@@ -24,6 +22,8 @@ import backend
 from dynamic_page import DynamicPage
 from ui.common import load_module
 from ui.dialogs import PasswordDialog, get_saved_password, clear_saved_password
+from system import profile as profile_module
+from ui.profile_dialog import show_preset_save_dialog, show_preset_import_dialog
 from ui.setup_page import SetupPage
 from ui.apps_page import AppsPage
 from ui.extensions_page import ExtensionsPage
@@ -73,6 +73,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         root.append(self._build_header())
         root.append(self._build_update_banner())
+        root.append(self._build_profile_banner())
 
         # ── Страницы приложения ───────────────────────────────────────────────
         self._setup = SetupPage(self._log)
@@ -126,13 +127,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         sw.set_stack(self._stack)
         header.set_title_widget(sw)
 
+        # ── Кнопка выбора пресета (левый угол) ───────────────────────────────
+        header.pack_start(self._build_preset_button())
+
         # ── Структура меню (гамбургер) ────────────────────────────────────────
         menu = Gio.Menu()
-
-        section_settings = Gio.Menu()
-        section_settings.append("Импорт настроек", "win.import_settings")
-        section_settings.append("Экспорт настроек", "win.export_settings")
-        menu.append_section(None, section_settings)
 
         section_diag = Gio.Menu()
         section_diag.append("Посмотреть логи", "win.open_log")
@@ -164,15 +163,13 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         # Регистрируем действия меню как GAction на уровне окна
         actions = [
-            ("check_update",    self._check_for_updates),
-            ("about",           self._show_about),
-            ("clear_log",       self._clear_log),
-            ("reset_state",     self._reset_state),
-            ("reset_password",  self._reset_password),
-            ("reset_config",    self._reset_config),
-            ("open_log",        self._open_log_file),
-            ("export_settings", self._export_settings),
-            ("import_settings", self._import_settings),
+            ("check_update",   self._check_for_updates),
+            ("about",          self._show_about),
+            ("clear_log",      self._clear_log),
+            ("reset_state",    self._reset_state),
+            ("reset_password", self._reset_password),
+            ("reset_config",   self._reset_config),
+            ("open_log",       self._open_log_file),
         ]
         for name, cb in actions:
             a = Gio.SimpleAction.new(name, None)
@@ -223,6 +220,438 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._update_banner_revealer.set_child(outer)
         self._update_banner_revealer.set_reveal_child(False)
         return self._update_banner_revealer
+
+    # ── Пресеты ───────────────────────────────────────────────────────────────
+
+    def _build_preset_button(self) -> Gtk.MenuButton:
+        """Строит кнопку выбора пресета для левого угла хедера."""
+        self._preset_btn = Gtk.MenuButton()
+        self._preset_btn.add_css_class("flat")
+
+        self._preset_popover = Gtk.Popover()
+        self._preset_popover.set_has_arrow(False)
+        self._preset_btn.set_popover(self._preset_popover)
+
+        self._refresh_preset_menu()
+        return self._preset_btn
+
+    def _refresh_preset_menu(self):
+        """Перестраивает содержимое popover'а пресетов и обновляет метку кнопки."""
+        presets = profile_module.list_presets()
+        active_name = config.state_get("active_preset")
+
+        # Метка кнопки = имя активного пресета, иначе «Default»
+        self._preset_btn.set_label(active_name or "Default")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.set_margin_top(4)
+        box.set_margin_bottom(4)
+        box.set_margin_start(4)
+        box.set_margin_end(4)
+
+        def _flat_row(label: str, icon: str, cb, sensitive: bool = True) -> Gtk.Button:
+            """Плоская кнопка-строка для popover-меню."""
+            row = Gtk.Box(spacing=8)
+            row.set_margin_start(4)
+            img = Gtk.Image.new_from_icon_name(icon)
+            img.set_pixel_size(16)
+            row.append(img)
+            lbl_w = Gtk.Label(label=label)
+            lbl_w.set_xalign(0.0)
+            lbl_w.set_hexpand(True)
+            row.append(lbl_w)
+            btn = Gtk.Button()
+            btn.set_child(row)
+            btn.add_css_class("flat")
+            btn.set_sensitive(sensitive)
+            btn.connect("clicked", cb)
+            return btn
+
+        # ── Список сохранённых пресетов ──────────────────────────────────────
+        if presets:
+            for p_name, _ in presets:
+                row = Gtk.Box(spacing=8)
+                row.set_margin_start(4)
+                check_img = Gtk.Image.new_from_icon_name("object-select-symbolic")
+                check_img.set_pixel_size(16)
+                check_img.set_opacity(1.0 if p_name == active_name else 0.0)
+                row.append(check_img)
+                lbl_w = Gtk.Label(label=p_name)
+                lbl_w.set_xalign(0.0)
+                lbl_w.set_hexpand(True)
+                row.append(lbl_w)
+                btn = Gtk.Button()
+                btn.set_child(row)
+                btn.add_css_class("flat")
+                btn.connect("clicked", lambda _, n=p_name: self._on_preset_selected(n))
+                box.append(btn)
+        else:
+            placeholder = Gtk.Label(label="Нет сохранённых пресетов")
+            placeholder.add_css_class("dim-label")
+            placeholder.set_margin_top(6)
+            placeholder.set_margin_bottom(6)
+            placeholder.set_margin_start(8)
+            box.append(placeholder)
+
+        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        # ── Действия с пресетами ─────────────────────────────────────────────
+        has_active = bool(active_name and any(n == active_name for n, _ in presets))
+        box.append(_flat_row("Сохранить как новый…",    "list-add-symbolic",        self._on_preset_save_new))
+        box.append(_flat_row("Переименовать текущий…",  "document-edit-symbolic",   self._on_preset_rename,  has_active))
+        box.append(_flat_row("Удалить текущий",         "user-trash-symbolic",      self._on_preset_delete,  has_active))
+
+        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        # ── Файловый экспорт/импорт ───────────────────────────────────────────
+        box.append(_flat_row("Экспортировать в файл…",  "document-send-symbolic",   self._on_preset_export_file))
+        box.append(_flat_row("Импортировать из файла…", "document-open-symbolic",   self._on_preset_import_file))
+
+        self._preset_popover.set_child(box)
+
+    def _on_preset_selected(self, name: str):
+        """Выбор пресета из списка — показывает диалог применения."""
+        self._preset_popover.popdown()
+        for p_name, path in profile_module.list_presets():
+            if p_name == name:
+                try:
+                    data = profile_module.load_preset(path)
+                    show_preset_import_dialog(self, data, self._do_apply_preset)
+                except Exception as e:
+                    self._log(f"✘ Ошибка загрузки пресета: {e}\n")
+                return
+
+    def _on_preset_save_new(self, *_):
+        """Сохранить текущее состояние как новый пресет."""
+        self._preset_popover.popdown()
+        existing = [n for n, _ in profile_module.list_presets()]
+        show_preset_save_dialog(self, existing, self._do_save_preset)
+
+    def _on_preset_rename(self, *_):
+        """Переименовать текущий активный пресет."""
+        self._preset_popover.popdown()
+        active_name = config.state_get("active_preset")
+        if not active_name:
+            return
+        existing = [n for n, _ in profile_module.list_presets() if n != active_name]
+
+        def _do_rename(new_name: str):
+            for p_name, path in profile_module.list_presets():
+                if p_name == active_name:
+                    try:
+                        data = profile_module.load_preset(path)
+                        new_path = profile_module.save_preset(data, new_name)
+                        if new_path != path:
+                            path.unlink(missing_ok=True)
+                        config.state_set("active_preset", new_name)
+                        self._refresh_preset_menu()
+                        self._log(f"✔ Пресет переименован: «{active_name}» → «{new_name}»\n")
+                    except Exception as e:
+                        self._log(f"✘ Ошибка переименования: {e}\n")
+                    return
+
+        show_preset_save_dialog(self, existing, _do_rename)
+
+    def _on_preset_delete(self, *_):
+        """Удалить текущий активный пресет (с подтверждением)."""
+        self._preset_popover.popdown()
+        active_name = config.state_get("active_preset")
+        if not active_name:
+            return
+
+        d = Adw.AlertDialog(
+            heading=f"Удалить пресет «{active_name}»?",
+            body="Файл пресета будет удалён. Это действие нельзя отменить.",
+        )
+        d.add_response("cancel", "Отмена")
+        d.add_response("delete", "Удалить")
+        d.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        d.set_default_response("cancel")
+        d.set_close_response("cancel")
+
+        def _on_resp(_, r):
+            if r != "delete":
+                return
+            for p_name, path in profile_module.list_presets():
+                if p_name == active_name:
+                    try:
+                        path.unlink(missing_ok=True)
+                        config.state_set("active_preset", None)
+                        self._refresh_preset_menu()
+                        self._log(f"🗑 Пресет «{active_name}» удалён.\n")
+                    except Exception as e:
+                        self._log(f"✘ Ошибка удаления: {e}\n")
+                    return
+
+        d.connect("response", _on_resp)
+        d.present(self)
+
+    def _on_preset_export_file(self, *_):
+        """Экспортировать текущий пресет (или текущее состояние) в .altbooster файл.
+
+        Если активный пресет сохранён — копирует его файл напрямую.
+        Если нет — собирает текущее состояние системы и сохраняет как «Default».
+        """
+        self._preset_popover.popdown()
+        active_name = config.state_get("active_preset") or "Default"
+
+        import datetime as _dt
+        date_str = _dt.datetime.now().strftime("%Y-%m-%d")
+        safe_name = "".join(c if c.isalnum() or c in " _-" else "_" for c in active_name).strip()
+        filename = f"{safe_name}-{date_str}.altbooster"
+
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Экспортировать пресет")
+        dialog.set_initial_name(filename)
+
+        def _on_save(d, res):
+            try:
+                file = d.save_finish(res)
+                if not file:
+                    return
+                # Ищем уже сохранённый файл пресета
+                for p_name, path in profile_module.list_presets():
+                    if p_name == active_name:
+                        import shutil as _sh
+                        _sh.copy2(path, file.get_path())
+                        self._log(f"✔ Пресет «{active_name}» экспортирован в {file.get_path()}\n")
+                        self.add_toast(Adw.Toast(title="Пресет экспортирован"))
+                        return
+                # Пресет не сохранён — собираем текущее состояние в фоне
+                dest = file.get_path()
+                self._log(f"💾 Собираю текущее состояние для экспорта...\n")
+
+                def _collect():
+                    try:
+                        import json as _json
+                        data = profile_module.collect_profile(active_name, self._apps._data)
+                        from pathlib import Path as _P
+                        _P(dest).write_text(
+                            _json.dumps(data, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                        GLib.idle_add(self._log, f"✔ Пресет экспортирован в {dest}\n")
+                        GLib.idle_add(self.add_toast, Adw.Toast(title="Пресет экспортирован"))
+                    except Exception as e:
+                        GLib.idle_add(self._log, f"✘ Ошибка экспорта: {e}\n")
+
+                threading.Thread(target=_collect, daemon=True).start()
+            except Exception as e:
+                self._log(f"✘ Ошибка экспорта: {e}\n")
+
+        dialog.save(self, None, _on_save)
+
+    def _on_preset_import_file(self, *_):
+        """Импортировать пресет из .altbooster файла."""
+        self._preset_popover.popdown()
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Импортировать пресет")
+
+        f = Gtk.FileFilter()
+        f.set_name("Пресеты ALT Booster (*.altbooster)")
+        f.add_pattern("*.altbooster")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(f)
+        dialog.set_filters(filters)
+
+        def _on_open(d, res):
+            try:
+                file = d.open_finish(res)
+                if file:
+                    self._load_and_show_preset(file.get_path())
+            except Exception as e:
+                self._log(f"✘ Ошибка выбора файла: {e}\n")
+
+        dialog.open(self, None, _on_open)
+
+    def _load_and_show_preset(self, path_str: str):
+        """Загружает .altbooster файл и показывает диалог применения."""
+        from pathlib import Path as _Path
+        try:
+            data = profile_module.load_preset(_Path(path_str))
+            show_preset_import_dialog(self, data, self._do_apply_preset)
+        except Exception as e:
+            self._log(f"✘ Ошибка чтения пресета: {e}\n")
+
+    def _do_save_preset(self, name: str):
+        """Собирает текущее состояние и сохраняет пресет с указанным именем."""
+        self._log(f"💾 Сохраняю пресет «{name}»...\n")
+
+        def _worker():
+            try:
+                data = profile_module.collect_profile(name, self._apps._data)
+                profile_module.save_preset(data, name)
+                config.state_set("active_preset", name)
+                GLib.idle_add(self._refresh_preset_menu)
+                GLib.idle_add(self._log, f"✔ Пресет «{name}» сохранён.\n")
+                GLib.idle_add(self.add_toast, Adw.Toast(title=f"Пресет «{name}» сохранён"))
+            except Exception as e:
+                GLib.idle_add(self._log, f"✘ Ошибка сохранения пресета: {e}\n")
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _find_app_install_cmd(self, app_info: dict) -> list | None:
+        """Ищет команду установки для приложения по ID в текущем каталоге."""
+        app_id = app_info.get("id")
+        source_label = app_info.get("source_label", "")
+        for group in self._apps._data.get("groups", []):
+            for item in group.get("items", []):
+                if item.get("id") != app_id:
+                    continue
+                sources = item.get("sources") or (
+                    [item["source"]] if item.get("source") else []
+                )
+                # Предпочитаем источник с тем же лейблом, что был при экспорте
+                for src in sources:
+                    if not source_label or src.get("label") == source_label:
+                        return src.get("cmd")
+                # Fallback: первый доступный источник
+                if sources:
+                    return sources[0].get("cmd")
+        return None
+
+    def _do_apply_preset(self, data: dict, flags: dict):
+        """Применяет пресет: настройки сразу, установка в фоне."""
+        name = data.get("name", "Пресет")
+
+        if flags.get("settings"):
+            profile_module.apply_settings(data)
+            self._log("✔ Настройки из пресета применены.\n")
+            # Обновляем страницу приложений если был custom_apps
+            if data.get("custom_apps"):
+                GLib.idle_add(self._apps._load_and_build)
+
+        config.state_set("active_preset", name)
+        GLib.idle_add(self._refresh_preset_menu)
+
+        # Собираем команды для установки
+        cmds: list[tuple[str, list, str]] = []  # (label, cmd, type)
+
+        if flags.get("apps"):
+            for app_info in data.get("apps") or []:
+                cmd = self._find_app_install_cmd(app_info)
+                if cmd:
+                    kind = "epm" if cmd and cmd[0] == "epm" else "privileged"
+                    cmds.append((app_info.get("label", app_info["id"]), cmd, kind))
+
+        if flags.get("extensions"):
+            gext = shutil.which("gext") or str(
+                __import__("pathlib").Path.home() / ".local" / "bin" / "gext"
+            )
+            for uuid in data.get("extensions") or []:
+                cmds.append((uuid, [gext, "install", uuid], "shell"))
+
+        if not cmds:
+            self.add_toast(Adw.Toast(title=f"Пресет «{name}» применён"))
+            return
+
+        total = len(cmds)
+        self._log(f"▶ Применяю пресет «{name}»: {total} операций...\n")
+        self.start_progress(f"Применяю пресет «{name}»")
+
+        def _worker():
+            ok_count = 0
+            for label, cmd, kind in cmds:
+                GLib.idle_add(self._log, f"📦 {label}...\n")
+                if kind == "epm":
+                    ok = backend.run_epm_sync(cmd, lambda l: GLib.idle_add(self._log, l))
+                elif kind == "shell":
+                    r = subprocess.run(cmd, capture_output=True, text=True)
+                    if r.stdout:
+                        GLib.idle_add(self._log, r.stdout)
+                    ok = r.returncode == 0
+                else:
+                    ok = backend.run_privileged_sync(cmd, lambda l: GLib.idle_add(self._log, l))
+                if ok:
+                    ok_count += 1
+
+            GLib.idle_add(self.stop_progress, ok_count == total)
+            GLib.idle_add(
+                self.add_toast,
+                Adw.Toast(title=f"Пресет «{name}» применён ({ok_count}/{total})"),
+            )
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    # ── Баннер обнаруженного профиля ──────────────────────────────────────────
+
+    def _build_profile_banner(self) -> Gtk.Revealer:
+        """Строит баннер для предложения импорта найденного .altbooster файла."""
+        outer = Gtk.Box()
+        outer.set_halign(Gtk.Align.CENTER)
+        outer.set_margin_top(4)
+        outer.set_margin_bottom(2)
+        outer.set_opacity(0.92)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        box.add_css_class("ab-float-banner")
+
+        icon = Gtk.Image.new_from_icon_name("document-open-symbolic")
+        icon.set_pixel_size(16)
+        box.append(icon)
+
+        self._profile_banner_label = Gtk.Label()
+        self._profile_banner_label.set_xalign(0.0)
+        box.append(self._profile_banner_label)
+
+        import_btn = Gtk.Button(label="Импортировать")
+        import_btn.add_css_class("suggested-action")
+        import_btn.add_css_class("pill")
+        import_btn.set_valign(Gtk.Align.CENTER)
+        import_btn.connect("clicked", self._on_profile_banner_import)
+        box.append(import_btn)
+
+        close_btn = Gtk.Button()
+        close_btn.set_icon_name("window-close-symbolic")
+        close_btn.add_css_class("flat")
+        close_btn.add_css_class("circular")
+        close_btn.set_valign(Gtk.Align.CENTER)
+        close_btn.connect("clicked", self._on_profile_banner_dismiss)
+        box.append(close_btn)
+
+        outer.append(box)
+
+        self._profile_banner_revealer = Gtk.Revealer()
+        self._profile_banner_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self._profile_banner_revealer.set_transition_duration(300)
+        self._profile_banner_revealer.set_child(outer)
+        self._profile_banner_revealer.set_reveal_child(False)
+        self._profile_banner_path = None  # текущий предложенный файл
+        return self._profile_banner_revealer
+
+    def _check_for_import_candidates(self):
+        """Ищет .altbooster файлы в ~/Downloads и ~/, показывает баннер если найдено."""
+        def _find():
+            candidates = profile_module.find_import_candidates()
+            dismissed = set(config.state_get("dismissed_profiles") or [])
+            for path in candidates:
+                if str(path) not in dismissed:
+                    GLib.idle_add(self._show_profile_banner, path)
+                    return
+
+        threading.Thread(target=_find, daemon=True).start()
+
+    def _show_profile_banner(self, path):
+        """Показывает баннер с именем найденного файла пресета."""
+        self._profile_banner_path = path
+        self._profile_banner_label.set_text(f"Найден пресет: {path.name}")
+        self._profile_banner_revealer.set_reveal_child(True)
+
+    def _on_profile_banner_import(self, *_):
+        """Кнопка «Импортировать» в баннере."""
+        self._profile_banner_revealer.set_reveal_child(False)
+        if self._profile_banner_path:
+            self._load_and_show_preset(str(self._profile_banner_path))
+
+    def _on_profile_banner_dismiss(self, *_):
+        """Кнопка ✕ в баннере — добавляет файл в список отклонённых."""
+        self._profile_banner_revealer.set_reveal_child(False)
+        if self._profile_banner_path:
+            dismissed = list(config.state_get("dismissed_profiles") or [])
+            key = str(self._profile_banner_path)
+            if key not in dismissed:
+                dismissed.append(key)
+                config.state_set("dismissed_profiles", dismissed)
 
     def _on_update_found_global(self, version):
         """Показывает глобальный баннер обновления и подсвечивает кнопку в хедере."""
@@ -501,6 +930,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._maint.refresh_checks()
         self._log("👋 Добро пожаловать в ALT Booster. С чего начнём?\n")
         self._status_label.set_label("Готов к работе")
+        # Проверяем наличие .altbooster файлов в ~/Downloads и ~/
+        GLib.idle_add(self._check_for_import_candidates)
 
     # ── Настройки окна ────────────────────────────────────────────────────────
 
@@ -539,7 +970,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.set_developer_name("PLAFON")
         d.set_version(config.VERSION)
         d.set_issue_url("https://github.com/plafonlinux/altbooster/issues")
-        d.set_comments("ALT Booster для ALT Linux\nGTK4 / Adwaita / Python 3 / Data-Driven UI")
+        d.set_comments("ALT Booster — утилита-компаньон для настройки ALT Рабочая станция (GNOME)")
         d.set_license_type(Gtk.License.MIT_X11)
         d.set_developers(["PLAFON"])
         d.set_copyright("© 2026 PLAFON")
@@ -647,143 +1078,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         # Последний fallback — системная ассоциация файлов
         Gio.AppInfo.launch_default_for_uri(self._log_file.as_uri(), None)
-
-    # ── Экспорт / импорт настроек ─────────────────────────────────────────────
-
-    def _export_settings(self, *_):
-        """Показывает диалог выбора файла для экспорта настроек в ZIP."""
-        dialog = Gtk.FileDialog()
-        dialog.set_title("Экспорт настроек")
-        filename = f"altbooster_backup_{datetime.datetime.now().strftime('%Y-%m-%d')}.zip"
-        dialog.set_initial_name(filename)
-
-        def _on_save(d, res):
-            try:
-                file = d.save_finish(res)
-                if file:
-                    self._do_export(file.get_path())
-            except Exception as e:
-                self._log(f"✘ Ошибка экспорта: {e}\n")
-
-        dialog.save(self, None, _on_save)
-
-    def _do_export(self, zip_path):
-        """Упаковывает всё содержимое CONFIG_DIR в ZIP-архив."""
-        try:
-            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                # Версия в архиве нужна для проверки совместимости при импорте
-                zf.writestr("version", config.VERSION)
-
-                if os.path.exists(config.CONFIG_DIR):
-                    for root, _, files in os.walk(config.CONFIG_DIR):
-                        for file in files:
-                            full_path = os.path.join(root, file)
-                            # Пропускаем битые симлинки — иначе ZipFile упадёт с ошибкой
-                            if os.path.islink(full_path) and not os.path.exists(full_path):
-                                self._log(f"⚠ Пропущен битый symlink: {file}\n")
-                                continue
-                            rel_path = os.path.relpath(full_path, config.CONFIG_DIR)
-                            zf.write(full_path, rel_path)
-
-            self._log(f"✔ Настройки экспортированы в {zip_path}\n")
-            self.add_toast(Adw.Toast(title="Экспорт завершен"))
-        except Exception as e:
-            self._log(f"✘ Ошибка создания архива: {e}\n")
-
-    def _import_settings(self, *_):
-        """Показывает диалог выбора ZIP-файла для импорта настроек."""
-        dialog = Gtk.FileDialog()
-        dialog.set_title("Импорт настроек")
-        f = Gtk.FileFilter()
-        f.set_name("ZIP архивы")
-        f.add_pattern("*.zip")
-        filters = Gio.ListStore.new(Gtk.FileFilter)
-        filters.append(f)
-        dialog.set_filters(filters)
-
-        def _on_open(d, res):
-            try:
-                file = d.open_finish(res)
-                if file:
-                    self._confirm_import(file.get_path())
-            except Exception as e:
-                self._log(f"✘ Ошибка выбора файла: {e}\n")
-
-        dialog.open(self, None, _on_open)
-
-    def _confirm_import(self, zip_path):
-        """Читает версию из архива и показывает диалог подтверждения импорта."""
-        imported_ver = "неизвестно"
-        try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                if "version" in zf.namelist():
-                    imported_ver = zf.read("version").decode("utf-8").strip()
-        except Exception as e:
-            self._log(f"✘ Ошибка чтения архива: {e}\n")
-            return
-
-        body = "Текущие настройки будут перезаписаны. Приложение перезапустится."
-        if imported_ver != config.VERSION:
-            body += (
-                f"\n\n⚠ Внимание: Версия настроек ({imported_ver}) отличается от текущей "
-                f"({config.VERSION}). Возможны ошибки совместимости."
-            )
-
-        dialog = Adw.AlertDialog(heading="Импортировать настройки?", body=body)
-        dialog.add_response("cancel", "Отмена")
-        dialog.add_response("import", "Импортировать")
-        dialog.set_response_appearance("import", Adw.ResponseAppearance.DESTRUCTIVE)
-        dialog.set_default_response("cancel")
-        dialog.set_close_response("cancel")
-
-        def _on_response(_d, res):
-            if res != "import":
-                return
-            try:
-                # Безопасный импорт через временную папку:
-                # 1. Распаковываем во tmp
-                # 2. Делаем бэкап текущего конфига
-                # 3. Копируем из tmp в CONFIG_DIR
-                # При ошибке на шаге 3 — восстанавливаем бэкап
-                with tempfile.TemporaryDirectory() as tmp_dir:
-                    with zipfile.ZipFile(zip_path, "r") as zf:
-                        # Защита от zip slip: пути не должны быть абсолютными
-                        # или содержать компоненты ".." — иначе extractall
-                        # запишет файлы за пределами tmp_dir.
-                        for name in zf.namelist():
-                            if os.path.isabs(name) or os.path.normpath(name).startswith(".."):
-                                raise ValueError(f"Небезопасный путь в архиве: {name!r}")
-                        zf.extractall(tmp_dir)
-
-                    ver_file = os.path.join(tmp_dir, "version")
-                    if os.path.exists(ver_file):
-                        os.remove(ver_file)
-
-                    backup_dir = config.CONFIG_DIR.with_suffix(".bak_restore")
-                    if os.path.exists(config.CONFIG_DIR):
-                        if os.path.exists(backup_dir):
-                            shutil.rmtree(backup_dir)
-                        shutil.move(config.CONFIG_DIR, backup_dir)
-
-                    try:
-                        shutil.copytree(tmp_dir, config.CONFIG_DIR)
-                        if os.path.exists(backup_dir):
-                            shutil.rmtree(backup_dir)
-                    except Exception:
-                        # Что-то пошло не так — возвращаем старый конфиг
-                        if os.path.exists(backup_dir):
-                            if os.path.exists(config.CONFIG_DIR):
-                                shutil.rmtree(config.CONFIG_DIR)
-                            shutil.move(backup_dir, config.CONFIG_DIR)
-                        raise
-
-                self._log("✔ Настройки импортированы. Перезапуск...\n")
-                os.execl(sys.executable, sys.executable, *sys.argv)
-            except Exception as e:
-                self._log(f"✘ Ошибка импорта: {e}\n")
-
-        dialog.connect("response", _on_response)
-        dialog.present(self)
 
     def add_toast(self, toast):
         """Показывает всплывающее уведомление поверх контента."""

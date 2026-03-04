@@ -845,9 +845,9 @@ class SetupPage(Gtk.Box):
 
     # Ключи цветов папок Papirus (lowercase = имя темы после capitalize())
     _PAPIRUS_COLOR_KEYS = [
-        "adwaita", "yaru", "nordic", "breeze", "blue", "bluegrey",
-        "brown", "cyan", "deeporange", "green", "grey", "indigo",
-        "magenta", "orange", "palebrown", "pink", "purple", "red",
+        "adwaita", "yaru", "nordic", "breeze", "blue",
+        "brown", "cyan", "green", "grey", "indigo",
+        "magenta", "orange", "pink", "purple", "red",
         "teal", "violet", "white", "yellow",
     ]
 

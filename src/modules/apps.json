@@ -375,6 +375,39 @@
               "com.calibre_ebook.calibre"
             ]
           }
+        },
+        {
+          "id": "obsidian",
+          "label": "Obsidian",
+          "desc": "База знаний и заметки в Markdown",
+          "sources": [
+            {
+              "label": "EPM play",
+              "cmd": [
+                "epm",
+                "play",
+                "obsidian"
+              ],
+              "check": [
+                "rpm",
+                "obsidian"
+              ]
+            },
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "md.obsidian.Obsidian"
+              ],
+              "check": [
+                "flatpak",
+                "md.obsidian.Obsidian"
+              ]
+            }
+          ]
         }
       ]
     },
@@ -527,6 +560,109 @@
             "check": [
               "flatpak",
               "com.spotify.Client"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "игры",
+      "title": "Игры",
+      "items": [
+        {
+          "id": "portproton",
+          "label": "PortProton",
+          "desc": "Запуск Windows-игр через Wine/Proton",
+          "sources": [
+            {
+              "label": "EPM play",
+              "cmd": [
+                "epm",
+                "play",
+                "portproton"
+              ],
+              "check": [
+                "rpm",
+                "portproton"
+              ]
+            },
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "portproton"
+              ],
+              "check": [
+                "rpm",
+                "portproton"
+              ]
+            },
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "ru.linux_gaming.PortProton"
+              ],
+              "check": [
+                "flatpak",
+                "ru.linux_gaming.PortProton"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "heroic",
+          "label": "Heroic Games Launcher",
+          "desc": "Запуск игр Epic Games и GOG",
+          "sources": [
+            {
+              "label": "EPM play",
+              "cmd": [
+                "epm",
+                "play",
+                "heroic-games-launcher"
+              ],
+              "check": [
+                "rpm",
+                "heroic-games-launcher"
+              ]
+            },
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "com.heroicgameslauncher.hgl"
+              ],
+              "check": [
+                "flatpak",
+                "com.heroicgameslauncher.hgl"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "protonplus",
+          "label": "Proton Plus",
+          "desc": "Менеджер версий Proton для Steam",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.vysp3r.ProtonPlus"
+            ],
+            "check": [
+              "flatpak",
+              "com.vysp3r.ProtonPlus"
             ]
           }
         }
@@ -712,6 +848,29 @@
       ]
     },
     {
+      "id": "программирование",
+      "title": "Программирование",
+      "items": [
+        {
+          "id": "vscode",
+          "label": "Visual Studio Code",
+          "desc": "Редактор кода от Microsoft",
+          "source": {
+            "label": "EPM play",
+            "cmd": [
+              "epm",
+              "play",
+              "code"
+            ],
+            "check": [
+              "which",
+              "code"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "id": "системные_инструменты",
       "title": "Системные инструменты",
       "items": [
@@ -786,25 +945,6 @@
             "check": [
               "flatpak",
               "net.nokyan.Resources"
-            ]
-          }
-        },
-        {
-          "id": "protonplus",
-          "label": "Proton Plus",
-          "desc": "Менеджер версий Proton для Steam",
-          "source": {
-            "label": "Flathub",
-            "cmd": [
-              "flatpak",
-              "install",
-              "-y",
-              "flathub",
-              "com.vysp3r.ProtonPlus"
-            ],
-            "check": [
-              "flatpak",
-              "com.vysp3r.ProtonPlus"
             ]
           }
         },
@@ -890,20 +1030,34 @@
           "id": "localsend",
           "label": "LocalSend",
           "desc": "Передача файлов по локальной сети (AirDrop-аналог)",
-          "source": {
-            "label": "Flathub",
-            "cmd": [
-              "flatpak",
-              "install",
-              "-y",
-              "flathub",
-              "org.localsend.localsend_app"
-            ],
-            "check": [
-              "flatpak",
-              "org.localsend.localsend_app"
-            ]
-          }
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.localsend.localsend_app"
+              ],
+              "check": [
+                "flatpak",
+                "org.localsend.localsend_app"
+              ]
+            },
+            {
+              "label": "EPM play",
+              "cmd": [
+                "epm",
+                "play",
+                "localsend"
+              ],
+              "check": [
+                "rpm",
+                "localsend"
+              ]
+            }
+          ]
         },
         {
           "id": "monic",

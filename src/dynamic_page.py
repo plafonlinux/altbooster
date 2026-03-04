@@ -63,30 +63,33 @@ def run_check(check: dict | None) -> bool:
         return False
     kind = check.get("type")
 
-    if kind == "rpm":
-        return subprocess.run(
-            ["rpm", "-q", check["value"]], capture_output=True,
-        ).returncode == 0
+    try:
+        if kind == "rpm":
+            return subprocess.run(
+                ["rpm", "-q", check["value"]], capture_output=True, timeout=10,
+            ).returncode == 0
 
-    if kind == "flatpak":
-        r = subprocess.run(
-            ["flatpak", "list", "--app", "--columns=application"],
-            capture_output=True, text=True,
-        )
-        return check["value"] in r.stdout
+        if kind == "flatpak":
+            r = subprocess.run(
+                ["flatpak", "list", "--app", "--columns=application"],
+                capture_output=True, text=True, timeout=15,
+            )
+            return check["value"] in r.stdout
 
-    if kind == "which":
-        return subprocess.run(
-            ["which", check["value"]], capture_output=True,
-        ).returncode == 0
+        if kind == "which":
+            return subprocess.run(
+                ["which", check["value"]], capture_output=True, timeout=5,
+            ).returncode == 0
+
+        if kind == "systemd":
+            return subprocess.run(
+                ["systemctl", "is-enabled", check["value"]], capture_output=True, timeout=5,
+            ).returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
 
     if kind == "path":
         return os.path.exists(os.path.expanduser(check["value"]))
-
-    if kind == "systemd":
-        return subprocess.run(
-            ["systemctl", "is-enabled", check["value"]], capture_output=True,
-        ).returncode == 0
 
     if kind == "gsettings":
         value = backend.gsettings_get(check["schema"], check["key"])

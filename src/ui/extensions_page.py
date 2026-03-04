@@ -486,7 +486,19 @@ class ExtensionsPage(Gtk.Box):
 
         switch.connect("state-set", on_state_set)
 
-        suffix_widgets: list = [switch]
+        has_prefs = (
+            (_USER_EXT_DIR / uuid / "prefs.js").exists() or
+            (_SYSTEM_EXT_DIR / uuid / "prefs.js").exists()
+        )
+
+        prefs_btn = Gtk.Button()
+        prefs_btn.set_icon_name("emblem-system-symbolic")
+        prefs_btn.add_css_class("flat")
+        prefs_btn.add_css_class("circular")
+        prefs_btn.set_valign(Gtk.Align.CENTER)
+        prefs_btn.set_tooltip_text("Настройки расширения")
+        prefs_btn.set_sensitive(has_prefs)
+        prefs_btn.connect("clicked", lambda _, u=uuid: subprocess.Popen(["gnome-extensions", "prefs", u]))
 
         del_btn = Gtk.Button()
         del_btn.set_icon_name("user-trash-symbolic")
@@ -499,9 +511,8 @@ class ExtensionsPage(Gtk.Box):
         else:
             del_btn.set_tooltip_text("Удалить системное расширение (с проверкой зависимостей)")
         del_btn.connect("clicked", lambda _, u=uuid, usr=is_user: self._on_delete_ext(u, usr))
-        suffix_widgets.append(del_btn)
 
-        row.add_suffix(make_suffix_box(*suffix_widgets))
+        row.add_suffix(make_suffix_box(prefs_btn, switch, del_btn))
         return row
 
     def _make_recommended_row(self, uuid, name, desc, install_id=None, installed=False):

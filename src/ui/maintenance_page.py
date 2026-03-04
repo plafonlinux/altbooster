@@ -148,12 +148,28 @@ class CacheTaskRow(Adw.ExpanderRow):
             base = os.path.expanduser("~/.var/app")
             targets.append(shlex.quote(base) + "/*/cache/*")
 
+        # Системные директории, удаление которых через rm -rf/* сломает систему.
+        # Проверяем resolved-путь, чтобы блокировать и "~" и symlink-варианты.
+        _DANGEROUS_PREFIXES = (
+            "/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/lib32",
+            "/proc", "/run", "/sbin", "/sys", "/usr", "/var",
+        )
+        _DANGEROUS_EXACT = {"/", os.path.expanduser("~")}
+
         custom = config.state_get("clean_custom_paths") or []
         for p in custom:
-            if p.strip() in ["/", "~", os.path.expanduser("~")]:
+            p = p.strip()
+            if not p:
                 continue
             if p.startswith("~"):
                 p = os.path.expanduser(p)
+            real = os.path.realpath(p)
+            if real in _DANGEROUS_EXACT:
+                self._log(f"⚠  Пропущен опасный путь: {p}\n")
+                continue
+            if any(real == d or real.startswith(d + "/") for d in _DANGEROUS_PREFIXES):
+                self._log(f"⚠  Пропущен системный путь: {p}\n")
+                continue
             targets.append(shlex.quote(p) + "/*")
 
         if not targets:
