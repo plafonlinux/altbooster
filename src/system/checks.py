@@ -111,7 +111,11 @@ def check_app_installed(source: dict) -> bool:
             res = subprocess.run(["flatpak", "list", "--app", "--columns=application"], capture_output=True, text=True, timeout=15)
             return value in res.stdout
         if kind == "rpm":
-            return subprocess.run(["rpm", "-q", value], capture_output=True, timeout=10).returncode == 0
+            if subprocess.run(["rpm", "-q", value], capture_output=True, timeout=10).returncode == 0:
+                return True
+            # Fallback: пакет мог установиться под другим именем (через provides),
+            # проверяем наличие бинарника в PATH (например, pipewire-utils → pipewire-settings)
+            return shutil.which(value) is not None
     except (subprocess.TimeoutExpired, OSError):
         return False
     if kind == "path":
