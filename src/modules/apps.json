@@ -1196,6 +1196,31 @@
           }
         }
       ]
+    },
+    {
+      "id": "бенчмарки",
+      "title": "Бенчмарки",
+      "items": [
+        {
+          "id": "unigine_valley",
+          "label": "Unigine Valley",
+          "desc": "Бенчмарк GPU на движке Unigine",
+          "sources": [
+            {
+              "label": "EPM Play",
+              "cmd": [
+                "epm",
+                "play",
+                "unigine-valley"
+              ],
+              "check": [
+                "rpm",
+                "unigine-valley"
+              ]
+            }
+          ]
+        }
+      ]
     }
   ]
 }
