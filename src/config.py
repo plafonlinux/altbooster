@@ -19,7 +19,9 @@ CONFIG_DIR  = Path.home() / ".config" / "altbooster"
 CONFIG_FILE = CONFIG_DIR / "window.json"
 STATE_FILE  = CONFIG_DIR / "state.json"
 
-VERSION = "5.6.4"
+VERSION = "5.6.5"
+
+PRESETS_DIR = CONFIG_DIR / "presets"
 
 
 # ── Пути к кэшу DaVinci Resolve по умолчанию ─────────────────────────────────
@@ -81,6 +83,11 @@ def reset_state() -> None:
     """Полностью сбрасывает сохранённое состояние."""
     _state.clear()
     save_state()
+
+
+def get_state_copy() -> dict:
+    """Возвращает полную копию текущего состояния (для экспорта в пресет)."""
+    return dict(_state)
 
 
 # ── Пути к кэшу DaVinci (с учётом пользовательских настроек) ─────────────────

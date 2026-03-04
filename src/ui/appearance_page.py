@@ -69,7 +69,7 @@ class AppearancePage(Gtk.Box):
         self._combo_color.set_subtitle("Применяется для текущего пользователя")
         self._combo_color.add_prefix(make_icon("applications-graphics-symbolic"))
         
-        colors = ["adwaita", "yaru", "black", "blue", "bluegrey", "breeze", "brown", "cyan", "deeporange", "green", "grey", "indigo", "magenta", "nordic", "orange", "palebrown", "pink", "purple", "red", "teal", "violet", "white", "yellow"]
+        colors = ["adwaita", "yaru", "black", "blue", "breeze", "brown", "cyan", "green", "grey", "indigo", "magenta", "nordic", "orange", "pink", "purple", "red", "teal", "violet", "white", "yellow"]
         self._colors = colors
         model = Gtk.StringList.new([c.capitalize() for c in colors])
         self._combo_color.set_model(model)
