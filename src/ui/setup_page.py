@@ -2,6 +2,7 @@
 
 import ast
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -114,6 +115,11 @@ class SetupPage(Gtk.Box):
         self._update_group.add(row)
 
     def _do_update(self, btn, version):
+        # Защита от инъекции: версия приходит из GitHub API и подставляется в shell-команду.
+        if not re.fullmatch(r"\d+\.\d+(\.\d+)*", version):
+            self._log(f"✘  Неверный формат версии: {version!r}\n")
+            return
+
         btn.set_sensitive(False)
         btn.set_label("⏳ Загрузка...")
         self._log(f"\n▶  Обновление до версии {version}...\n")
@@ -123,7 +129,9 @@ class SetupPage(Gtk.Box):
             win.start_progress("Обновление приложения...")
 
         url = f"https://github.com/plafonlinux/altbooster/archive/refs/tags/v{version}.tar.gz"
-        downloader = "wget -O" if shutil.which("wget") else "curl -L -o"
+        if not (downloader := ("wget -O" if shutil.which("wget") else ("curl -L -o" if shutil.which("curl") else ""))):
+            self._log("✘  wget и curl не найдены — обновление невозможно\n")
+            return
 
         cmd_str = (
             f"TMP=$(mktemp -d) && "

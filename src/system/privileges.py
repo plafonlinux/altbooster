@@ -69,7 +69,7 @@ def _get_pkexec_shell() -> subprocess.Popen | None:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, # Объединяем stderr с stdout для простоты
                 text=True,
-                bufsize=0 # Без буферизации
+                bufsize=1, # Построчная буферизация (единственный правильный вариант при text=True)
             )
         except Exception:
             return None
@@ -107,7 +107,7 @@ def start_pkexec_shell() -> tuple[bool, bool]:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=0,
+                bufsize=1, # Построчная буферизация (единственный правильный вариант при text=True)
             )
         except Exception:
             return False, False
