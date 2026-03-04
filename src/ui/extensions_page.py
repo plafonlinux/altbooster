@@ -74,12 +74,6 @@ RECOMMENDED = [
         "7048",
     ),
     (
-        "pipewire-settings@tuxor1337",
-        "Pipewire Settings",
-        "Настройка частоты и буфера звука",
-        "7699",
-    ),
-    (
         "ding@rastersoft.com",
         "Desktop Icons NG (DING)",
         "Иконки на рабочем столе с поддержкой перетаскивания и контекстного меню",
@@ -419,10 +413,11 @@ class ExtensionsPage(Gtk.Box):
     def _load_installed(self):
         # Небольшая задержка, чтобы файловая система успела обновиться после установки
         time.sleep(1.0)
-        
+
         user_exts   = _read_extensions_from(_USER_EXT_DIR)
         system_exts = _read_extensions_from(_SYSTEM_EXT_DIR)
         enabled     = _get_enabled_uuids()
+
         GLib.idle_add(self._populate_installed, user_exts, system_exts, enabled)
 
     def _populate_installed(self, user_exts, system_exts, enabled):
