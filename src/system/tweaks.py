@@ -70,6 +70,7 @@ def patch_drive_menu(on_log: OnLine, on_done: OnDone) -> None:
         on_done(False)
         return
 
+    qpatch = shlex.quote(patch_path)
     script = f"""set -e
 TARGET="/usr/share/gnome-shell/extensions/drive-menu@gnome-shell-extensions.gcampax.github.com/extension.js"
 BACKUP="$TARGET.bak"
@@ -79,7 +80,7 @@ echo "Проверяю наличие системного расширения.
 
 if [ ! -f "$TARGET" ]; then
     echo "Ошибка: файл $TARGET не найден."
-    rm -f {patch_path}
+    rm -f {qpatch}
     exit 1
 fi
 
@@ -89,13 +90,13 @@ echo "Текущий размер:      $CURRENT_SIZE"
 
 if [ "$CURRENT_SIZE" != "$ORIGINAL_SIZE" ]; then
     echo "Размер файла изменился. Патч НЕ применяется."
-    rm -f {patch_path}
+    rm -f {qpatch}
     exit 0
 fi
 
 if grep -q "this._mounts.some" "$TARGET"; then
     echo "Патч уже применён."
-    rm -f {patch_path}
+    rm -f {qpatch}
     exit 0
 fi
 
@@ -106,13 +107,13 @@ echo "Устанавливаю утилиту patch..."
 apt-get install -y patch
 
 echo "Применяю патч..."
-patch -u -f "$TARGET" < {patch_path}
+patch -u -f "$TARGET" < {qpatch}
 
 echo "Патч успешно применён."
 echo "Очищаю кэш GNOME Shell..."
 rm -rf {shlex.quote(home)}/.cache/gnome-shell/*
 
-rm -f {patch_path}
+rm -f {qpatch}
 echo "Готово!"
 echo "Чтобы изменения вступили в силу, нажми Win+L и разблокируй экран."
 """
@@ -127,5 +128,6 @@ def install_aac_codec(archive_path: str, on_line: OnLine, on_done: OnDone) -> No
       в /opt/resolve/IOPlugins/ — именно там DaVinci Resolve ищет IO-плагины.
     - Требует root, потому что /opt/resolve/ принадлежит root.
     """
-    cmd = ["bash", "-c", f"tar xzf {shlex.quote(archive_path)} -C /tmp && cp -r /tmp/aac_encoder_plugin.dvcp.bundle /opt/resolve/IOPlugins/"]
+    # --no-symlinks: запрещает распаковку симлинков из архива (защита от symlink-атаки)
+    cmd = ["bash", "-c", f"tar --no-symlinks -xzf {shlex.quote(archive_path)} -C /tmp && cp -r /tmp/aac_encoder_plugin.dvcp.bundle /opt/resolve/IOPlugins/"]
     run_privileged(cmd, on_line, on_done)

@@ -72,13 +72,19 @@ def is_flathub_enabled() -> bool:
     """Проверяет, включен ли репозиторий Flathub."""
     env = os.environ.copy()
     env["LC_ALL"] = "C"
-    result = subprocess.run(["flatpak", "remotes"], capture_output=True, text=True, env=env)
-    return "flathub" in result.stdout.lower()
+    try:
+        result = subprocess.run(["flatpak", "remotes"], capture_output=True, text=True, env=env, timeout=10)
+        return "flathub" in result.stdout.lower()
+    except (subprocess.TimeoutExpired, OSError):
+        return False
 
 def is_fstrim_enabled() -> bool:
     """Проверяет, включен ли таймер fstrim."""
-    result = subprocess.run(["systemctl", "is-enabled", "fstrim.timer"], capture_output=True)
-    return result.returncode == 0
+    try:
+        result = subprocess.run(["systemctl", "is-enabled", "fstrim.timer"], capture_output=True, timeout=5)
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
 
 def is_fractional_scaling_enabled() -> bool:
     """Проверяет, включено ли дробное масштабирование."""
@@ -88,23 +94,26 @@ def is_fractional_scaling_enabled() -> bool:
 def is_system_busy() -> bool:
     """Проверяет занятость пакетного менеджера."""
     try:
-        if subprocess.run(["pgrep", "-f", "packagekitd"], capture_output=True).returncode == 0:
+        if subprocess.run(["pgrep", "-f", "packagekitd"], capture_output=True, timeout=5).returncode == 0:
             return True
         for lock_file in config.APT_LOCK_FILES:
-            if os.path.exists(lock_file) and subprocess.run(["fuser", lock_file], capture_output=True).returncode == 0:
+            if os.path.exists(lock_file) and subprocess.run(["fuser", lock_file], capture_output=True, timeout=5).returncode == 0:
                 return True
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         pass
     return False
 
 def check_app_installed(source: dict) -> bool:
     """Проверяет, установлено ли приложение."""
     kind, value = source["check"]
-    if kind == "flatpak":
-        res = subprocess.run(["flatpak", "list", "--app", "--columns=application"], capture_output=True, text=True)
-        return value in res.stdout
-    if kind == "rpm":
-        return subprocess.run(["rpm", "-q", value], capture_output=True).returncode == 0
+    try:
+        if kind == "flatpak":
+            res = subprocess.run(["flatpak", "list", "--app", "--columns=application"], capture_output=True, text=True, timeout=15)
+            return value in res.stdout
+        if kind == "rpm":
+            return subprocess.run(["rpm", "-q", value], capture_output=True, timeout=10).returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
     if kind == "path":
         return os.path.exists(os.path.expanduser(value))
     if kind == "which":
@@ -147,7 +156,10 @@ def is_davinci_installed() -> bool:
     """Проверяет, установлен ли DaVinci Resolve."""
     if os.path.exists("/opt/resolve/bin/resolve"):
         return True
-    return subprocess.run(["rpm", "-q", "davinci-resolve"], capture_output=True).returncode == 0
+    try:
+        return subprocess.run(["rpm", "-q", "davinci-resolve"], capture_output=True, timeout=10).returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
 
 def is_aac_installed() -> bool:
     """Проверяет, установлен ли кодек AAC для DaVinci Resolve."""
@@ -155,8 +167,14 @@ def is_aac_installed() -> bool:
 
 def is_fairlight_installed() -> bool:
     """Проверяет, установлен ли плагин Fairlight для DaVinci Resolve."""
-    return subprocess.run(["rpm", "-q", "alsa-plugins-pulse"], capture_output=True).returncode == 0
+    try:
+        return subprocess.run(["rpm", "-q", "alsa-plugins-pulse"], capture_output=True, timeout=10).returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
 
 def is_epm_installed() -> bool:
     """Проверяет, установлен ли пакетный менеджер eepm."""
-    return subprocess.run(["rpm", "-q", "eepm"], capture_output=True).returncode == 0
+    try:
+        return subprocess.run(["rpm", "-q", "eepm"], capture_output=True, timeout=10).returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
