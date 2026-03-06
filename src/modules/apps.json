@@ -844,6 +844,51 @@
               "nl.hjdskes.gcolor3"
             ]
           }
+        },
+        {
+          "id": "blender",
+          "label": "Blender",
+          "desc": "3D-редактор и анимация",
+          "sources": [
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "blender"
+              ],
+              "check": [
+                "rpm",
+                "blender"
+              ]
+            },
+            {
+              "label": "EPM Play",
+              "cmd": [
+                "epm",
+                "play",
+                "blender"
+              ],
+              "check": [
+                "which",
+                "blender"
+              ]
+            },
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.blender.Blender"
+              ],
+              "check": [
+                "flatpak",
+                "org.blender.Blender"
+              ]
+            }
+          ]
         }
       ]
     },
@@ -1194,13 +1239,7 @@
               "com.leinardi.gst"
             ]
           }
-        }
-      ]
-    },
-    {
-      "id": "бенчмарки",
-      "title": "Бенчмарки",
-      "items": [
+        },
         {
           "id": "unigine_valley",
           "label": "Unigine Valley",
@@ -1216,6 +1255,44 @@
               "check": [
                 "rpm",
                 "unigine-valley"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "unigine_superposition",
+          "label": "Unigine Superposition",
+          "desc": "Бенчмарк GPU на движке Unigine",
+          "sources": [
+            {
+              "label": "EPM Play",
+              "cmd": [
+                "epm",
+                "play",
+                "unigine-superposition"
+              ],
+              "check": [
+                "rpm",
+                "unigine-superposition"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "unigine_heaven",
+          "label": "Unigine Heaven",
+          "desc": "Бенчмарк GPU на движке Unigine",
+          "sources": [
+            {
+              "label": "EPM Play",
+              "cmd": [
+                "epm",
+                "play",
+                "unigine-heaven"
+              ],
+              "check": [
+                "rpm",
+                "unigine-heaven"
               ]
             }
           ]

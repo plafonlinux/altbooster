@@ -128,3 +128,22 @@ def check_update(on_result):
         except Exception:
             on_result(None)
     threading.Thread(target=_worker, daemon=True).start()
+
+
+def check_update_beta(on_result):
+    """Ищет последний pre-release на GitHub. Вызывает on_result(version_str | None)."""
+    def _worker():
+        try:
+            url = "https://api.github.com/repos/plafonlinux/altbooster/releases?per_page=10"
+            req = urllib.request.Request(url, headers={"User-Agent": "ALTBooster"})
+            with urllib.request.urlopen(req, timeout=5) as response:
+                releases = json.loads(response.read().decode())
+                for r in releases:
+                    if r.get("prerelease"):
+                        tag = r.get("tag_name", "").lstrip("v")
+                        on_result(tag)
+                        return
+                on_result(None)
+        except Exception:
+            on_result(None)
+    threading.Thread(target=_worker, daemon=True).start()
