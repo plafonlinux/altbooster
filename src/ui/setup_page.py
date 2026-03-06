@@ -140,7 +140,8 @@ class SetupPage(Gtk.Box):
         self._update_group.set_title("Обновление ALT Booster")
         self._body.prepend(self._update_group)
 
-        is_on_beta = "-" in config.VERSION  # e.g. "5.6.6-beta"
+        # Пользователь на бета-канале если: суффикс "-" в VERSION или сам выбирал бета-канал ранее
+        is_on_beta = "-" in config.VERSION or config.state_get("update_channel") == "beta"
 
         # ── Строка Stable ──────────────────────────────────────────────────
         if stable_ver:
@@ -164,7 +165,7 @@ class SetupPage(Gtk.Box):
                 btn = None
 
             if btn:
-                btn.connect("clicked", lambda b, v=stable_ver: self._do_update(b, v))
+                btn.connect("clicked", lambda b, v=stable_ver: self._do_update(b, v, "stable"))
                 row.add_suffix(btn)
             self._update_group.add(row)
 
@@ -176,17 +177,17 @@ class SetupPage(Gtk.Box):
             row_b.add_prefix(_icon_b)
             row_b.set_title(f"Бета  v{beta_ver}")
 
-            if config.VERSION == beta_ver:
+            if is_on_beta and not self._is_newer(beta_ver, config.VERSION):
                 row_b.set_subtitle("Установлена · переустановить?")
             else:
                 row_b.set_subtitle("Тестовая версия с новыми функциями")
 
             btn_b = make_button("Установить бета")
-            btn_b.connect("clicked", lambda b, v=beta_ver: self._do_update(b, v))
+            btn_b.connect("clicked", lambda b, v=beta_ver: self._do_update(b, v, "beta"))
             row_b.add_suffix(btn_b)
             self._update_group.add(row_b)
 
-    def _do_update(self, btn, version):
+    def _do_update(self, btn, version, channel="stable"):
         # Защита от инъекции: версия приходит из GitHub API и подставляется в shell-команду.
         # Допускаем суффикс вроде -beta, -rc1 и т.п.
         if not re.fullmatch(r"\d+\.\d+(\.\d+)*(-[a-zA-Z0-9]+)?", version):
@@ -226,6 +227,7 @@ class SetupPage(Gtk.Box):
                     self._update_group = None
 
                 if ok:
+                    config.state_set("update_channel", channel)
                     self._log("✔  Готово! Перезапуск через 2 сек...\n")
                     GLib.timeout_add(2000, self._restart_app)
                 else:
