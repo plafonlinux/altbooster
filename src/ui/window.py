@@ -471,8 +471,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                         GLib.idle_add(self._log, f"✘ Ошибка экспорта: {e}\n")
 
                 threading.Thread(target=_collect, daemon=True).start()
-            except Exception as e:
-                self._log(f"✘ Ошибка экспорта: {e}\n")
+            except GLib.Error as e:
+                if e.code != 2:  # 2 = Dismissed by user — не ошибка
+                    self._log(f"✘ Ошибка экспорта: {e}\n")
 
         self._file_dialog = dialog  # держим ссылку, иначе GC уничтожит до колбэка
         dialog.save(self, None, _on_save)
@@ -495,8 +496,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 file = d.open_finish(res)
                 if file:
                     self._load_and_show_preset(file.get_path())
-            except Exception as e:
-                self._log(f"✘ Ошибка выбора файла: {e}\n")
+            except GLib.Error as e:
+                if e.code != 2:  # 2 = Dismissed by user — не ошибка
+                    self._log(f"✘ Ошибка выбора файла: {e}\n")
 
         self._file_dialog = dialog  # держим ссылку, иначе GC уничтожит до колбэка
         dialog.open(self, None, _on_open)
@@ -573,8 +575,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                         )
                         self._log(f"✔ Расширения экспортированы в {file.get_path()}\n")
                         self.add_toast(Adw.Toast(title="Расширения экспортированы"))
-                    except Exception as e:
-                        self._log(f"✘ Ошибка сохранения: {e}\n")
+                    except GLib.Error as e:
+                        if e.code != 2:
+                            self._log(f"✘ Ошибка сохранения: {e}\n")
 
                 self._file_dialog = fdialog  # держим ссылку, иначе GC уничтожит до колбэка
                 fdialog.save(self, None, _on_save)
@@ -630,8 +633,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                     count = len(apps_data["apps"])
                     self._log(f"✔ Приложения экспортированы ({count} шт.) в {file.get_path()}\n")
                     self.add_toast(Adw.Toast(title=f"Приложения экспортированы ({count})"))
-                except Exception as e:
-                    self._log(f"✘ Ошибка сохранения: {e}\n")
+                except GLib.Error as e:
+                    if e.code != 2:
+                        self._log(f"✘ Ошибка сохранения: {e}\n")
 
             self._file_dialog = fdialog  # держим ссылку, иначе GC уничтожит до колбэка
             fdialog.save(self, None, _on_save)
@@ -709,10 +713,22 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                     cmds.append((app_info.get("label", app_info["id"]), cmd, kind))
 
         if flags.get("extensions"):
+            import pathlib as _pl
+            _system_ext_dir = _pl.Path("/usr/share/gnome-shell/extensions")
             gext = shutil.which("gext") or str(
-                __import__("pathlib").Path.home() / ".local" / "bin" / "gext"
+                _pl.Path.home() / ".local" / "bin" / "gext"
             )
+
+            installed_uuids = set()
+            try:
+                r_list = subprocess.run(["gnome-extensions", "list"], capture_output=True, text=True)
+                installed_uuids = set(line.strip() for line in r_list.stdout.splitlines() if line.strip())
+            except Exception:
+                pass
+
             for uuid in data.get("extensions") or []:
+                if uuid in installed_uuids or (_system_ext_dir / uuid).exists():
+                    continue
                 cmds.append((uuid, [gext, "install", uuid], "shell"))
 
         if not cmds:
