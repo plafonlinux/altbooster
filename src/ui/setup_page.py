@@ -19,22 +19,22 @@ import config
 from widgets import make_button, make_icon, make_scrolled_page
 from ui.rows import SettingRow
 
-# CSS для цветных иконок каналов обновления
-_channel_css = Gtk.CssProvider()
-_channel_css.load_from_data(b"""
-    .ab-icon-green { color: @success_color; }
-    .ab-icon-red   { color: @error_color;   }
-""")
-Gtk.StyleContext.add_provider_for_display(
-    Gdk.Display.get_default(), _channel_css,
-    Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-)
-
-
 class SetupPage(Gtk.Box):
     def __init__(self, log_fn):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._log = log_fn
+
+        # CSS для цветных иконок каналов обновления (регистрируем здесь — дисплей уже готов)
+        _css = Gtk.CssProvider()
+        _css.load_from_data(b"""
+            .ab-icon-green { color: @success_color; }
+            .ab-icon-red   { color: @error_color;   }
+        """)
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), _css,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+        )
+
         scroll, body = make_scrolled_page()
         self._body = body
         self.append(scroll)
