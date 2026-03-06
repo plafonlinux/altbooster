@@ -27,14 +27,24 @@ import config
 PROFILE_EXT = ".altbooster"
 
 
+_USER_EXT_DIR   = Path.home() / ".local" / "share" / "gnome-shell" / "extensions"
+_SYSTEM_EXT_DIR = Path("/usr/share/gnome-shell/extensions")
+
+
 def _get_enabled_extensions() -> list[str]:
-    """Возвращает список UUID включённых расширений GNOME Shell."""
+    """Возвращает UUID включённых расширений, установленных в пользовательской директории.
+
+    Системные расширения (/usr/share/gnome-shell/extensions/) намеренно исключаются:
+    они привязаны к ОС и не нуждаются в установке при восстановлении пресета.
+    """
     try:
         r = subprocess.run(
             ["gnome-extensions", "list", "--enabled"],
             capture_output=True, text=True, timeout=10,
         )
-        return [u.strip() for u in r.stdout.splitlines() if u.strip()]
+        uuids = [u.strip() for u in r.stdout.splitlines() if u.strip()]
+        # Оставляем только пользовательские расширения
+        return [u for u in uuids if (_USER_EXT_DIR / u).exists()]
     except Exception:
         return []
 
