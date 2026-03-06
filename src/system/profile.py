@@ -4,6 +4,7 @@ profile.py — сбор, сохранение и загрузка пресето
 Пресет (.altbooster) — JSON-файл, описывающий:
   - список установленных приложений из каталога (apps)
   - UUID включённых расширений GNOME Shell (extensions)
+  - dconf-настройки расширений (extensions_dconf) — конфиги Vitals, Blur и т.д.
   - копию state.json (state)
   - ключевые gsettings оформления (gsettings)
   - опционально изменённый apps.json (custom_apps)
@@ -95,6 +96,19 @@ def collect_profile(name: str, apps_catalog: dict) -> dict:
     except Exception:
         pass
 
+    # Снимаем dconf-настройки расширений — позволяет восстановить конфиги
+    # Vitals, Blur my Shell и т.д. точно так же, как они были настроены
+    extensions_dconf = ""
+    try:
+        r = subprocess.run(
+            ["dconf", "dump", "/org/gnome/shell/extensions/"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode == 0:
+            extensions_dconf = r.stdout
+    except Exception:
+        pass
+
     return {
         "format_version": 1,
         "name": name,
@@ -102,6 +116,7 @@ def collect_profile(name: str, apps_catalog: dict) -> dict:
         "exported_at": datetime.datetime.now().isoformat(timespec="seconds"),
         "apps": _get_installed_apps(apps_catalog),
         "extensions": _get_enabled_extensions(),
+        "extensions_dconf": extensions_dconf,
         "state": config.get_state_copy(),
         "gsettings": _get_gsettings_snapshot(),
         "custom_apps": custom_apps,
