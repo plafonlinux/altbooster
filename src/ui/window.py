@@ -474,6 +474,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             except Exception as e:
                 self._log(f"✘ Ошибка экспорта: {e}\n")
 
+        self._file_dialog = dialog  # держим ссылку, иначе GC уничтожит до колбэка
         dialog.save(self, None, _on_save)
 
     def _on_preset_import_file(self, *_):
@@ -497,6 +498,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             except Exception as e:
                 self._log(f"✘ Ошибка выбора файла: {e}\n")
 
+        self._file_dialog = dialog  # держим ссылку, иначе GC уничтожит до колбэка
         dialog.open(self, None, _on_open)
 
     def _on_export_extensions(self, *_):
@@ -574,6 +576,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                     except Exception as e:
                         self._log(f"✘ Ошибка сохранения: {e}\n")
 
+                self._file_dialog = fdialog  # держим ссылку, иначе GC уничтожит до колбэка
                 fdialog.save(self, None, _on_save)
 
             threading.Thread(target=_collect_and_save, daemon=True).start()
@@ -630,6 +633,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 except Exception as e:
                     self._log(f"✘ Ошибка сохранения: {e}\n")
 
+            self._file_dialog = fdialog  # держим ссылку, иначе GC уничтожит до колбэка
             fdialog.save(self, None, _on_save)
 
         threading.Thread(target=_collect, daemon=True).start()
