@@ -490,11 +490,23 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         dialog = Gtk.FileDialog()
         dialog.set_title("Импортировать пресет")
 
-        f = Gtk.FileFilter()
-        f.set_name("Пресеты ALT Booster (*.altbooster)")
-        f.add_pattern("*.altbooster")
+        f_all = Gtk.FileFilter()
+        f_all.set_name("Файлы ALT Booster (*.altbooster, *.json)")
+        f_all.add_pattern("*.altbooster")
+        f_all.add_pattern("*.json")
+
+        f_preset = Gtk.FileFilter()
+        f_preset.set_name("Пресеты ALT Booster (*.altbooster)")
+        f_preset.add_pattern("*.altbooster")
+
+        f_json = Gtk.FileFilter()
+        f_json.set_name("JSON-экспорт (*.json)")
+        f_json.add_pattern("*.json")
+
         filters = Gio.ListStore.new(Gtk.FileFilter)
-        filters.append(f)
+        filters.append(f_all)
+        filters.append(f_preset)
+        filters.append(f_json)
         dialog.set_filters(filters)
 
         def _on_open(d, res):
@@ -698,8 +710,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         """Применяет пресет: настройки сразу, установка в фоне."""
         name = data.get("name", "Пресет")
 
+        deferred_settings: list[dict] = []
         if flags.get("settings"):
-            profile_module.apply_settings(data)
+            deferred_settings = profile_module.apply_settings(data)
             self._log("✔ Настройки из пресета применены.\n")
             # Обновляем страницу приложений если был custom_apps
             if data.get("custom_apps"):
@@ -717,6 +730,12 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 if cmd:
                     kind = "epm" if cmd and cmd[0] == "epm" else "privileged"
                     cmds.append((app_info.get("label", app_info["id"]), cmd, kind))
+
+        # Для отложенных тем: если пакет известен — ставим его перед применением gsettings
+        for entry in deferred_settings:
+            pkg = profile_module.theme_package(entry.get("value", ""))
+            if pkg:
+                cmds.append((entry["value"], ["apt-get", "install", "-y", pkg], "privileged"))
 
         if flags.get("extensions"):
             import pathlib as _pl
@@ -770,6 +789,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                     ok = backend.run_privileged_sync(cmd, lambda l: GLib.idle_add(self._log, l))
                 if ok:
                     ok_count += 1
+
+            # Применяем отложенные gsettings тем — пакеты уже должны быть установлены
+            for entry in deferred_settings:
+                if profile_module.theme_exists(entry.get("value", "")):
+                    backend.run_gsettings(["set", entry["schema"], entry["key"], entry["value"]])
 
             # После установки расширений — восстанавливаем их dconf-настройки
             # (схемы должны быть уже зарегистрированы после установки)
