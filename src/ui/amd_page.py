@@ -168,7 +168,7 @@ class AmdPage(DynamicPage):
     def _build_scx_ui(self):
         is_sisyphus = self._is_sisyphus()
         group = Adw.PreferencesGroup()
-        group.set_title("Планировщик CPU (SCX)")
+        group.set_title("Планировщик CPU (SCX) — Экспериментально")
         desc = "Экспериментальные планировщики sched-ext (LAVD) для игровых задач."
         if not is_sisyphus:
             desc += "\n⚠️ Пакет scx-scheds доступен только в репозитории Sisyphus."
