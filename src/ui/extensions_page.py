@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+from typing import Callable
+import re
 import shutil
 import subprocess
+import tempfile
 import time
 import threading
 import urllib.parse
@@ -74,12 +77,6 @@ RECOMMENDED = [
         "7048",
     ),
     (
-        "pipewire-settings@tuxor1337",
-        "Pipewire Settings",
-        "Настройка частоты и буфера звука",
-        "7699",
-    ),
-    (
         "ding@rastersoft.com",
         "Desktop Icons NG (DING)",
         "Иконки на рабочем столе с поддержкой перетаскивания и контекстного меню",
@@ -115,7 +112,7 @@ def _gext_path() -> str | None:
     return None
 
 
-def _fix_float_versions_in_metadata() -> list[str]:
+def _fix_float_versions_in_metadata(log_fn: Callable[[str], None] | None = None) -> list[str]:
     """Исправляет float-версии в metadata.json установленных расширений.
 
     gnome-extensions-cli использует pydantic для парсинга metadata.json.
@@ -129,6 +126,16 @@ def _fix_float_versions_in_metadata() -> list[str]:
     Возвращает список исправленных файлов (для лога).
     """
     fixed = []
+    
+    # Проверка системных расширений (только лог, так как нет прав на запись)
+    for meta_path in _SYSTEM_EXT_DIR.glob("*/metadata.json"):
+        try:
+            data = json.loads(meta_path.read_text(encoding="utf-8"))
+            if isinstance(data.get("version"), float) and log_fn:
+                log_fn(f"⚠  Системное расширение {meta_path.parent.name} имеет версию в формате float ({data['version']}). Это может вызвать сбой gext.\n")
+        except Exception:
+            pass
+
     for meta_path in _USER_EXT_DIR.glob("*/metadata.json"):
         try:
             text = meta_path.read_text(encoding="utf-8")
@@ -197,6 +204,54 @@ class ExtensionsPage(Gtk.Box):
 
     # ── Секция: Поиск и установка ─────────────────────────────────────────────
 
+    def _get_shell_version(self) -> str:
+        """Определяет версию GNOME Shell для запроса к API."""
+        try:
+            r = subprocess.run(["gnome-shell", "--version"], capture_output=True, text=True)
+            # "GNOME Shell 47.4" -> "47"
+            m = re.search(r"(\d+)", r.stdout)
+            return m.group(1) if m else "47"
+        except Exception:
+            return "47"
+
+    def _install_native_fallback(self, target_id: str, uuid_hint: str = None) -> tuple[bool, str | None]:
+        """Нативный метод установки без использования gnome-extensions-cli.
+        
+        Использует API extensions.gnome.org и системную команду 'gnome-extensions install'.
+        """
+        GLib.idle_add(self._log, "⚠  gext дал сбой. Пробую нативный метод установки...\n")
+        try:
+            shell_ver = self._get_shell_version()
+            # API принимает либо pk (числовой ID), либо uuid
+            key = "pk" if target_id.isdigit() else "uuid"
+            url = f"https://extensions.gnome.org/extension-info/?{key}={target_id}&shell_version={shell_ver}"
+            
+            req = urllib.request.Request(url, headers={"User-Agent": "ALTBooster"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            
+            dl_path = data.get("download_url")
+            if not dl_path:
+                raise ValueError("Не удалось найти версию для вашего GNOME Shell")
+            
+            uuid = data.get("uuid")
+            full_url = f"https://extensions.gnome.org{dl_path}"
+            
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                urllib.request.urlretrieve(full_url, tmp.name)
+                zip_path = tmp.name
+            
+            # Нативная установка (force перезаписывает если уже есть)
+            subprocess.run(["gnome-extensions", "install", "--force", zip_path], check=True)
+            os.unlink(zip_path)
+            
+            if uuid:
+                subprocess.run(["gnome-extensions", "enable", uuid])
+            return True, uuid
+        except Exception as e:
+            GLib.idle_add(self._log, f"✘  Нативный метод тоже не помог: {e}\n")
+            return False, None
+
     def _build_search_group(self):
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         box.set_margin_top(12)
@@ -236,6 +291,36 @@ class ExtensionsPage(Gtk.Box):
         else:
             self._search_extensions(text)
 
+    def _ensure_gext(self) -> str | None:
+        """Убеждается, что gext установлен. Пробует установить через pip если нужно."""
+        gext = _gext_path()
+        if gext:
+            return gext
+
+        GLib.idle_add(self._log, "▶  gext не найден, устанавливаю...\n")
+        
+        # Поиск pip
+        pip_cmd = next((c for c in ("pip3", "pip") if shutil.which(c)), None)
+        
+        if not pip_cmd:
+            GLib.idle_add(self._log, "▶  pip не найден. Устанавливаю системные пакеты...\n")
+            if not backend.run_privileged_sync(["apt-get", "install", "-y", "pip", "python3-module-pip"], self._log):
+                return None
+            pip_cmd = next((c for c in ("pip3", "pip") if shutil.which(c)), None)
+
+        if not pip_cmd:
+            return None
+
+        r_pip = subprocess.run(
+            [pip_cmd, "install", "gnome-extensions-cli", "--user"],
+            capture_output=True, text=True,
+        )
+        if r_pip.returncode != 0:
+            return None
+            
+        GLib.idle_add(self._log, "✔  gext установлен!\n")
+        return _gext_path() or "gext"
+
     def _install_by_id(self, ext_id):
         self._id_entry.set_sensitive(False)
         clear_status(self._id_status)
@@ -244,59 +329,24 @@ class ExtensionsPage(Gtk.Box):
         if hasattr(win, "start_progress"): win.start_progress(f"Установка расширения {ext_id}...")
 
         def _do():
-            gext = _gext_path()
-            if not gext:
-                GLib.idle_add(self._log, "▶  gext не найден, устанавливаю...\n")
-                # Пробуем pip3, затем pip (на ALT p11 команда называется pip)
-                pip_cmd = None
-                for candidate in ("pip3", "pip"):
-                    if shutil.which(candidate):
-                        pip_cmd = candidate
-                        break
-                if pip_cmd is None:
-                    GLib.idle_add(self._log, "▶  pip не найден. Устанавливаю системные пакеты...\n")
-                    if backend.run_privileged_sync(["apt-get", "install", "-y", "pip", "python3-module-pip"], self._log):
-                        for candidate in ("pip3", "pip"):
-                            if shutil.which(candidate):
-                                pip_cmd = candidate
-                                break
-
-                    if pip_cmd is None:
-                        def _fail_no_pip():
-                            self._log("✘  Не удалось установить pip. Проверьте интернет или репозитории.\n")
-                            if hasattr(win, "stop_progress"): win.stop_progress(False)
-                            set_status_error(self._id_status)
-                            self._id_entry.set_sensitive(True)
-                        GLib.idle_add(_fail_no_pip)
-                        return
-                r_pip = subprocess.run(
-                    [pip_cmd, "install", "gnome-extensions-cli", "--user"],
-                    capture_output=True, text=True,
-                )
-                if r_pip.returncode != 0:
-                    def _fail_gext():
-                        self._log(
-                            f"✘  Не удалось установить gext: {r_pip.stderr.strip()}\n"
-                            "   Попробуйте вручную:\n"
-                            "   sudo apt-get install pip python3-module-pip\n"
-                            "   pip install gnome-extensions-cli\n"
-                        )
-                        if hasattr(win, "stop_progress"): win.stop_progress(False)
-                        set_status_error(self._id_status)
-                        self._id_entry.set_sensitive(True)
-                    GLib.idle_add(_fail_gext)
-                    return
-                GLib.idle_add(self._log, "✔  gext установлен!\n")
-                gext = _gext_path() or "gext"
-
-            fixed = _fix_float_versions_in_metadata()
+            gext = self._ensure_gext()
+            
+            fixed = _fix_float_versions_in_metadata(self._log)
             if fixed:
                 GLib.idle_add(self._log, f"⚠  Исправлены float-версии в metadata.json: {', '.join(fixed)}\n")
 
-            r = subprocess.run([gext, "install", ext_id], capture_output=True, text=True)
-            if r.stdout:
-                GLib.idle_add(self._log, r.stdout)
-            ok = r.returncode == 0
+            ok = False
+            err_msg = ""
+            if gext:
+                r = subprocess.run([gext, "install", ext_id], capture_output=True, text=True)
+                if r.stdout:
+                    GLib.idle_add(self._log, r.stdout)
+                ok = (r.returncode == 0)
+                if not ok:
+                    err_msg = r.stderr.strip()
+            
+            if not ok:
+                ok, _ = self._install_native_fallback(ext_id)
 
             def _finish():
                 if ok:
@@ -306,7 +356,7 @@ class ExtensionsPage(Gtk.Box):
                     self._id_entry.set_text("")
                     self._refresh_installed()
                 else:
-                    self._log(f"✘  Ошибка: {r.stderr.strip()}\n")
+                    self._log(f"✘  Ошибка: {err_msg}\n")
                     if hasattr(win, "stop_progress"): win.stop_progress(False)
                     set_status_error(self._id_status)
                 self._id_entry.set_sensitive(True)
@@ -419,10 +469,11 @@ class ExtensionsPage(Gtk.Box):
     def _load_installed(self):
         # Небольшая задержка, чтобы файловая система успела обновиться после установки
         time.sleep(1.0)
-        
+
         user_exts   = _read_extensions_from(_USER_EXT_DIR)
         system_exts = _read_extensions_from(_SYSTEM_EXT_DIR)
         enabled     = _get_enabled_uuids()
+
         GLib.idle_add(self._populate_installed, user_exts, system_exts, enabled)
 
     def _populate_installed(self, user_exts, system_exts, enabled):
@@ -574,62 +625,29 @@ class ExtensionsPage(Gtk.Box):
         if hasattr(win, "start_progress"): win.start_progress(f"Установка расширения...")
 
         def _do():
-            gext = _gext_path()
-            if not gext:
-                GLib.idle_add(self._log, "▶  gext не найден, устанавливаю...\n")
-                pip_cmd = None
-                for candidate in ("pip3", "pip"):
-                    if shutil.which(candidate):
-                        pip_cmd = candidate
-                        break
-                if pip_cmd is None:
-                    GLib.idle_add(self._log, "▶  pip не найден. Устанавливаю системные пакеты...\n")
-                    if backend.run_privileged_sync(["apt-get", "install", "-y", "pip", "python3-module-pip"], self._log):
-                        for candidate in ("pip3", "pip"):
-                            if shutil.which(candidate):
-                                pip_cmd = candidate
-                                break
-
-                if pip_cmd is None:
-                    GLib.idle_add(self._log, "✘  Не удалось установить pip.\n")
-                    GLib.idle_add(set_status_error, status)
-                    GLib.idle_add(btn.set_label, "Повторить")
-                    GLib.idle_add(btn.set_sensitive, True)
-                    if hasattr(win, "stop_progress"): win.stop_progress(False)
-                    return
-                r_pip = subprocess.run(
-                    [pip_cmd, "install", "gnome-extensions-cli", "--user"],
-                    capture_output=True, text=True,
-                )
-                if r_pip.returncode != 0:
-                    GLib.idle_add(self._log,
-                        f"✘  Не удалось установить gext: {r_pip.stderr.strip()}\n"
-                        "   sudo apt-get install pip python3-module-pip\n"
-                        "   pip install gnome-extensions-cli\n"
-                    )
-                    GLib.idle_add(set_status_error, status)
-                    GLib.idle_add(btn.set_label, "Повторить")
-                    GLib.idle_add(btn.set_sensitive, True)
-                    if hasattr(win, "stop_progress"): win.stop_progress(False)
-                    return
-                GLib.idle_add(self._log, "✔  gext установлен!\n")
-                gext = _gext_path() or "gext"
-
-            fixed = _fix_float_versions_in_metadata()
+            gext = self._ensure_gext()
+            
+            fixed = _fix_float_versions_in_metadata(self._log)
             if fixed:
                 GLib.idle_add(self._log, f"⚠  Исправлены float-версии в metadata.json: {', '.join(fixed)}\n")
 
             target = install_id if install_id else uuid
-            r = subprocess.run([gext, "install", target], capture_output=True, text=True)
-            if r.stdout:
-                GLib.idle_add(self._log, r.stdout)
-            ok = r.returncode == 0
+            ok = False
+            err_msg = ""
+            if gext:
+                r = subprocess.run([gext, "install", target], capture_output=True, text=True)
+                if r.stdout: GLib.idle_add(self._log, r.stdout)
+                ok = (r.returncode == 0)
+                if not ok: err_msg = r.stderr.strip()
+            
+            if not ok:
+                ok, _ = self._install_native_fallback(target, uuid_hint=uuid)
             
             if ok:
                 self._log("✔  Установлено!\n")
                 GLib.idle_add(self._refresh_installed)
             else:
-                self._log(f"✘  Ошибка: {r.stderr.strip()}\n")
+                if err_msg: self._log(f"✘  Ошибка: {err_msg}\n")
                 GLib.idle_add(set_status_error, status)
                 GLib.idle_add(btn.set_label, "Повторить")
                 GLib.idle_add(btn.set_sensitive, True)

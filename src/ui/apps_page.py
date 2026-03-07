@@ -436,27 +436,33 @@ class AppsPage(Gtk.Box):
 
         item_id = install_id.replace(".", "_").replace("-", "_").replace(" ", "_").lower()
 
-        gs = self._data.get("groups", [])
-        if not gs:
-            self._log("⚠ Нет групп для добавления.\n")
-            return
+        gs = self._data.setdefault("groups", [])
 
-        # Ищем, существует ли уже такое приложение
+        # Находим или создаём группу «Пользовательские приложения» в начале списка
+        USER_GID = "user_apps"
+        user_group = next((g for g in gs if g.get("id") == USER_GID), None)
+        if user_group is None:
+            user_group = {"id": USER_GID, "title": "Пользовательские приложения", "items": []}
+            gs.insert(0, user_group)
+
+        # Ищем, существует ли уже такое приложение (во всех группах)
         target_item = None
+        target_group = None
         for g in gs:
             for it in g.get("items", []):
                 if it.get("id") == item_id:
                     target_item = it
+                    target_group = g
                     break
             if target_item:
                 break
-        
+
         if target_item:
             # Если есть — добавляем источник к нему
             if "sources" not in target_item:
                 target_item["sources"] = [target_item["source"]] if "source" in target_item else []
                 if "source" in target_item: del target_item["source"]
-            
+
             # Проверяем дубликаты источников
             exists = any(s.get("label") == source["label"] and s.get("cmd") == source["cmd"] for s in target_item["sources"])
             if not exists:
@@ -466,15 +472,15 @@ class AppsPage(Gtk.Box):
                 GLib.idle_add(self._load_and_build) # Перезагружаем UI, чтобы обновить бейджики
             else:
                 self._log(f"ℹ Источник уже существует у «{target_item['label']}»\n")
-            
+
             btn_add.set_label("Обновлено")
         else:
-            # Если нет — создаем новое
+            # Если нет — создаём новое и кладём в пользовательскую группу
             item = {"id": item_id, "label": display_name, "desc": summary, "sources": [source]}
-            gs[0].setdefault("items", []).append(item)
+            user_group.setdefault("items", []).append(item)
             self._write_json()
             GLib.idle_add(self._load_and_build)
-            
+
             btn_add.set_label("Добавлено")
             self._log(f"✔ {display_name} добавлен в список\n")
             
@@ -571,6 +577,14 @@ class AppsPage(Gtk.Box):
             self._update_reset_button_ui(False)
 
     def _build(self):
+        # Отрисовываем группу пользовательских приложений первой (до заголовка),
+        # но только если в ней есть хотя бы один элемент.
+        USER_GID = "user_apps"
+        groups_all = self._data.get("groups", [])
+        user_gdata = next((g for g in groups_all if g.get("id") == USER_GID), None)
+        if user_gdata and user_gdata.get("items"):
+            self._build_group(user_gdata)
+
         heading = Gtk.Label()
         heading.set_markup("<b>Выбрать и установить приложения</b>")
         heading.set_halign(Gtk.Align.START)
@@ -584,94 +598,98 @@ class AppsPage(Gtk.Box):
             self._log("⚠ Список групп приложений пуст или не загружен.\n")
 
         for gdata in self._data.get("groups", []):
-            pg = Adw.PreferencesGroup()
-            self._body.append(pg)
+            if gdata.get("id") == USER_GID:
+                continue  # уже отрисована выше
+            self._build_group(gdata)
 
-            exp = Adw.ExpanderRow()
-            exp.set_title(gdata.get("title", ""))
-            exp.set_subtitle(f"Доступно приложений: {len(gdata.get('items', []))}")
-            exp.set_expanded(False)
-            pg.add(exp)
+    def _build_group(self, gdata):
+        """Рисует одну группу приложений (PreferencesGroup + ExpanderRow) и добавляет в body."""
+        pg = Adw.PreferencesGroup()
+        self._body.append(pg)
 
-            gid = gdata.get("id", "")
+        exp = Adw.ExpanderRow()
+        exp.set_title(gdata.get("title", ""))
+        exp.set_subtitle(f"Доступно приложений: {len(gdata.get('items', []))}")
+        exp.set_expanded(False)
+        pg.add(exp)
 
-            # Чекбокс группового выбора
-            group_rows = []
-            grp_cb = Gtk.CheckButton()
-            grp_cb.set_valign(Gtk.Align.CENTER)
-            grp_cb.set_tooltip_text("Выбрать / снять все в группе")
+        gid = gdata.get("id", "")
 
-            def _on_grp_cb_toggled(cb, rows=group_rows):
-                if getattr(self, "_refreshing_btn", False):
-                    return
-                if cb.get_inconsistent():
-                    cb.set_inconsistent(False)
-                    cb.set_active(True)
-                want = cb.get_active()
-                uninstalled = [r for r in rows if not r.is_installed()]
-                for r in uninstalled:
-                    r.set_selected(want)
-                self._refresh_btn_all()
+        # Чекбокс группового выбора
+        group_rows = []
+        grp_cb = Gtk.CheckButton()
+        grp_cb.set_valign(Gtk.Align.CENTER)
+        grp_cb.set_tooltip_text("Выбрать / снять все в группе")
 
-            grp_cb.connect("toggled", _on_grp_cb_toggled)
+        def _on_grp_cb_toggled(cb, rows=group_rows):
+            if getattr(self, "_refreshing_btn", False):
+                return
+            if cb.get_inconsistent():
+                cb.set_inconsistent(False)
+                cb.set_active(True)
+            want = cb.get_active()
+            uninstalled = [r for r in rows if not r.is_installed()]
+            for r in uninstalled:
+                r.set_selected(want)
+            self._refresh_btn_all()
 
-            # Галочка «все установлены» — в одной колонке с чекбоксом
-            grp_status = make_status_icon()
-            grp_status.set_visible(False)
+        grp_cb.connect("toggled", _on_grp_cb_toggled)
 
-            _grp_prefix = Gtk.Box()
-            _grp_prefix.set_valign(Gtk.Align.CENTER)
-            _grp_prefix.append(grp_cb)
-            _grp_prefix.append(grp_status)
-            exp.add_prefix(_grp_prefix)
+        # Галочка «все установлены» — в одной колонке с чекбоксом
+        grp_status = make_status_icon()
+        grp_status.set_visible(False)
 
-            self._group_checkboxes.append((grp_cb, grp_status, group_rows))
+        _grp_prefix = Gtk.Box()
+        _grp_prefix.set_valign(Gtk.Align.CENTER)
+        _grp_prefix.append(grp_cb)
+        _grp_prefix.append(grp_status)
+        exp.add_prefix(_grp_prefix)
 
-            add_btn = Gtk.Button()
-            add_btn.set_icon_name("list-add-symbolic")
-            add_btn.set_tooltip_text("Добавить приложение в эту группу")
-            add_btn.add_css_class("flat")
-            add_btn.connect("clicked", lambda _b, g=gid: self._on_add(g))
-            exp.add_suffix(add_btn)
+        self._group_checkboxes.append((grp_cb, grp_status, group_rows))
 
-            for app in gdata.get("items", []):
-                # Нормализация для AppRow
-                sources = []
-                if "sources" in app:
-                    sources = app["sources"]
-                elif "source" in app:
-                    sources = [app["source"]]
+        add_btn = Gtk.Button()
+        add_btn.set_icon_name("list-add-symbolic")
+        add_btn.set_tooltip_text("Добавить приложение в эту группу")
+        add_btn.add_css_class("flat")
+        add_btn.connect("clicked", lambda _b, g=gid: self._on_add(g))
+        exp.add_suffix(add_btn)
 
-                # Валидация источников (tuple check)
-                for s in sources:
-                    chk = s.get("check", [])
-                    s["check"] = tuple(chk) if isinstance(chk, list) else chk
+        for app in gdata.get("items", []):
+            # Нормализация для AppRow
+            sources = []
+            if "sources" in app:
+                sources = app["sources"]
+            elif "source" in app:
+                sources = [app["source"]]
 
-                app_n = dict(app, sources=sources)
-                row = AppRow(app_n, self._log, self._refresh_btn_all)
-                self._rows.append(row)
-                group_rows.append(row)
-                exp.add_row(row)
+            # Валидация источников (tuple check)
+            for s in sources:
+                chk = s.get("check", [])
+                s["check"] = tuple(chk) if isinstance(chk, list) else chk
 
-                gid2 = gdata.get("id", "")
+            app_n = dict(app, sources=sources)
+            row = AppRow(app_n, self._log, self._refresh_btn_all)
+            self._rows.append(row)
+            group_rows.append(row)
+            exp.add_row(row)
 
-                edit_btn = Gtk.Button()
-                edit_btn.set_icon_name("document-edit-symbolic")
-                edit_btn.set_tooltip_text("Редактировать")
-                edit_btn.set_valign(Gtk.Align.CENTER)
-                edit_btn.add_css_class("flat")
-                edit_btn.add_css_class("circular")
-                edit_btn.connect("clicked", lambda _b, a=app, g=gid2: self._on_edit(a, g))
-                row.add_suffix(edit_btn)
+            edit_btn = Gtk.Button()
+            edit_btn.set_icon_name("document-edit-symbolic")
+            edit_btn.set_tooltip_text("Редактировать")
+            edit_btn.set_valign(Gtk.Align.CENTER)
+            edit_btn.add_css_class("flat")
+            edit_btn.add_css_class("circular")
+            edit_btn.connect("clicked", lambda _b, a=app, g=gid: self._on_edit(a, g))
+            row.add_suffix(edit_btn)
 
-                del_btn = Gtk.Button()
-                del_btn.set_icon_name("list-remove-symbolic")
-                del_btn.set_tooltip_text("Убрать из списка")
-                del_btn.set_valign(Gtk.Align.CENTER)
-                del_btn.add_css_class("flat")
-                del_btn.add_css_class("circular")
-                del_btn.connect("clicked", lambda _b, a=app, g=gid2: self._on_delete(a, g))
-                row.add_suffix(del_btn)
+            del_btn = Gtk.Button()
+            del_btn.set_icon_name("list-remove-symbolic")
+            del_btn.set_tooltip_text("Убрать из списка")
+            del_btn.set_valign(Gtk.Align.CENTER)
+            del_btn.add_css_class("flat")
+            del_btn.add_css_class("circular")
+            del_btn.connect("clicked", lambda _b, a=app, g=gid: self._on_delete(a, g))
+            row.add_suffix(del_btn)
 
     def _add_error_widgets(self):
         """Добавляет виджеты с сообщением об ошибке и кнопкой сброса."""
@@ -802,10 +820,16 @@ class AppsPage(Gtk.Box):
         GLib.idle_add(self._load_and_build)
 
     def _do_delete(self, item, group_id):
-        for g in self._data.get("groups", []):
+        groups = self._data.get("groups", [])
+        for g in groups:
             if g.get("id") == group_id:
                 g["items"] = [it for it in g.get("items", []) if it.get("id") != item.get("id")]
                 break
+        # Удаляем пустую группу пользовательских приложений из JSON
+        self._data["groups"] = [
+            g for g in groups
+            if not (g.get("id") == "user_apps" and not g.get("items"))
+        ]
         self._write_json()
         GLib.idle_add(self._load_and_build)
 

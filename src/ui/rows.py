@@ -41,7 +41,7 @@ class SettingRow(Adw.ActionRow):
     """Строка настройки с кнопкой и индикатором статуса."""
 
     # ВАЖНО: Добавили аргумент done_label="Активировано" в конец
-    def __init__(self, icon, title, subtitle, btn_label, on_activate, check_fn, state_key, done_label="Активировано", on_undo=None, undo_label="Отменить", undo_icon="edit-undo-symbolic"):
+    def __init__(self, icon, title, subtitle, btn_label, on_activate, check_fn, state_key, done_label="Активировано", on_undo=None, undo_label="Отменить", undo_icon="edit-undo-symbolic", help_text=None):
         super().__init__()
         self.set_title(title)
         self.set_subtitle(subtitle)
@@ -60,7 +60,22 @@ class SettingRow(Adw.ActionRow):
         self._btn = make_button(btn_label)
         self._btn.connect("clicked", self._on_btn_clicked)
         self._btn.set_sensitive(False)
-        self.add_suffix(make_suffix_box(self._status, self._btn))
+
+        # Собираем суффикс
+        suffix_box = Gtk.Box(spacing=6)
+        suffix_box.set_valign(Gtk.Align.CENTER)
+
+        if help_text:
+            help_btn = Gtk.Button(icon_name="help-about-symbolic")
+            help_btn.add_css_class("flat")
+            help_btn.add_css_class("circular")
+            help_btn.set_valign(Gtk.Align.CENTER)
+            help_btn.set_tooltip_text(help_text)
+            suffix_box.append(help_btn)
+
+        suffix_box.append(self._status)
+        suffix_box.append(self._btn)
+        self.add_suffix(suffix_box)
 
         if config.state_get(state_key) is True:
             self._set_ui(True)

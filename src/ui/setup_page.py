@@ -12,18 +12,29 @@ from pathlib import Path
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, Gdk, GLib, Gtk
 
 import backend
 import config
 from widgets import make_button, make_icon, make_scrolled_page
 from ui.rows import SettingRow
 
-
 class SetupPage(Gtk.Box):
     def __init__(self, log_fn):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._log = log_fn
+
+        # CSS для цветных иконок каналов обновления (регистрируем здесь — дисплей уже готов)
+        _css = Gtk.CssProvider()
+        _css.load_from_data(b"""
+            .ab-icon-green { color: @success_color; }
+            .ab-icon-red   { color: @error_color;   }
+        """)
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), _css,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+        )
+
         scroll, body = make_scrolled_page()
         self._body = body
         self.append(scroll)
@@ -43,39 +54,62 @@ class SetupPage(Gtk.Box):
                 continue
         return False
 
-    def check_for_updates(self, manual=False, on_update_found=None):
-        """Проверяет наличие обновлений и показывает баннер или диалог.
+    @staticmethod
+    def _is_newer(version, current):
+        """True если version > current. Сравниваем только цифровые части (до дефиса)."""
+        if not version:
+            return False
+        try:
+            def _nums(v):
+                return [int(x) for x in v.split("-")[0].split(".")]
+            cur, lat = _nums(current), _nums(version)
+            max_len = max(len(cur), len(lat))
+            cur += [0] * (max_len - len(cur))
+            lat += [0] * (max_len - len(lat))
+            return lat > cur
+        except ValueError:
+            return False
 
-        on_update_found(version) — опциональный внешний callback, вызывается
-        из главного потока когда найдена новая версия (например, для баннера окна).
+    def check_for_updates(self, manual=False, on_update_found=None):
+        """Проверяет оба канала (stable + beta) и показывает раздел обновления.
+
+        on_update_found(version) — callback для окна (синий кружок + баннер).
+        Вызывается ТОЛЬКО при наличии stable-обновления.
+        Beta в авто-режиме не показывается — только при ручной проверке.
         """
         if manual:
             self._log("\n▶  Проверка обновлений...\n")
 
-        def on_result(version):
-            if not version:
-                if manual: GLib.idle_add(self._show_no_update_dialog)
+        _results = {}
+
+        def _maybe_show():
+            if "stable" not in _results or "beta" not in _results:
                 return
-            try:
-                current = [int(x) for x in config.VERSION.split(".")]
-                latest = [int(x) for x in version.split(".")]
-                # Нормализуем до одинаковой длины (5.6 vs 5.6.0 → [5,6,0] vs [5,6,0])
-                max_len = max(len(current), len(latest))
-                current += [0] * (max_len - len(current))
-                latest  += [0] * (max_len - len(latest))
-                if latest <= current:
-                    if manual: GLib.idle_add(self._show_no_update_dialog)
-                    return
-            except ValueError:
-                if manual: GLib.idle_add(self._show_no_update_dialog)
+            stable_ver = _results["stable"]
+            beta_ver   = _results["beta"]
+            has_stable_update = self._is_newer(stable_ver, config.VERSION)
+
+            # Авто-режим: только stable триггерит глобальное уведомление, beta скрыта
+            if not manual:
+                if has_stable_update and on_update_found:
+                    GLib.idle_add(on_update_found, stable_ver)
                 return
 
-            # ВАЖНО: вызываем из главного потока, т.к. работаем с GTK-виджетами
-            GLib.idle_add(self._on_update_found, version)
-            if on_update_found:
-                GLib.idle_add(on_update_found, version)
+            # Ручная проверка: показываем полный раздел с обоими каналами
+            GLib.idle_add(self._show_update_section, stable_ver, beta_ver)
+            if has_stable_update and on_update_found:
+                GLib.idle_add(on_update_found, stable_ver)
 
-        config.check_update(on_result)
+        def on_stable(v):
+            _results["stable"] = v
+            _maybe_show()
+
+        def on_beta(v):
+            _results["beta"] = v
+            _maybe_show()
+
+        config.check_update(on_stable)
+        config.check_update_beta(on_beta)
 
     def _show_no_update_dialog(self):
         self._log("✔  Новых обновлений не найдено.\n")
@@ -87,36 +121,76 @@ class SetupPage(Gtk.Box):
         dialog.set_default_response("ok")
         dialog.present(self.get_root())
 
-    def _on_update_found(self, version):
-        # Проверяем, не показан ли уже баннер
-        child = self._body.get_first_child()
-        while child:
-            if isinstance(child, Adw.PreferencesGroup) and child.get_title() == "Доступно обновление":
-                return  # Баннер уже есть
-            child = child.get_next_sibling()
+    def _show_update_section(self, stable_ver, beta_ver):
+        """Показывает раздел с двумя каналами: Stable и Beta."""
+        # Убираем старый раздел если есть
+        if hasattr(self, "_update_group") and self._update_group:
+            try:
+                self._body.remove(self._update_group)
+            except Exception:
+                pass
+            self._update_group = None
 
-        GLib.idle_add(self._show_update_banner, version)
+        # Оба канала недоступны — ничего нового
+        if not stable_ver and not beta_ver:
+            self._show_no_update_dialog()
+            return
 
-    def _show_update_banner(self, version):
         self._update_group = Adw.PreferencesGroup()
-        self._update_group.set_title("Доступно обновление")
+        self._update_group.set_title("Обновление ALT Booster")
         self._body.prepend(self._update_group)
 
-        row = Adw.ActionRow()
-        row.set_title(f"Новая версия {version}")
-        row.set_subtitle("Загрузим архив с GitHub, запустим install.sh и перезапустим утилиту")
-        row.add_prefix(Gtk.Image.new_from_icon_name("software-update-available-symbolic"))
+        # Пользователь на бета-канале если: суффикс "-" в VERSION или сам выбирал бета-канал ранее
+        is_on_beta = "-" in config.VERSION or config.state_get("update_channel") == "beta"
 
-        btn = make_button("Установить")
-        btn.add_css_class("suggested-action")
-        btn.connect("clicked", lambda b: self._do_update(b, version))
+        # ── Строка Stable ──────────────────────────────────────────────────
+        if stable_ver:
+            row = Adw.ActionRow()
+            _icon_s = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
+            _icon_s.add_css_class("ab-icon-green")
+            row.add_prefix(_icon_s)
 
-        row.add_suffix(btn)
-        self._update_group.add(row)
+            if self._is_newer(stable_ver, config.VERSION):
+                row.set_title(f"Стабильная  v{stable_ver}")
+                row.set_subtitle("Рекомендуемая версия")
+                btn = make_button("Установить")
+                btn.add_css_class("suggested-action")
+            elif is_on_beta:
+                row.set_title(f"Стабильная  v{stable_ver}")
+                row.set_subtitle("Последняя стабильная версия")
+                btn = make_button("Установить")
+            else:
+                row.set_title(f"Стабильная  v{stable_ver}  ✓")
+                row.set_subtitle("Установлена последняя версия")
+                btn = None
 
-    def _do_update(self, btn, version):
+            if btn:
+                btn.connect("clicked", lambda b, v=stable_ver: self._do_update(b, v, "stable"))
+                row.add_suffix(btn)
+            self._update_group.add(row)
+
+        # ── Строка Beta ────────────────────────────────────────────────────
+        if beta_ver:
+            row_b = Adw.ActionRow()
+            _icon_b = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
+            _icon_b.add_css_class("ab-icon-red")
+            row_b.add_prefix(_icon_b)
+            row_b.set_title(f"Бета  v{beta_ver}")
+
+            if is_on_beta and not self._is_newer(beta_ver, config.VERSION):
+                row_b.set_subtitle("Установлена · переустановить?")
+            else:
+                row_b.set_subtitle("Тестовая версия с новыми функциями")
+
+            btn_b = make_button("Установить бета")
+            btn_b.connect("clicked", lambda b, v=beta_ver: self._do_update(b, v, "beta"))
+            row_b.add_suffix(btn_b)
+            self._update_group.add(row_b)
+
+    def _do_update(self, btn, version, channel="stable"):
         # Защита от инъекции: версия приходит из GitHub API и подставляется в shell-команду.
-        if not re.fullmatch(r"\d+\.\d+(\.\d+)*", version):
+        # Допускаем суффикс вроде -beta, -rc1 и т.п.
+        if not re.fullmatch(r"\d+\.\d+(\.\d+)*(-[a-zA-Z0-9]+)?", version):
             self._log(f"✘  Неверный формат версии: {version!r}\n")
             return
 
@@ -153,6 +227,7 @@ class SetupPage(Gtk.Box):
                     self._update_group = None
 
                 if ok:
+                    config.state_set("update_channel", channel)
                     self._log("✔  Готово! Перезапуск через 2 сек...\n")
                     GLib.timeout_add(2000, self._restart_app)
                 else:

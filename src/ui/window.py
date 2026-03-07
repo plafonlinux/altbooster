@@ -15,7 +15,7 @@ import grp
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 import config
 import backend
@@ -29,6 +29,7 @@ from ui.apps_page import AppsPage
 from ui.extensions_page import ExtensionsPage
 from ui.terminal_page import TerminalPage
 from ui.davinci_page import DaVinciPage
+from ui.amd_page import AmdPage
 from ui.maintenance_page import MaintenancePage
 
 
@@ -92,7 +93,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 lbl.set_wrap(True)
                 return lbl
 
-        self._amd = _dp("amd")
+        self._amd = AmdPage(self._log)
 
         # Регистрируем все страницы в ViewStack; порядок определяет порядок вкладок
         for widget, name, title, icon in [
@@ -153,12 +154,46 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         mb.set_menu_model(menu)
         header.pack_end(mb)
 
-        # Кнопка проверки обновлений — рядом с бургером (левее него)
+        # Кнопка проверки обновлений — с синим кружком при наличии stable-обновления
         self._update_check_btn = Gtk.Button()
-        self._update_check_btn.set_icon_name("software-update-available-symbolic")
         self._update_check_btn.set_tooltip_text("Проверить обновления")
         self._update_check_btn.add_css_class("flat")
         self._update_check_btn.connect("clicked", self._check_for_updates)
+
+        _upd_icon = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
+        self._update_badge_dot = Gtk.Label(label="")
+        self._update_badge_dot.add_css_class("ab-update-dot")
+        self._update_badge_dot.set_halign(Gtk.Align.END)
+        self._update_badge_dot.set_valign(Gtk.Align.START)
+        self._update_badge_dot.set_visible(False)
+        _upd_overlay = Gtk.Overlay()
+        _upd_overlay.set_child(_upd_icon)
+        _upd_overlay.add_overlay(self._update_badge_dot)
+        self._update_check_btn.set_child(_upd_overlay)
+
+        # CSS кружка — регистрируем один раз при построении хедера
+        _dot_css = Gtk.CssProvider()
+        _dot_css.load_from_data(b"""
+            .ab-update-dot {
+                background-color: @accent_color;
+                border-radius: 999px;
+                min-width: 9px;
+                min-height: 9px;
+                border: 1.5px solid @window_bg_color;
+                padding: 0;
+                font-size: 0;
+            }
+            viewswitcher button {
+                min-width: 0;
+                padding-left: 12px;
+                padding-right: 12px;
+            }
+        """)
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), _dot_css,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+        )
+
         header.pack_end(self._update_check_btn)
 
         # Регистрируем действия меню как GAction на уровне окна
@@ -307,6 +342,12 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         box.append(_flat_row("Экспортировать в файл…",  "document-send-symbolic",   self._on_preset_export_file))
         box.append(_flat_row("Импортировать из файла…", "document-open-symbolic",   self._on_preset_import_file))
 
+        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        # ── Отдельный экспорт расширений и приложений ────────────────────────
+        box.append(_flat_row("Экспорт расширений…",    "application-x-addon-symbolic",       self._on_export_extensions))
+        box.append(_flat_row("Экспорт приложений…",    "application-x-executable-symbolic",  self._on_export_apps))
+
         self._preset_popover.set_child(box)
 
     def _on_preset_selected(self, name: str):
@@ -436,9 +477,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                         GLib.idle_add(self._log, f"✘ Ошибка экспорта: {e}\n")
 
                 threading.Thread(target=_collect, daemon=True).start()
-            except Exception as e:
-                self._log(f"✘ Ошибка экспорта: {e}\n")
+            except GLib.Error as e:
+                if e.code != 2:  # 2 = Dismissed by user — не ошибка
+                    self._log(f"✘ Ошибка экспорта: {e}\n")
 
+        self._file_dialog = dialog  # держим ссылку, иначе GC уничтожит до колбэка
         dialog.save(self, None, _on_save)
 
     def _on_preset_import_file(self, *_):
@@ -459,10 +502,151 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 file = d.open_finish(res)
                 if file:
                     self._load_and_show_preset(file.get_path())
-            except Exception as e:
-                self._log(f"✘ Ошибка выбора файла: {e}\n")
+            except GLib.Error as e:
+                if e.code != 2:  # 2 = Dismissed by user — не ошибка
+                    self._log(f"✘ Ошибка выбора файла: {e}\n")
 
+        self._file_dialog = dialog  # держим ссылку, иначе GC уничтожит до колбэка
         dialog.open(self, None, _on_open)
+
+    def _on_export_extensions(self, *_):
+        """Экспорт расширений: диалог выбора — только список или список + конфиги."""
+        self._preset_popover.popdown()
+
+        d = Adw.AlertDialog(
+            heading="Экспорт расширений",
+            body="Что включить в файл экспорта?",
+        )
+        d.add_response("list",   "Только список")
+        d.add_response("full",   "Список + настройки")
+        d.add_response("cancel", "Отмена")
+        d.set_default_response("full")
+        d.set_close_response("cancel")
+
+        def _on_choice(_, response):
+            if response == "cancel":
+                return
+
+            include_dconf = (response == "full")
+
+            def _collect_and_save():
+                # Собираем данные в фоне, потом открываем диалог в main thread
+                try:
+                    r_list = subprocess.run(
+                        ["gnome-extensions", "list", "--enabled"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    enabled = [u.strip() for u in r_list.stdout.splitlines() if u.strip()]
+
+                    ext_data: dict = {"altbooster_extensions_backup": True, "extensions": enabled}
+
+                    if include_dconf:
+                        r_dconf = subprocess.run(
+                            ["dconf", "dump", "/org/gnome/shell/extensions/"],
+                            capture_output=True, text=True, timeout=10,
+                        )
+                        ext_data["extensions_dconf"] = r_dconf.stdout if r_dconf.returncode == 0 else ""
+
+                    GLib.idle_add(_show_save_dialog, ext_data)
+                except Exception as e:
+                    GLib.idle_add(self._log, f"✘ Ошибка сбора данных расширений: {e}\n")
+
+            def _show_save_dialog(ext_data):
+                import datetime as _dt
+                date_str = _dt.datetime.now().strftime("%Y-%m-%d")
+                suffix = "-full" if include_dconf else "-list"
+                filename = f"extensions{suffix}-{date_str}.json"
+
+                fdialog = Gtk.FileDialog()
+                fdialog.set_title("Экспорт расширений")
+                fdialog.set_initial_name(filename)
+
+                flt = Gtk.FileFilter()
+                flt.set_name("JSON (*.json)")
+                flt.add_pattern("*.json")
+                filters = Gio.ListStore.new(Gtk.FileFilter)
+                filters.append(flt)
+                fdialog.set_filters(filters)
+
+                def _on_save(fd, res):
+                    try:
+                        file = fd.save_finish(res)
+                        if not file:
+                            return
+                        import json as _json
+                        from pathlib import Path as _P
+                        _P(file.get_path()).write_text(
+                            _json.dumps(ext_data, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                        self._log(f"✔ Расширения экспортированы в {file.get_path()}\n")
+                        self.add_toast(Adw.Toast(title="Расширения экспортированы"))
+                    except GLib.Error as e:
+                        if e.code != 2:
+                            self._log(f"✘ Ошибка сохранения: {e}\n")
+
+                self._file_dialog = fdialog  # держим ссылку, иначе GC уничтожит до колбэка
+                fdialog.save(self, None, _on_save)
+
+            threading.Thread(target=_collect_and_save, daemon=True).start()
+
+        d.connect("response", _on_choice)
+        d.present(self)
+
+    def _on_export_apps(self, *_):
+        """Экспорт списка установленных приложений в JSON-файл."""
+        self._preset_popover.popdown()
+
+        self._log("💾 Собираю список установленных приложений...\n")
+
+        def _collect():
+            try:
+                apps = profile_module._get_installed_apps(self._apps._data)
+                apps_data = {
+                    "altbooster_apps_backup": True,
+                    "apps": apps,
+                }
+                GLib.idle_add(_show_save_dialog, apps_data)
+            except Exception as e:
+                GLib.idle_add(self._log, f"✘ Ошибка сбора приложений: {e}\n")
+
+        def _show_save_dialog(apps_data):
+            import datetime as _dt
+            date_str = _dt.datetime.now().strftime("%Y-%m-%d")
+
+            fdialog = Gtk.FileDialog()
+            fdialog.set_title("Экспорт приложений")
+            fdialog.set_initial_name(f"apps-{date_str}.json")
+
+            flt = Gtk.FileFilter()
+            flt.set_name("JSON (*.json)")
+            flt.add_pattern("*.json")
+            filters = Gio.ListStore.new(Gtk.FileFilter)
+            filters.append(flt)
+            fdialog.set_filters(filters)
+
+            def _on_save(fd, res):
+                try:
+                    file = fd.save_finish(res)
+                    if not file:
+                        return
+                    import json as _json
+                    from pathlib import Path as _P
+                    _P(file.get_path()).write_text(
+                        _json.dumps(apps_data, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    count = len(apps_data["apps"])
+                    self._log(f"✔ Приложения экспортированы ({count} шт.) в {file.get_path()}\n")
+                    self.add_toast(Adw.Toast(title=f"Приложения экспортированы ({count})"))
+                except GLib.Error as e:
+                    if e.code != 2:
+                        self._log(f"✘ Ошибка сохранения: {e}\n")
+
+            self._file_dialog = fdialog  # держим ссылку, иначе GC уничтожит до колбэка
+            fdialog.save(self, None, _on_save)
+
+        threading.Thread(target=_collect, daemon=True).start()
 
     def _load_and_show_preset(self, path_str: str):
         """Загружает .altbooster файл и показывает диалог применения."""
@@ -535,10 +719,22 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                     cmds.append((app_info.get("label", app_info["id"]), cmd, kind))
 
         if flags.get("extensions"):
+            import pathlib as _pl
+            _system_ext_dir = _pl.Path("/usr/share/gnome-shell/extensions")
             gext = shutil.which("gext") or str(
-                __import__("pathlib").Path.home() / ".local" / "bin" / "gext"
+                _pl.Path.home() / ".local" / "bin" / "gext"
             )
+
+            installed_uuids = set()
+            try:
+                r_list = subprocess.run(["gnome-extensions", "list"], capture_output=True, text=True)
+                installed_uuids = set(line.strip() for line in r_list.stdout.splitlines() if line.strip())
+            except Exception:
+                pass
+
             for uuid in data.get("extensions") or []:
+                if uuid in installed_uuids or (_system_ext_dir / uuid).exists():
+                    continue
                 cmds.append((uuid, [gext, "install", uuid], "shell"))
 
         if not cmds:
@@ -551,6 +747,16 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         def _worker():
             ok_count = 0
+
+            # Проверяем prerequisites: если среди команд есть flatpak — убеждаемся что он установлен
+            has_flatpak_src = any(
+                cmd and cmd[0] == "flatpak"
+                for _, cmd, _ in cmds
+            )
+            if has_flatpak_src and not shutil.which("flatpak"):
+                GLib.idle_add(self._log, "▶ Flatpak не найден, устанавливаю...\n")
+                backend.run_epm_sync(["epm", "-i", "-y", "flatpak"], lambda l: GLib.idle_add(self._log, l))
+
             for label, cmd, kind in cmds:
                 GLib.idle_add(self._log, f"📦 {label}...\n")
                 if kind == "epm":
@@ -564,6 +770,23 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                     ok = backend.run_privileged_sync(cmd, lambda l: GLib.idle_add(self._log, l))
                 if ok:
                     ok_count += 1
+
+            # После установки расширений — восстанавливаем их dconf-настройки
+            # (схемы должны быть уже зарегистрированы после установки)
+            dconf_text = data.get("extensions_dconf", "")
+            if dconf_text and flags.get("extensions"):
+                GLib.idle_add(self._log, "▶ Восстанавливаю конфиги расширений...\n")
+                try:
+                    proc = subprocess.run(
+                        ["dconf", "load", "/org/gnome/shell/extensions/"],
+                        input=dconf_text, text=True, capture_output=True,
+                    )
+                    if proc.returncode == 0:
+                        GLib.idle_add(self._log, "✔ Конфиги расширений восстановлены.\n")
+                    else:
+                        GLib.idle_add(self._log, f"⚠ dconf load: {proc.stderr.strip()}\n")
+                except Exception as e:
+                    GLib.idle_add(self._log, f"⚠ dconf load: {e}\n")
 
             GLib.idle_add(self.stop_progress, ok_count == total)
             GLib.idle_add(
@@ -654,11 +877,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 config.state_set("dismissed_profiles", dismissed)
 
     def _on_update_found_global(self, version):
-        """Показывает глобальный баннер обновления и подсвечивает кнопку в хедере."""
+        """Показывает баннер и синий кружок — вызывается только для stable-обновления."""
         self._update_banner_label.set_text(f"Доступна новая версия {version}")
         self._update_banner_revealer.set_reveal_child(True)
-        # Подсвечиваем кнопку, чтобы было заметно на любой вкладке
-        self._update_check_btn.add_css_class("suggested-action")
+        self._update_badge_dot.set_visible(True)
 
     def _go_to_update(self, *_):
         """Переходит на вкладку «Начало» и скрывает баннер."""
@@ -960,7 +1182,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def _check_for_updates(self, *_):
         """Переключается на вкладку «Начало» и запускает проверку обновлений."""
         self._stack.set_visible_child_name("setup")
-        self._update_check_btn.remove_css_class("suggested-action")
+        self._update_badge_dot.set_visible(False)
         self._setup.check_for_updates(manual=True, on_update_found=self._on_update_found_global)
 
     def _show_about(self, *_):
@@ -968,7 +1190,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.set_application_name("ALT Booster")
         d.set_application_icon("altbooster")
         d.set_developer_name("PLAFON")
-        d.set_version(config.VERSION)
+        d.set_version("5.6.6")
         d.set_issue_url("https://github.com/plafonlinux/altbooster/issues")
         d.set_comments("ALT Booster — утилита-компаньон для настройки ALT Рабочая станция (GNOME)")
         d.set_license_type(Gtk.License.MIT_X11)
