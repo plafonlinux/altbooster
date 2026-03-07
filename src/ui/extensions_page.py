@@ -66,6 +66,12 @@ RECOMMENDED = [
         "3193",
     ),
     (
+        "pigeon@subz69.gmail.com",
+        "Pigeon Email Notifier",
+        "Показывает уведомления о новых письмах для IMAP-аккаунтов",
+        "9301",
+    ),
+    (
         "auto-accent-colour@Wartybix",
         "Auto Accent Colour",
         "Автоматический цвет акцента под обои",
