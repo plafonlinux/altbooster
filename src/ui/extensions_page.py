@@ -32,73 +32,73 @@ RECOMMENDED = [
     (
         "appindicatorsupport@rgcjonas.gmail.com",
         "AppIndicator and KStatusNotifierItem",
-        "Добавляет поддержку значков приложений (трея) в верхнюю панель.",
+        "Добавляет поддержку системного лотка для старых приложений.",
         "615",
     ),
     (
         "Vitals@CoreCoding.com",
         "Vitals",
-        "Отображает температуру, напряжение, скорость вентиляторов и другую информацию о системе.",
+        "Системный монитор (CPU, RAM, сеть) в верхней панели.",
         "1460",
     ),
     (
         "just-perfection-desktop@just-perfection",
         "Just Perfection",
-        "Позволяет отключать и настраивать различные элементы интерфейса GNOME.",
+        "Тонкая настройка множества элементов интерфейса GNOME.",
         "3843",
     ),
     (
         "dash-to-dock@micxgx.gmail.com",
         "Dash to Dock",
-        "Превращает стандартную панель GNOME в док-панель в стиле macOS.",
+        "Превращает панель GNOME в док-станцию в стиле macOS.",
         "307",
     ),
     (
         "dash-to-panel@jderose9.github.com",
         "Dash to Panel",
-        "Объединяет верхнюю панель и док в единую панель в стиле Windows.",
+        "Создаёт единую панель задач в стиле Windows/KDE.",
         "1160",
     ),
     (
         "blur-my-shell@aunetx",
         "Blur my Shell",
-        "Добавляет эффект размытия в обзор, панель и другие элементы Shell.",
+        "Эффект размытия для обзора, панели и других элементов.",
         "3193",
     ),
     (
-        "pigeon@subz69.gmail.com",
+        "pigeon@subz69.github",
         "Pigeon Email Notifier",
-        "Показывает уведомления о новых письмах для учётных записей IMAP.",
+        "Уведомления о новых письмах для почтовых ящиков IMAP.",
         "9301",
     ),
     (
         "auto-accent-colour@Wartybix",
         "Auto Accent Colour",
-        "Автоматически изменяет цвет акцента системы на основе обоев.",
+        "Автоматически подбирает цвет акцента под обои рабочего стола.",
         "7502",
     ),
     (
         "rounded-window-corners@fxgn",
         "Rounded Window Corners Reborn",
-        "Добавляет скругление углов для окон приложений.",
+        "Скругляет углы окон приложений.",
         "7048",
     ),
     (
         "ding@rastersoft.com",
         "Desktop Icons NG (DING)",
-        "Отображает иконки на рабочем столе.",
+        "Добавляет иконки на рабочий стол.",
         "2087",
     ),
     (
         "no-overview@fthx",
         "No Overview at Startup",
-        "Отключает показ обзора при запуске и выходе из приложений.",
+        "Отключает обзор при запуске сеанса.",
         "4099",
     ),
     (
         "status-tray@keithvassallo.com",
         "Status Tray",
-        "Позволяет настраивать значки в системном лотке (трее).",
+        "Позволяет группировать и скрывать значки в системном лотке.",
         "9164",
     ),
 ]
@@ -119,7 +119,7 @@ def _gext_path() -> str | None:
     return None
 
 
-def _fix_float_versions_in_metadata(log_fn: Callable[[str], None] | None = None) -> list[str]:
+def _fix_float_versions_in_metadata(log_fn: Callable[[str], None] | None = None) -> tuple[list[str], list[str]]:
     """Исправляет float-версии в metadata.json установленных расширений.
 
     gnome-extensions-cli использует pydantic для парсинга metadata.json.
@@ -130,19 +130,41 @@ def _fix_float_versions_in_metadata(log_fn: Callable[[str], None] | None = None)
     Фикс: преобразуем float → str ("7.6"). GNOME Shell сам хранит версии
     как строки, так что это безопасно.
 
-    Возвращает список исправленных файлов (для лога).
+    Для системных расширений пробуем исправить через sudo -n tee (без промпта).
+    Если нет кэшированных прав — добавляем в broken_system, что сигнализирует
+    вызывающему коду пропустить gext и использовать нативный метод установки.
+
+    Возвращает (исправленные_пользовательские, сломанные_системные).
     """
     fixed = []
-    
-    # Проверка системных расширений (только лог, так как нет прав на запись)
+    broken_system = []
+
+    # Системные расширения: пробуем исправить через sudo -n (non-interactive)
     for meta_path in _SYSTEM_EXT_DIR.glob("*/metadata.json"):
         try:
             data = json.loads(meta_path.read_text(encoding="utf-8"))
-            if isinstance(data.get("version"), float) and log_fn:
-                log_fn(f"⚠  Системное расширение {meta_path.parent.name} имеет версию в формате float ({data['version']}). Это может вызвать сбой gext.\n")
+            orig_ver = data.get("version")
+            if isinstance(orig_ver, float):
+                data["version"] = str(orig_ver)
+                new_text = json.dumps(data, ensure_ascii=False, indent=2)
+                r = subprocess.run(
+                    ["sudo", "-n", "tee", str(meta_path)],
+                    input=new_text, capture_output=True, text=True,
+                )
+                if r.returncode == 0:
+                    if log_fn:
+                        log_fn(f"✔  Исправлена float-версия в системном расширении {meta_path.parent.name}\n")
+                else:
+                    broken_system.append(meta_path.parent.name)
+                    if log_fn:
+                        log_fn(
+                            f"⚠  Системное расширение {meta_path.parent.name} имеет версию float ({orig_ver}). "
+                            f"Исправить без прав не удалось — будет использован нативный метод установки.\n"
+                        )
         except Exception:
             pass
 
+    # Пользовательские расширения: исправляем напрямую
     for meta_path in _USER_EXT_DIR.glob("*/metadata.json"):
         try:
             text = meta_path.read_text(encoding="utf-8")
@@ -154,7 +176,7 @@ def _fix_float_versions_in_metadata(log_fn: Callable[[str], None] | None = None)
                 fixed.append(meta_path.parent.name)
         except Exception:
             pass
-    return fixed
+    return fixed, broken_system
 
 
 def _is_ext_installed(uuid: str) -> bool:
@@ -351,20 +373,20 @@ class ExtensionsPage(Gtk.Box):
         def _do():
             gext = self._ensure_gext()
             
-            fixed = _fix_float_versions_in_metadata(self._log)
+            fixed, broken_system = _fix_float_versions_in_metadata(self._log)
             if fixed:
                 GLib.idle_add(self._log, f"⚠  Исправлены float-версии в metadata.json: {', '.join(fixed)}\n")
 
             ok = False
             err_msg = ""
-            if gext:
+            if gext and not broken_system:
                 r = subprocess.run([gext, "install", ext_id], capture_output=True, text=True)
                 if r.stdout:
                     GLib.idle_add(self._log, r.stdout)
                 ok = (r.returncode == 0)
                 if not ok:
                     err_msg = r.stderr.strip()
-            
+
             if not ok:
                 ok, _ = self._install_native_fallback(ext_id)
 
@@ -516,6 +538,9 @@ class ExtensionsPage(Gtk.Box):
             self._installed_group.add(row)
             return
 
+        # Русские описания из RECOMMENDED для подстановки в установленные расширения
+        rec_desc_by_uuid = {r[0]: r[2] for r in RECOMMENDED}
+
         if user_exts or missing_recs:
             exp = Adw.ExpanderRow()
             exp.set_title("Пользовательские")
@@ -525,7 +550,9 @@ class ExtensionsPage(Gtk.Box):
             exp.set_subtitle(count_str)
             exp.set_expanded(True)
             for uuid, name, desc in user_exts:
-                exp.add_row(self._make_installed_row(uuid, name, desc, uuid in enabled, is_user=True))
+                # Предпочитаем русское описание из RECOMMENDED, иначе оригинальное из metadata.json
+                display_desc = rec_desc_by_uuid.get(uuid) or desc
+                exp.add_row(self._make_installed_row(uuid, name, display_desc, uuid in enabled, is_user=True))
             for r in missing_recs:
                 uuid, name, desc = r[0], r[1], r[2]
                 install_id = r[3] if len(r) > 3 else None
@@ -538,7 +565,8 @@ class ExtensionsPage(Gtk.Box):
             exp.set_subtitle(f"{len(visible_system_exts)} расш.")
             exp.set_expanded(False)
             for uuid, name, desc in visible_system_exts:
-                exp.add_row(self._make_installed_row(uuid, name, desc, uuid in enabled, is_user=False))
+                display_desc = rec_desc_by_uuid.get(uuid) or desc
+                exp.add_row(self._make_installed_row(uuid, name, display_desc, uuid in enabled, is_user=False))
             self._installed_group.add(exp)
 
     def _make_installed_row(self, uuid: str, name: str, desc: str, enabled: bool, is_user: bool = False) -> Adw.ActionRow:
@@ -650,14 +678,14 @@ class ExtensionsPage(Gtk.Box):
         def _do():
             gext = self._ensure_gext()
             
-            fixed = _fix_float_versions_in_metadata(self._log)
+            fixed, broken_system = _fix_float_versions_in_metadata(self._log)
             if fixed:
                 GLib.idle_add(self._log, f"⚠  Исправлены float-версии в metadata.json: {', '.join(fixed)}\n")
 
             target = install_id if install_id else uuid
             ok = False
             err_msg = ""
-            if gext:
+            if gext and not broken_system:
                 r = subprocess.run([gext, "install", target], capture_output=True, text=True)
                 if r.stdout: GLib.idle_add(self._log, r.stdout)
                 ok = (r.returncode == 0)
