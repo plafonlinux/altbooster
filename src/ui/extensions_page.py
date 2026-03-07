@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
+import tempfile
 import time
 import threading
 import urllib.parse
@@ -191,6 +193,54 @@ class ExtensionsPage(Gtk.Box):
 
     # ── Секция: Поиск и установка ─────────────────────────────────────────────
 
+    def _get_shell_version(self) -> str:
+        """Определяет версию GNOME Shell для запроса к API."""
+        try:
+            r = subprocess.run(["gnome-shell", "--version"], capture_output=True, text=True)
+            # "GNOME Shell 47.4" -> "47"
+            m = re.search(r"(\d+)", r.stdout)
+            return m.group(1) if m else "47"
+        except Exception:
+            return "47"
+
+    def _install_native_fallback(self, target_id: str, uuid_hint: str = None) -> tuple[bool, str | None]:
+        """Нативный метод установки без использования gnome-extensions-cli.
+        
+        Использует API extensions.gnome.org и системную команду 'gnome-extensions install'.
+        """
+        GLib.idle_add(self._log, "⚠  gext дал сбой. Пробую нативный метод установки...\n")
+        try:
+            shell_ver = self._get_shell_version()
+            # API принимает либо pk (числовой ID), либо uuid
+            key = "pk" if target_id.isdigit() else "uuid"
+            url = f"https://extensions.gnome.org/extension-info/?{key}={target_id}&shell_version={shell_ver}"
+            
+            req = urllib.request.Request(url, headers={"User-Agent": "ALTBooster"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            
+            dl_path = data.get("download_url")
+            if not dl_path:
+                raise ValueError("Не удалось найти версию для вашего GNOME Shell")
+            
+            uuid = data.get("uuid")
+            full_url = f"https://extensions.gnome.org{dl_path}"
+            
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                urllib.request.urlretrieve(full_url, tmp.name)
+                zip_path = tmp.name
+            
+            # Нативная установка (force перезаписывает если уже есть)
+            subprocess.run(["gnome-extensions", "install", "--force", zip_path], check=True)
+            os.unlink(zip_path)
+            
+            if uuid:
+                subprocess.run(["gnome-extensions", "enable", uuid])
+            return True, uuid
+        except Exception as e:
+            GLib.idle_add(self._log, f"✘  Нативный метод тоже не помог: {e}\n")
+            return False, None
+
     def _build_search_group(self):
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         box.set_margin_top(12)
@@ -290,7 +340,12 @@ class ExtensionsPage(Gtk.Box):
             r = subprocess.run([gext, "install", ext_id], capture_output=True, text=True)
             if r.stdout:
                 GLib.idle_add(self._log, r.stdout)
-            ok = r.returncode == 0
+            
+            # Если gext упал (например, из-за pydantic), пробуем нативный метод
+            if r.returncode != 0:
+                ok, _ = self._install_native_fallback(ext_id)
+            else:
+                ok = True
 
             def _finish():
                 if ok:
@@ -618,7 +673,12 @@ class ExtensionsPage(Gtk.Box):
             r = subprocess.run([gext, "install", target], capture_output=True, text=True)
             if r.stdout:
                 GLib.idle_add(self._log, r.stdout)
-            ok = r.returncode == 0
+            
+            # Fallback если gext сломан
+            if r.returncode != 0:
+                ok, _ = self._install_native_fallback(target, uuid_hint=uuid)
+            else:
+                ok = True
             
             if ok:
                 self._log("✔  Установлено!\n")
