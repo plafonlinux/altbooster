@@ -29,6 +29,7 @@ from ui.apps_page import AppsPage
 from ui.extensions_page import ExtensionsPage
 from ui.terminal_page import TerminalPage
 from ui.davinci_page import DaVinciPage
+from ui.amd_page import AmdPage
 from ui.maintenance_page import MaintenancePage
 
 
@@ -92,7 +93,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 lbl.set_wrap(True)
                 return lbl
 
-        self._amd = _dp("amd")
+        self._amd = AmdPage(self._log)
 
         # Регистрируем все страницы в ViewStack; порядок определяет порядок вкладок
         for widget, name, title, icon in [
@@ -181,6 +182,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 border: 1.5px solid @window_bg_color;
                 padding: 0;
                 font-size: 0;
+            }
+            viewswitcher button {
+                min-width: 0;
+                padding-left: 12px;
+                padding-right: 12px;
             }
         """)
         Gtk.StyleContext.add_provider_for_display(

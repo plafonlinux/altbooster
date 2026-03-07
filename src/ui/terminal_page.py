@@ -243,27 +243,37 @@ class TerminalPage(Gtk.Box):
         group = Adw.PreferencesGroup()
         group.set_title("Ptyxis")
         group.set_description("Современный терминал GNOME, заменяет gnome-terminal")
+        
+        # Кнопка "Применить всё" в заголовке группы
+        btn_all = Gtk.Button(label="Применить всё")
+        btn_all.set_valign(Gtk.Align.CENTER)
+        btn_all.add_css_class("suggested-action")
+        btn_all.connect("clicked", self._on_apply_all)
+        group.set_header_suffix(btn_all)
+        
         body.append(group)
 
         # 1. Установить Ptyxis
-        group.add(SettingRow(
+        self._row_ptyxis_install = SettingRow(
             "utilities-terminal-symbolic", "Установить Ptyxis",
             "epmi ptyxis + удалить gnome-terminal", "Установить",
             self._on_install_ptyxis,
             lambda: backend.check_app_installed({"check": ["which", "ptyxis"]}),
             "term_ptyxis_install", "Установлен",
             self._on_remove_ptyxis, "Удалить", "user-trash-symbolic"
-        ))
+        )
+        group.add(self._row_ptyxis_install)
 
         # 2. Ptyxis по умолчанию
-        group.add(SettingRow(
+        self._row_ptyxis_default = SettingRow(
             "starred-symbolic", "Ptyxis по умолчанию",
             "xdg-mime default org.gnome.Ptyxis.desktop", "Применить",
             self._on_ptyxis_default,
             self._check_ptyxis_default,
             "term_ptyxis_default", "Применено",
             self._on_ptyxis_default_undo, "Сбросить"
-        ))
+        )
+        group.add(self._row_ptyxis_default)
 
     def _on_install_ptyxis(self, row):
         row.set_working()
@@ -329,24 +339,26 @@ class TerminalPage(Gtk.Box):
         body.append(group)
 
         # 1. Terminal 1
-        group.add(SettingRow(
+        self._row_shortcut_1 = SettingRow(
             "input-keyboard-symbolic", "Terminal 1",
             "Ctrl + Alt + T", "Назначить",
             lambda r: self._set_shortcut(r, "custom0", "Terminal", "ptyxis --new-window", "<Control><Alt>t", "<Primary><Alt>t"),
             lambda: self._check_shortcut("custom0", "<Control><Alt>t"),
             "term_shortcut_1", "Назначен",
             lambda r: self._remove_shortcut(r, "custom0"), "Сбросить"
-        ))
+        )
+        group.add(self._row_shortcut_1)
 
         # 2. Terminal 2
-        group.add(SettingRow(
+        self._row_shortcut_2 = SettingRow(
             "input-keyboard-symbolic", "Terminal 2",
             "Super + Enter", "Назначить",
             lambda r: self._set_shortcut(r, "custom1", "Terminal Super", "ptyxis --new-window", "<Super>Return"),
             lambda: self._check_shortcut("custom1", "<Super>Return"),
             "term_shortcut_2", "Назначен",
             lambda r: self._remove_shortcut(r, "custom1"), "Сбросить"
-        ))
+        )
+        group.add(self._row_shortcut_2)
 
     def _get_custom_bindings(self):
         val = backend.gsettings_get("org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings")
@@ -432,34 +444,37 @@ class TerminalPage(Gtk.Box):
         body.append(group)
 
         # 1. Установить git и zsh
-        group.add(SettingRow(
+        self._row_zsh_install = SettingRow(
             "utilities-terminal-symbolic", "Установить git и zsh",
             "apt-get install -y git zsh", "Установить",
             self._on_install_zsh,
             lambda: backend.check_app_installed({"check": ["which", "zsh"]}),
             "term_zsh_install", "Установлен",
             self._on_remove_zsh, "Удалить", "user-trash-symbolic"
-        ))
+        )
+        group.add(self._row_zsh_install)
 
         # 2. Установить zplug
-        group.add(SettingRow(
+        self._row_zplug_install = SettingRow(
             "utilities-terminal-symbolic", "Установить zplug",
             "git clone https://github.com/zplug/zplug ~/.zplug", "Установить",
             self._on_install_zplug,
             lambda: backend.check_app_installed({"check": ["path", "~/.zplug"]}),
             "term_zplug_install", "Установлен",
             self._on_remove_zplug, "Удалить", "user-trash-symbolic"
-        ))
+        )
+        group.add(self._row_zplug_install)
 
         # 3. ZSH по умолчанию
-        group.add(SettingRow(
+        self._row_zsh_default = SettingRow(
             "system-run-symbolic", "ZSH по умолчанию",
             "chsh -s /bin/zsh", "Применить",
             self._on_zsh_default,
             self._check_zsh_default,
             "term_zsh_default", "Применено",
             self._on_zsh_default_undo, "Сбросить"
-        ))
+        )
+        group.add(self._row_zsh_default)
 
     def _on_install_zsh(self, row):
         row.set_working()
@@ -532,44 +547,48 @@ class TerminalPage(Gtk.Box):
         body.append(group)
 
         # 1. Установить Fastfetch
-        group.add(SettingRow(
+        self._row_fastfetch_install = SettingRow(
             "dialog-information-symbolic", "Установить Fastfetch",
             "epmi fastfetch", "Установить",
             self._on_install_fastfetch,
             lambda: backend.check_app_installed({"check": ["which", "fastfetch"]}),
             "term_ff_install", "Установлен",
             self._on_remove_fastfetch, "Удалить", "user-trash-symbolic"
-        ))
+        )
+        group.add(self._row_fastfetch_install)
 
         # 2. Шрифт FiraCode Nerd Font
-        group.add(SettingRow(
+        self._row_font_install = SettingRow(
             "font-x-generic-symbolic", "Шрифт FiraCode Nerd Font",
             "epmi fonts-ttf-fira-code-nerd", "Установить",
             self._on_install_font,
             lambda: backend.check_app_installed({"check": ["rpm", "fonts-ttf-fira-code-nerd"]}),
             "term_font_install", "Установлен",
             self._on_remove_font, "Удалить", "user-trash-symbolic"
-        ))
+        )
+        group.add(self._row_font_install)
 
         # 3. Применить шрифт в Ptyxis
-        group.add(SettingRow(
+        self._row_font_apply = SettingRow(
             "font-x-generic-symbolic", "Применить шрифт в Ptyxis",
             "FiraCode Nerd Font Regular 14", "Применить",
             self._on_apply_font,
             self._check_ptyxis_font,
             "term_font_apply", "Применён",
             self._on_apply_font_undo, "Сбросить"
-        ))
+        )
+        group.add(self._row_font_apply)
 
         # 4. Конфиг plafonfetch.jsonc
-        group.add(SettingRow(
+        self._row_ff_config = SettingRow(
             "document-save-symbolic", "Конфиг Fastfetch (Default)",
             "Сохраняет в ~/.config/fastfetch/config.jsonc", "Установить",
             self._on_install_ff_config,
             lambda: backend.check_app_installed({"check": ["path", "~/.config/fastfetch/config.jsonc"]}),
             "term_ff_config", "Установлен",
             self._on_remove_ff_config, "Удалить", "user-trash-symbolic"
-        ))
+        )
+        group.add(self._row_ff_config)
 
     def _on_install_fastfetch(self, row):
         row.set_working()
@@ -670,14 +689,15 @@ class TerminalPage(Gtk.Box):
         group.set_description("Добавляет набор алиасов в ~/.zshrc")
         body.append(group)
 
-        group.add(SettingRow(
+        self._row_aliases = SettingRow(
             "text-editor-symbolic", "Добавить алиасы в .zshrc",
             "Алиасы для epm, flatpak, timeshift, DaVinci и др.", "Добавить",
             self._on_add_aliases,
             self._check_aliases,
             "term_aliases", "Добавлены",
             self._on_remove_aliases, "Удалить", "user-trash-symbolic"
-        ))
+        )
+        group.add(self._row_aliases)
 
     def _check_aliases(self):
         p = Path(os.path.expanduser("~/.zshrc"))
@@ -797,3 +817,107 @@ class TerminalPage(Gtk.Box):
             GLib.idle_add(self._log, "✔  Алиасы удалены\n")
             if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()
+
+    # ── Массовое применение ──────────────────────────────────────────────────
+
+    def _on_apply_all(self, btn):
+        btn.set_sensitive(False)
+        self._log("\n▶  Применение всех настроек терминала...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"): win.start_progress("Настройка терминала...")
+        threading.Thread(target=self._do_apply_all, args=(btn,), daemon=True).start()
+
+    def _do_apply_all(self, btn):
+        def run_step(row, action_name, sync_fn):
+            # Если уже активно/установлено — пропускаем
+            try:
+                if row._check_fn and row._check_fn():
+                    GLib.idle_add(row.set_done, True)
+                    return True
+            except Exception:
+                pass
+            
+            GLib.idle_add(row.set_working)
+            GLib.idle_add(self._log, f"▶  {action_name}...\n")
+            
+            try:
+                ok = sync_fn()
+            except Exception as e:
+                GLib.idle_add(self._log, f"✘  Ошибка: {e}\n")
+                ok = False
+            
+            GLib.idle_add(row.set_done, ok)
+            GLib.idle_add(self._log, f"{'✔' if ok else '✘'}  {action_name}\n")
+            return ok
+
+        # 1. Ptyxis
+        run_step(self._row_ptyxis_install, "Установка Ptyxis", 
+            lambda: backend.run_privileged_sync(["bash", "-c", "apt-get remove -y gnome-terminal 2>/dev/null || true && apt-get install -y ptyxis"], self._log))
+        
+        run_step(self._row_ptyxis_default, "Ptyxis по умолчанию",
+            lambda: subprocess.run(["xdg-mime", "default", "org.gnome.Ptyxis.desktop", "x-scheme-handler/terminal"]).returncode == 0)
+
+        # 2. Шорткаты
+        def _sync_shortcut(uid, name, cmd, binding):
+            path = f"/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/{uid}/"
+            schema = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:" + path
+            backend.run_gsettings(["set", schema, "name", f"'{name}'"])
+            backend.run_gsettings(["set", schema, "command", f"'{cmd}'"])
+            backend.run_gsettings(["set", schema, "binding", f"'{binding}'"])
+            current = self._get_custom_bindings()
+            if path not in current:
+                current.append(path)
+                array_str = "[" + ", ".join(f"'{p}'" for p in current) + "]"
+                backend.run_gsettings(["set", "org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings", array_str])
+            return True
+
+        run_step(self._row_shortcut_1, "Шорткат Terminal 1",
+            lambda: _sync_shortcut("custom0", "Terminal", "ptyxis --new-window", "<Control><Alt>t"))
+        
+        run_step(self._row_shortcut_2, "Шорткат Terminal 2",
+            lambda: _sync_shortcut("custom1", "Terminal Super", "ptyxis --new-window", "<Super>Return"))
+
+        # 3. ZSH
+        run_step(self._row_zsh_install, "Установка ZSH",
+            lambda: backend.run_privileged_sync(["apt-get", "install", "-y", "git", "zsh"], self._log))
+        
+        run_step(self._row_zplug_install, "Установка zplug",
+            lambda: subprocess.run(["git", "clone", "https://github.com/zplug/zplug", os.path.expanduser("~/.zplug")], capture_output=True).returncode == 0)
+        
+        run_step(self._row_zsh_default, "ZSH по умолчанию",
+            lambda: backend.run_privileged_sync(["chsh", "-s", "/bin/zsh", os.environ.get("USER")], self._log))
+
+        # 4. Fastfetch
+        run_step(self._row_fastfetch_install, "Установка Fastfetch",
+            lambda: backend.run_epm_sync(["epm", "-i", "fastfetch"], self._log))
+        
+        run_step(self._row_font_install, "Установка шрифта",
+            lambda: backend.run_epm_sync(["epm", "-i", "fonts-ttf-fira-code-nerd"], self._log))
+        
+        run_step(self._row_font_apply, "Применение шрифта",
+            lambda: subprocess.run(["dconf", "write", "/org/gnome/Ptyxis/Profiles/default/font-name", "'FiraCode Nerd Font Regular 14'"]).returncode == 0)
+        
+        def _sync_ff_config():
+            p = Path(os.path.expanduser("~/.config/fastfetch/config.jsonc"))
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(_FASTFETCH_CONFIG, encoding="utf-8")
+            return True
+        run_step(self._row_ff_config, "Конфиг Fastfetch", _sync_ff_config)
+
+        # 5. Алиасы
+        def _sync_aliases():
+            p = Path(os.path.expanduser("~/.zshrc"))
+            content = p.read_text(encoding="utf-8") if p.exists() else ""
+            if "# --- ALT Booster Aliases ---" not in content:
+                text = _ALIASES_BLOCK.strip()
+                if not text.startswith("\n"): text = "\n" + text
+                if not text.endswith("\n"): text = text + "\n"
+                with open(p, "a", encoding="utf-8") as f:
+                    f.write(text)
+            return True
+        run_step(self._row_aliases, "Алиасы", _sync_aliases)
+
+        GLib.idle_add(btn.set_sensitive, True)
+        GLib.idle_add(self._log, "\n✔  Все настройки терминала применены!\n")
+        win = self.get_root()
+        if hasattr(win, "stop_progress"): GLib.idle_add(win.stop_progress, True)
