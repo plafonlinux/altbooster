@@ -166,15 +166,16 @@ def _is_ext_installed(uuid: str) -> bool:
         return False
 
 
-def _read_extensions_from(ext_dir: Path) -> list[tuple[str, str]]:
-    """Читает [(uuid, name), ...] из metadata.json в директории расширений."""
+def _read_extensions_from(ext_dir: Path) -> list[tuple[str, str, str]]:
+    """Читает [(uuid, name, description), ...] из metadata.json в директории расширений."""
     result = []
     for meta in sorted(ext_dir.glob("*/metadata.json")):
         try:
             data = json.loads(meta.read_text(encoding="utf-8"))
             uuid = data.get("uuid", meta.parent.name)
             name = data.get("name", uuid)
-            result.append((uuid, name))
+            desc = data.get("description", "")
+            result.append((uuid, name, desc))
         except Exception:
             pass
     return result
@@ -190,6 +191,18 @@ def _get_enabled_uuids() -> set[str]:
         return set(r.stdout.split())
     except Exception:
         return set()
+
+
+def _make_info_button(desc: str) -> Gtk.Button:
+    """Создаёт кнопку-иконку с информацией о расширении."""
+    info_btn = Gtk.Button()
+    info_btn.set_icon_name("dialog-information-symbolic")
+    info_btn.add_css_class("flat")
+    info_btn.add_css_class("circular")
+    info_btn.set_valign(Gtk.Align.CENTER)
+    info_btn.set_tooltip_text(desc)
+    info_btn.set_sensitive(bool(desc))
+    return info_btn
 
 
 # ── Главный класс ─────────────────────────────────────────────────────────────
@@ -511,8 +524,8 @@ class ExtensionsPage(Gtk.Box):
                 count_str += f", {len(missing_recs)} реком."
             exp.set_subtitle(count_str)
             exp.set_expanded(True)
-            for uuid, name in user_exts:
-                exp.add_row(self._make_installed_row(uuid, name, uuid in enabled, is_user=True))
+            for uuid, name, desc in user_exts:
+                exp.add_row(self._make_installed_row(uuid, name, desc, uuid in enabled, is_user=True))
             for r in missing_recs:
                 uuid, name, desc = r[0], r[1], r[2]
                 install_id = r[3] if len(r) > 3 else None
@@ -524,11 +537,11 @@ class ExtensionsPage(Gtk.Box):
             exp.set_title("Системные")
             exp.set_subtitle(f"{len(visible_system_exts)} расш.")
             exp.set_expanded(False)
-            for uuid, name in visible_system_exts:
-                exp.add_row(self._make_installed_row(uuid, name, uuid in enabled, is_user=False))
+            for uuid, name, desc in visible_system_exts:
+                exp.add_row(self._make_installed_row(uuid, name, desc, uuid in enabled, is_user=False))
             self._installed_group.add(exp)
 
-    def _make_installed_row(self, uuid: str, name: str, enabled: bool, is_user: bool = False) -> Adw.ActionRow:
+    def _make_installed_row(self, uuid: str, name: str, desc: str, enabled: bool, is_user: bool = False) -> Adw.ActionRow:
         row = Adw.ActionRow()
         row.set_title(name)
         row.set_subtitle(uuid)
@@ -548,6 +561,8 @@ class ExtensionsPage(Gtk.Box):
             (_USER_EXT_DIR / uuid / "prefs.js").exists() or
             (_SYSTEM_EXT_DIR / uuid / "prefs.js").exists()
         )
+
+        info_btn = _make_info_button(desc)
 
         prefs_btn = Gtk.Button()
         prefs_btn.set_icon_name("emblem-system-symbolic")
@@ -570,27 +585,28 @@ class ExtensionsPage(Gtk.Box):
             del_btn.set_tooltip_text("Удалить системное расширение (с проверкой зависимостей)")
         del_btn.connect("clicked", lambda _, u=uuid, usr=is_user: self._on_delete_ext(u, usr))
 
-        row.add_suffix(make_suffix_box(prefs_btn, switch, del_btn))
+        row.add_suffix(make_suffix_box(info_btn, prefs_btn, switch, del_btn))
         return row
 
     def _make_recommended_row(self, uuid, name, desc, install_id=None, installed=False):
         row = Adw.ActionRow()
         row.set_title(name)
-        row.set_subtitle(desc)
+        row.set_subtitle(uuid)
         row.add_prefix(make_icon("application-x-addon-symbolic"))
 
         status = make_status_icon()
-        
+        info_btn = _make_info_button(desc)
+
         if installed:
             set_status_ok(status)
             btn = make_button("Установлено")
             btn.set_sensitive(False)
             btn.add_css_class("flat")
+            row.add_suffix(make_suffix_box(info_btn, status, btn))
         else:
             btn = make_button("Установить")
             btn.connect("clicked", lambda _, u=uuid, b=btn, s=status, iid=install_id: self._on_install_ext(u, b, s, iid))
-            
-        row.add_suffix(make_suffix_box(status, btn))
+            row.add_suffix(make_suffix_box(info_btn, status, btn))
         return row
 
     def _on_install_ext(self, uuid, btn, status, install_id=None):
