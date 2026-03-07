@@ -8,7 +8,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-ALT%20Linux-informational)](https://altlinux.org)
-[![ALT Linux Sisyphus](https://img.shields.io/badge/ALT_Linux-Sisyphus-blue)](https://packages.altlinux.org/ru/sisyphus/srpms/plafon-altbooster/)
+[![ALT Linux Sisyphus](https://img.shields.io/badge/ALT_Linux-Sisyphus-yellow)](https://packages.altlinux.org/ru/sisyphus/srpms/plafon-altbooster/)
 [![GTK](https://img.shields.io/badge/GTK-4.0-green)](https://gtk.org)
 [![Python](https://img.shields.io/badge/Python-3.10+-yellow)](https://python.org)
 
