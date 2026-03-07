@@ -109,7 +109,13 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             p.set_icon_name(icon)
 
         self._stack.set_vexpand(True)
-        root.append(self._stack)
+        # Оборачиваем стек в Overlay для плавающей кнопки перелогина
+        stack_overlay = Gtk.Overlay()
+        stack_overlay.set_child(self._stack)
+        stack_overlay.set_vexpand(True)
+        self._relogin_revealer = self._build_relogin_banner()
+        stack_overlay.add_overlay(self._relogin_revealer)
+        root.append(stack_overlay)
         root.append(self._log_widget)
 
         startup_ms = (time.time() - start_time) * 1000
@@ -865,6 +871,52 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._profile_banner_revealer.set_reveal_child(False)
         self._profile_banner_path = None  # текущий предложенный файл
         return self._profile_banner_revealer
+
+    # ── Плавающая кнопка перелогина (появляется после установки расширений) ──────
+
+    def _build_relogin_banner(self) -> Gtk.Revealer:
+        """Плавающая кнопка в правом нижнем углу — предлагает перезайти в сессию GNOME.
+
+        Показывается после установки или удаления расширений, т.к. изменения
+        вступают в силу только после перезапуска сессии. Кнопка выезжает снизу
+        (SLIDE_UP), позиционируется через Overlay поверх ViewStack.
+        """
+        btn = Gtk.Button()
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        icon = Gtk.Image.new_from_icon_name("system-log-out-symbolic")
+        icon.set_pixel_size(16)
+        btn_box.append(icon)
+        btn_box.append(Gtk.Label(label="Перезайти в сессию"))
+        btn.set_child(btn_box)
+        btn.add_css_class("suggested-action")
+        btn.add_css_class("pill")
+        btn.set_margin_end(16)
+        btn.set_margin_bottom(16)
+        btn.set_halign(Gtk.Align.END)
+        btn.set_valign(Gtk.Align.END)
+        btn.connect("clicked", self._on_relogin_clicked)
+
+        revealer = Gtk.Revealer()
+        revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
+        revealer.set_transition_duration(300)
+        revealer.set_child(btn)
+        revealer.set_reveal_child(False)
+        revealer.set_halign(Gtk.Align.END)
+        revealer.set_valign(Gtk.Align.END)
+        # set_can_target(False) пока скрыта — чтобы не перехватывать клики мимо кнопки
+        revealer.set_can_target(False)
+        return revealer
+
+    def show_relogin_banner(self):
+        """Показывает плавающую кнопку перелогина (вызывается из extensions_page)."""
+        self._relogin_revealer.set_can_target(True)
+        self._relogin_revealer.set_reveal_child(True)
+
+    def _on_relogin_clicked(self, _btn):
+        """Скрывает кнопку и запускает logout из GNOME-сессии."""
+        self._relogin_revealer.set_reveal_child(False)
+        self._relogin_revealer.set_can_target(False)
+        subprocess.Popen(["gnome-session-quit", "--logout", "--no-prompt"])
 
     def _check_for_import_candidates(self):
         """Ищет .altbooster файлы в ~/Downloads и ~/, показывает баннер если найдено."""
