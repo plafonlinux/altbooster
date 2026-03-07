@@ -55,10 +55,17 @@
 - Python 3.10+
 - GTK 4.0 + libadwaita
 - GNOME или совместимый Wayland DE
+- git
 
 ## Установка
 
-### 1. Клонировать и установить
+### 1. Установите git
+
+```bash
+su - -c 'apt-get install git'
+```
+
+### 2. Клонировать и установить
 
 ```bash
 git clone https://github.com/plafonlinux/altbooster.git
@@ -66,7 +73,7 @@ cd altbooster
 ./install.sh
 ```
 
-### 2. Запустить
+### 3. Запустить
 
 ```bash
 altbooster
