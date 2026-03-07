@@ -178,18 +178,55 @@ def find_import_candidates() -> list[Path]:
     return candidates
 
 
-def apply_settings(data: dict) -> None:
+# Маппинг: префикс имени темы → имя пакета ALT Linux
+_THEME_PACKAGES: dict[str, str] = {
+    "Papirus": "papirus-remix-icon-theme",
+}
+
+
+def theme_package(theme_name: str) -> str | None:
+    """Возвращает имя пакета для темы иконок по её имени, или None если неизвестно."""
+    for prefix, pkg in _THEME_PACKAGES.items():
+        if theme_name.startswith(prefix):
+            return pkg
+    return None
+
+
+def theme_exists(name: str) -> bool:
+    """Проверяет наличие директории темы иконок/курсора на диске."""
+    for base in [Path.home() / ".local" / "share" / "icons", Path("/usr/share/icons")]:
+        if (base / name).is_dir():
+            return True
+    return False
+
+
+def apply_settings(data: dict) -> list[dict]:
     """Применяет gsettings и state из пресета немедленно (синхронно).
 
     Устанавливает только настройки — без установки приложений и расширений.
     Вызывается из GTK-потока (операции быстрые: дисковые и gsettings).
+
+    Возвращает список gsettings-записей, которые не были применены,
+    потому что тема иконок/курсора ещё не установлена — их нужно применить
+    после установки соответствующего пакета.
     """
+    deferred: list[dict] = []
+
     # GSettings
     for entry in data.get("gsettings", []):
         try:
-            backend.run_gsettings(["set", entry["schema"], entry["key"], entry["value"]])
+            key = entry.get("key", "")
+            value = entry.get("value", "")
+            # Темы иконок/курсора применяем только если директория уже есть на диске.
+            # Если нет — откладываем: вызывающий код установит пакет и применит потом.
+            if key in ("icon-theme", "cursor-theme") and not theme_exists(value):
+                deferred.append(entry)
+                continue
+            backend.run_gsettings(["set", entry["schema"], key, value])
         except Exception:
             pass
+
+    return deferred
 
     # State — мерджим поверх текущего (не затираем полностью)
     for k, v in (data.get("state") or {}).items():
