@@ -209,9 +209,13 @@ class DaVinciPage(Gtk.Box):
         ))
 
     def _make_folder_row(self, title, path, state_key):
+        _descriptions = {
+            "dv_cache_path": "Папка для временных файлов кэша рендеринга",
+            "dv_proxy_path": "Папка для прокси-медиафайлов",
+        }
         row = Adw.ActionRow()
         row.set_title(title)
-        row.set_subtitle(path)
+        row.set_subtitle(path if path else _descriptions.get(state_key, "Не задано"))
         row.add_prefix(make_icon("folder-symbolic"))
         btn = Gtk.Button(label="Выбрать")
         btn.add_css_class("flat")

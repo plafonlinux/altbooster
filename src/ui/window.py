@@ -1176,7 +1176,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.set_application_name("ALT Booster")
         d.set_application_icon("altbooster")
         d.set_developer_name("PLAFON")
-        d.set_version("5.6.7-beta")
+        d.set_version(config.VERSION)
         d.set_issue_url("https://github.com/plafonlinux/altbooster/issues")
         d.set_comments("ALT Booster — утилита-компаньон для настройки ALT Рабочая станция (GNOME)")
         d.set_license_type(Gtk.License.MIT_X11)
