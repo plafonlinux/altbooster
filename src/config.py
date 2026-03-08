@@ -26,8 +26,8 @@ PRESETS_DIR = CONFIG_DIR / "presets"
 
 # ── Пути к кэшу DaVinci Resolve по умолчанию ─────────────────────────────────
 
-DV_CACHE_DEFAULT = "/mnt/datassd/DaVinci Resolve/Work Folders/CacheClip"
-DV_PROXY_DEFAULT = "/mnt/datassd/DaVinci Resolve/Work Folders/ProxyMedia"
+DV_CACHE_DEFAULT = ""
+DV_PROXY_DEFAULT = ""
 
 # Gsettings-схемы — чтобы не повторять строки по всему коду
 GSETTINGS_MUTTER      = "org.gnome.mutter"
