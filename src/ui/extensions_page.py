@@ -704,7 +704,7 @@ class ExtensionsPage(Gtk.Box):
                 GLib.idle_add(set_status_error, status)
                 GLib.idle_add(btn.set_label, "Повторить")
                 GLib.idle_add(btn.set_sensitive, True)
-            if hasattr(win, "stop_progress"): win.stop_progress(ok)
+            GLib.idle_add(lambda: win.stop_progress(ok) if hasattr(win, "stop_progress") else None)
 
         threading.Thread(target=_do, daemon=True).start()
 
@@ -859,7 +859,7 @@ class ExtensionsPage(Gtk.Box):
                 GLib.idle_add(self._refresh_installed)
             else:
                 self._log("✘  Ошибка удаления\n")
-            if hasattr(win, "stop_progress"): win.stop_progress(ok)
+            GLib.idle_add(lambda: win.stop_progress(ok) if hasattr(win, "stop_progress") else None)
 
         threading.Thread(target=_do, daemon=True).start()
 
