@@ -963,28 +963,49 @@ class SetupPage(Gtk.Box):
         row.add_suffix(suffix)
 
         self._papirus_installed = False
+        # Предзагрузка из кэша: показываем правильный UI без ожидания фоновой проверки.
+        # Это важно на уже настроенных системах — тема видна сразу при запуске.
+        cached_installed = config.state_get("app_papirus_icons") is True
+        if cached_installed:
+            cached_applied = config.state_get("papirus_applied") is True
+            self._set_papirus_ui(cached_installed, cached_applied)
         threading.Thread(target=self._check_papirus, daemon=True).start()
         return row
 
     def _check_papirus(self):
         installed = backend.check_app_installed({"check": ["rpm", "papirus-remix-icon-theme"]})
         config.state_set("app_papirus_icons", installed)
-        GLib.idle_add(self._set_papirus_ui, installed)
+        # Дополнительно проверяем gsettings: применена ли Papirus-тема уже.
+        # На преднастроенных системах пакет установлен и тема уже активна.
+        applied = False
+        if installed:
+            icon_theme = backend.gsettings_get("org.gnome.desktop.interface", "icon-theme")
+            applied = "Papirus" in icon_theme
+            config.state_set("papirus_applied", applied)
+        GLib.idle_add(self._set_papirus_ui, installed, applied)
 
-    def _set_papirus_ui(self, installed):
+    def _set_papirus_ui(self, installed, applied=False):
         self._papirus_installed = installed
         if installed:
             self._papirus_color_drop.set_visible(True)
             self._papirus_trash_btn.set_visible(True)
             self._papirus_trash_btn.set_sensitive(True)
-            self._papirus_btn.set_label("Применить")
-            self._papirus_btn.set_sensitive(True)
-            self._papirus_btn.add_css_class("suggested-action")
+            if applied:
+                self._papirus_btn.set_label("Применено")
+                self._papirus_btn.set_sensitive(True)  # можно применить повторно (другой цвет)
+                self._papirus_btn.remove_css_class("suggested-action")
+                self._papirus_btn.add_css_class("flat")
+            else:
+                self._papirus_btn.set_label("Применить")
+                self._papirus_btn.set_sensitive(True)
+                self._papirus_btn.remove_css_class("flat")
+                self._papirus_btn.add_css_class("suggested-action")
         else:
             self._papirus_color_drop.set_visible(False)
             self._papirus_trash_btn.set_visible(False)
             self._papirus_btn.set_label("Установить")
             self._papirus_btn.set_sensitive(True)
+            self._papirus_btn.remove_css_class("flat")
             self._papirus_btn.add_css_class("suggested-action")
 
     def _on_papirus_btn_clicked(self, _):
@@ -1024,6 +1045,7 @@ class SetupPage(Gtk.Box):
         def _done(ok):
             if ok:
                 self._log("✔  Papirus удалён!\n")
+                config.state_set("papirus_applied", False)
             else:
                 self._log("✘  Ошибка удаления papirus-remix-icon-theme\n")
             if hasattr(win, "stop_progress"): win.stop_progress(ok)
@@ -1044,6 +1066,9 @@ class SetupPage(Gtk.Box):
             dark = "dark" in scheme.lower()
             theme = f"Papirus-{'Dark' if dark else 'Light'}-{color}"
             ok = backend.run_gsettings(["set", "org.gnome.desktop.interface", "icon-theme", theme])
+            if ok:
+                config.state_set("papirus_applied", True)
+                GLib.idle_add(self._set_papirus_ui, True, True)
             GLib.idle_add(self._log, f"✔  Тема {theme} применена!\n" if ok else "✘  Ошибка применения темы Papirus\n")
             if hasattr(win, "stop_progress"): GLib.idle_add(win.stop_progress, ok)
 
