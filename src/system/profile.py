@@ -227,20 +227,3 @@ def apply_settings(data: dict) -> list[dict]:
             pass
 
     return deferred
-
-    # State — мерджим поверх текущего (не затираем полностью)
-    for k, v in (data.get("state") or {}).items():
-        config.state_set(k, v)
-
-    # Пользовательский apps.json (если был изменён)
-    custom_apps = data.get("custom_apps")
-    if custom_apps:
-        try:
-            dest = config.CONFIG_DIR / "apps.json"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(
-                json.dumps(custom_apps, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
