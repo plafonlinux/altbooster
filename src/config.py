@@ -115,16 +115,23 @@ def is_btrfs() -> bool:
         return False
 
 
+_GITHUB_API = "https://api.github.com/repos/plafonlinux/altbooster"
+
+
+def _fetch_github(path: str) -> object:
+    """Загружает JSON из GitHub API. Возвращает распарсенный объект или None."""
+    url = f"{_GITHUB_API}/{path}"
+    req = urllib.request.Request(url, headers={"User-Agent": "ALTBooster"})
+    with urllib.request.urlopen(req, timeout=5) as response:
+        return json.loads(response.read().decode())
+
+
 def check_update(on_result):
     """Проверяет наличие новой версии на GitHub. Вызывает on_result(version_str | None)."""
     def _worker():
         try:
-            url = "https://api.github.com/repos/plafonlinux/altbooster/releases/latest"
-            req = urllib.request.Request(url, headers={"User-Agent": "ALTBooster"})
-            with urllib.request.urlopen(req, timeout=5) as response:
-                data = json.loads(response.read().decode())
-                tag = data.get("tag_name", "").lstrip("v")
-                on_result(tag)
+            data = _fetch_github("releases/latest")
+            on_result(data.get("tag_name", "").lstrip("v"))
         except Exception:
             on_result(None)
     threading.Thread(target=_worker, daemon=True).start()
@@ -134,16 +141,12 @@ def check_update_beta(on_result):
     """Ищет последний pre-release на GitHub. Вызывает on_result(version_str | None)."""
     def _worker():
         try:
-            url = "https://api.github.com/repos/plafonlinux/altbooster/releases?per_page=10"
-            req = urllib.request.Request(url, headers={"User-Agent": "ALTBooster"})
-            with urllib.request.urlopen(req, timeout=5) as response:
-                releases = json.loads(response.read().decode())
-                for r in releases:
-                    if r.get("prerelease"):
-                        tag = r.get("tag_name", "").lstrip("v")
-                        on_result(tag)
-                        return
-                on_result(None)
+            releases = _fetch_github("releases?per_page=10")
+            for r in releases:
+                if r.get("prerelease"):
+                    on_result(r.get("tag_name", "").lstrip("v"))
+                    return
+            on_result(None)
         except Exception:
             on_result(None)
     threading.Thread(target=_worker, daemon=True).start()
