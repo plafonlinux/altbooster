@@ -24,6 +24,11 @@ class AltBoosterApp(Adw.Application):
 
     def _on_activate(self, app):
         config.load_state()
+        # Регистрируем app.quit (GNOME HIG: Ctrl+Q для выхода)
+        quit_action = Gio.SimpleAction.new("quit", None)
+        quit_action.connect("activate", lambda *_: self.quit())
+        self.add_action(quit_action)
+        self.set_accels_for_action("app.quit", ["<Primary>q"])
         win = PlafonWindow(application=app)
         win.present()
         GLib.idle_add(win.ask_password)

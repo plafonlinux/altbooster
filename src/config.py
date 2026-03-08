@@ -19,7 +19,7 @@ CONFIG_DIR  = Path.home() / ".config" / "altbooster"
 CONFIG_FILE = CONFIG_DIR / "window.json"
 STATE_FILE  = CONFIG_DIR / "state.json"
 
-VERSION = "5.6.7"
+VERSION = "5.6.8-beta"
 
 PRESETS_DIR = CONFIG_DIR / "presets"
 

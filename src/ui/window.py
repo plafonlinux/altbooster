@@ -69,7 +69,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         # ToastOverlay позволяет показывать всплывающие уведомления поверх всего контента
         self._toast_overlay = Adw.ToastOverlay()
         self._toast_overlay.set_child(root)
-        self.set_content(self._toast_overlay)
 
         root.append(self._build_header())
         root.append(self._build_update_banner())
@@ -117,6 +116,23 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         root.append(stack_overlay)
         root.append(self._log_widget)
 
+        # ViewSwitcherBar для узкого режима (по умолчанию скрыт; показывается breakpoint-ом)
+        self._switcher_bar = Adw.ViewSwitcherBar()
+        self._switcher_bar.set_stack(self._stack)
+        self._switcher_bar.set_reveal(False)
+        root.append(self._switcher_bar)
+
+        # Адаптивный контейнер GNOME HIG: при ширине < 550sp прячет ViewSwitcher
+        # из хедера и показывает ViewSwitcherBar снизу (Adw.BreakpointBin)
+        bp_bin = Adw.BreakpointBin()
+        bp_bin.set_size_request(360, 200)
+        bp_bin.set_child(self._toast_overlay)
+        bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 550sp"))
+        bp.add_setter(self._header, "title-widget", self._window_title)
+        bp.add_setter(self._switcher_bar, "reveal", True)
+        bp_bin.add_breakpoint(bp)
+        self.set_content(bp_bin)
+
         startup_ms = (time.time() - start_time) * 1000
         self._log(f"ℹ Startup time: {startup_ms:.2f} ms\n")
 
@@ -125,13 +141,18 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def _build_header(self):
         """Строит HeaderBar с переключателем вкладок и меню настроек."""
         header = Adw.HeaderBar()
+        self._header = header
 
         # ViewStack создаём здесь (до регистрации страниц в __init__),
         # чтобы он был доступен при добавлении вкладок в цикле выше
         self._stack = Adw.ViewStack()
-        sw = Adw.ViewSwitcher()
-        sw.set_stack(self._stack)
-        header.set_title_widget(sw)
+        self._switcher = Adw.ViewSwitcher()
+        self._switcher.set_stack(self._stack)
+        header.set_title_widget(self._switcher)
+
+        # WindowTitle для узкого режима (используется в Adw.Breakpoint при ширине < 550sp)
+        self._window_title = Adw.WindowTitle()
+        self._window_title.set_title("ALT Booster")
 
         # ── Кнопка выбора пресета (левый угол) ───────────────────────────────
         header.pack_start(self._build_preset_button())
@@ -215,6 +236,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             a = Gio.SimpleAction.new(name, None)
             a.connect("activate", cb)
             self.add_action(a)
+
+        # Стандартные клавиатурные сокращения GNOME HIG
+        app = self.get_application()
+        app.set_accels_for_action("win.about", ["F1"])
 
         return header
 
