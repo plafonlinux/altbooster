@@ -173,34 +173,6 @@ def _minimal_env() -> dict[str, str]:
     }
 
 
-def sudo_reliable() -> bool:
-    """Проверяет, что sudo реально отклоняет неправильные пароли.
-
-    В GNOME-сессии PAM-стек sudo может быть настроен так, что принимает ЛЮБОЙ
-    пароль через агента сессии (polkit, gnome-keyring и т.п.) — даже с минимальным
-    env. Это определяется тестом с заведомо неправильным паролем.
-
-    Возвращает True  → sudo надёжен, можно показывать диалог ввода пароля.
-    Возвращает False → sudo принимает всё, нужно переключиться на pkexec.
-    """
-    try:
-        env = _minimal_env()
-        # Сбрасываем кэш, чтобы тест был честным
-        subprocess.run(["sudo", "-k"], env=env, capture_output=True, timeout=3)
-        result = subprocess.run(
-            ["sudo", "-S", "id", "-u"],
-            input=f"__altbooster_wrong_pw_{uuid.uuid4()}__\n",
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env=env,
-            timeout=5,
-        )
-        # Если заведомо неправильный пароль прошёл — PAM-bypass активен
-        return not (result.returncode == 0 and result.stdout.strip() == "0")
-    except (OSError, subprocess.SubprocessError, UnicodeError):
-        return True  # При ошибке считаем надёжным (консервативное поведение)
-
 
 def sudo_check(pw: str) -> bool:
     """Проверяет корректность sudo-пароля.

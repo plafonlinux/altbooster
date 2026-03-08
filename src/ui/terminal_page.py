@@ -97,15 +97,6 @@ alias vmax="sudo sysctl -w vm.max_map_count=2147483642"
 
 _FASTFETCH_CONFIG = r"""{
     "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
-    "logo": {
-      "source": "/mnt/datassd/holmes/Документы/Fastftech/2025/alt2simple.txt",
-      "height": 6,
-      "width": 12,
-      "padding": {
-          "top": 0,
-          "left": 1
-      }
-    },
     "display": {
 		"separator": "\u001b[90m ▐ "
     },

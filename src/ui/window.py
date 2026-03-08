@@ -10,7 +10,6 @@ import subprocess
 import sys
 import threading
 import time
-import grp
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -21,7 +20,7 @@ import config
 import backend
 from dynamic_page import DynamicPage
 from ui.common import load_module
-from ui.dialogs import PasswordDialog, get_saved_password, clear_saved_password
+from ui.dialogs import clear_saved_password
 from system import profile as profile_module
 from ui.profile_dialog import show_preset_save_dialog, show_preset_import_dialog
 from ui.setup_page import SetupPage
@@ -1096,117 +1095,28 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             except Exception:
                 pass
 
-            # 2.5. Нет управляющего терминала → запуск из GNOME-ярлыка.
-            # PAM-модули GNOME (polkit, gnome-keyring и т.п.) проверяют PAM_TTY при
-            # инициализации: без TTY они обходят проверку пароля через агент сессии —
-            # sudo -S принимает любой пароль. Правильное решение для GUI-запуска:
-            # показать системный polkit-диалог через start_pkexec_shell().
+            # 2.5. Используем pkexec для аутентификации (polkit-диалог).
             # start_pkexec_shell блокирует фоновый поток до ответа пользователя — это
             # нормально, мы находимся в _check(), а не в GTK-потоке.
-            if not sys.stdin.isatty():
-                GLib.idle_add(self._log, "ℹ Запуск из GNOME (без терминала). Инициализация pkexec...\n")
-                backend.set_pkexec_mode(True)
-                ok, is_cancel = backend.start_pkexec_shell()
-                if ok:
-                    GLib.idle_add(self._auth_ok)
-                elif is_cancel:
-                    GLib.idle_add(self._log, "⚠ Аутентификация отменена пользователем.\n")
-                    GLib.idle_add(self.close)
-                else:
-                    GLib.idle_add(self._log, "⚠ pkexec недоступен. Закрытие приложения.\n")
-                    GLib.idle_add(self.close)
-                return
-
-            # 3. Пробуем сохранённый в keyring пароль — это бесшумный автовход
-            saved_pw = get_saved_password()
-            if saved_pw and backend.sudo_check(saved_pw):
-                backend.set_sudo_password(saved_pw)
-                GLib.idle_add(self._log, "✔ Вход выполнен автоматически.\n")
+            GLib.idle_add(self._log, "ℹ Инициализация pkexec...\n")
+            backend.set_pkexec_mode(True)
+            ok, is_cancel = backend.start_pkexec_shell()
+            if ok:
                 GLib.idle_add(self._auth_ok)
-                return
-
-            # 4. Пользователь не в группе wheel — sudo в принципе недоступен
-            try:
-                wheel_gid = grp.getgrnam("wheel").gr_gid
-                if wheel_gid not in os.getgroups() and wheel_gid != os.getgid():
-                    GLib.idle_add(self._log, "ℹ Пользователь не в группе wheel. Включен режим pkexec.\n")
-                    GLib.idle_add(self._use_pkexec_auth)
-                    return
-            except (KeyError, ImportError, OSError):
-                pass
-
-            # 5. Пользователь в wheel, но sudowheel отключён — предлагаем настроить
-            if shutil.which("control"):
-                try:
-                    env = os.environ.copy()
-                    env["LC_ALL"] = "C"
-                    res = subprocess.run(
-                        ["control", "sudowheel"], capture_output=True, text=True, timeout=3, env=env,
-                    )
-                    out = res.stdout.strip().lower()
-                    if "enabled" not in out and "wheelonly" not in out:
-                        GLib.idle_add(self._offer_sudowheel_setup)
-                        return
-                except Exception:
-                    pass
-
-            # 6. sudowheel включён, пароль не сохранён → показываем диалог
-            GLib.idle_add(self._show_password_dialog)
+            elif is_cancel:
+                GLib.idle_add(self._log, "⚠ Аутентификация отменена пользователем.\n")
+                GLib.idle_add(self.close)
+            else:
+                GLib.idle_add(self._log, "⚠ pkexec недоступен. Закрытие приложения.\n")
+                GLib.idle_add(self.close)
 
         threading.Thread(target=_check, daemon=True).start()
-
-    def _show_password_dialog(self):
-        PasswordDialog(self, self._auth_ok, self.close)
 
     def _use_pkexec_auth(self):
         """Переключает всё приложение в pkexec-режим (без sudo)."""
         backend.set_pkexec_mode(True)
         self._log("🔑 Используется pkexec (polkit) для привилегированных команд.\n")
         self._auth_ok()
-
-    def _offer_sudowheel_setup(self):
-        """Предлагает диалог включения sudowheel через pkexec с последующим перезапуском."""
-        d = Adw.MessageDialog(
-            heading="Настройка sudo",
-            body=(
-                "Ваш пользователь входит в группу wheel, но sudo для wheel не активирован.\n\n"
-                "Нажмите «Настроить», чтобы включить sudo через polkit — "
-                "утилита автоматически перезапустится."
-            ),
-        )
-        d.set_transient_for(self)
-        d.add_response("cancel", "Отмена")
-        d.add_response("setup", "Настроить")
-        d.set_response_appearance("setup", Adw.ResponseAppearance.SUGGESTED)
-        d.set_default_response("setup")
-        d.connect("response", self._on_sudowheel_response)
-        d.present()
-
-    def _on_sudowheel_response(self, dialog, rid):
-        dialog.close()
-        if rid == "setup":
-            self._log("⚙ Включение sudowheel через pkexec...\n")
-            threading.Thread(target=self._do_sudowheel_setup, daemon=True).start()
-        else:
-            # Отмена → продолжаем через pkexec только на этот сеанс
-            self._use_pkexec_auth()
-
-    def _do_sudowheel_setup(self):
-        """Запускает 'pkexec control sudowheel enabled' и перезапускает приложение."""
-        try:
-            result = subprocess.run(
-                ["pkexec", "control", "sudowheel", "enabled"],
-                capture_output=True, text=True, timeout=60,
-            )
-            if result.returncode == 0:
-                GLib.idle_add(self._log, "✔ sudowheel включён. Перезапуск...\n")
-                GLib.idle_add(self._restart_app)
-            else:
-                GLib.idle_add(self._log, "❌ Не удалось включить sudowheel. Переключение на pkexec.\n")
-                GLib.idle_add(self._use_pkexec_auth)
-        except Exception as e:
-            GLib.idle_add(self._log, f"❌ Ошибка настройки sudowheel: {e}\n")
-            GLib.idle_add(self._use_pkexec_auth)
 
     def _restart_app(self):
         """Планирует перезапуск процесса через 600 мс (чтобы успел отрисоваться лог)."""
@@ -1266,7 +1176,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.set_application_name("ALT Booster")
         d.set_application_icon("altbooster")
         d.set_developer_name("PLAFON")
-        d.set_version("5.6.7-beta")
+        d.set_version(config.VERSION)
         d.set_issue_url("https://github.com/plafonlinux/altbooster/issues")
         d.set_comments("ALT Booster — утилита-компаньон для настройки ALT Рабочая станция (GNOME)")
         d.set_license_type(Gtk.License.MIT_X11)

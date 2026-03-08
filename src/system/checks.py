@@ -7,9 +7,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from pathlib import Path
-
 import sys
+from pathlib import Path
 
 from .privileges import get_sudo_password, run_privileged_sync
 from .gsettings import gsettings_get
@@ -68,6 +67,7 @@ def is_sudo_enabled() -> bool:
 
     return False
 
+
 def is_flathub_enabled() -> bool:
     """Проверяет, включен ли репозиторий Flathub."""
     env = os.environ.copy()
@@ -78,6 +78,7 @@ def is_flathub_enabled() -> bool:
     except (subprocess.TimeoutExpired, OSError):
         return False
 
+
 def is_fstrim_enabled() -> bool:
     """Проверяет, включен ли таймер fstrim."""
     try:
@@ -86,10 +87,12 @@ def is_fstrim_enabled() -> bool:
     except (subprocess.TimeoutExpired, OSError):
         return False
 
+
 def is_fractional_scaling_enabled() -> bool:
     """Проверяет, включено ли дробное масштабирование."""
     value = gsettings_get("org.gnome.mutter", "experimental-features")
     return "scale-monitor-framebuffer" in value
+
 
 def is_system_busy() -> bool:
     """Проверяет занятость пакетного менеджера."""
@@ -103,12 +106,16 @@ def is_system_busy() -> bool:
         pass
     return False
 
+
 def check_app_installed(source: dict) -> bool:
     """Проверяет, установлено ли приложение."""
     kind, value = source["check"]
     try:
         if kind == "flatpak":
-            res = subprocess.run(["flatpak", "list", "--app", "--columns=application"], capture_output=True, text=True, timeout=15)
+            res = subprocess.run(
+                ["flatpak", "list", "--app", "--columns=application"],
+                capture_output=True, text=True, timeout=15,
+            )
             return value in res.stdout
         if kind == "rpm":
             if subprocess.run(["rpm", "-q", value], capture_output=True, timeout=10).returncode == 0:
@@ -116,13 +123,14 @@ def check_app_installed(source: dict) -> bool:
             # Fallback: пакет мог установиться под другим именем (через provides),
             # проверяем наличие бинарника в PATH (например, pipewire-utils → pipewire-settings)
             return shutil.which(value) is not None
+        if kind == "path":
+            return os.path.exists(os.path.expanduser(value))
+        if kind == "which":
+            return shutil.which(value) is not None
     except (subprocess.TimeoutExpired, OSError):
         return False
-    if kind == "path":
-        return os.path.exists(os.path.expanduser(value))
-    if kind == "which":
-        return shutil.which(value) is not None
     return False
+
 
 def is_vm_dirty_optimized() -> bool:
     """Проверяет, оптимизированы ли параметры vm dirty."""
@@ -131,6 +139,7 @@ def is_vm_dirty_optimized() -> bool:
         return "67108864" in content
     except OSError:
         return False
+
 
 def is_drive_menu_patched() -> bool:
     """Проверяет, пропатчено ли расширение drive-menu.
@@ -145,6 +154,7 @@ def is_drive_menu_patched() -> bool:
     except OSError:
         return False
 
+
 def is_journal_optimized() -> bool:
     """Проверяет, оптимизирован ли журнал systemd."""
     paths = ["/etc/systemd/journald.conf", "/etc/systemd/journald.conf.d/99-altbooster.conf"]
@@ -156,6 +166,7 @@ def is_journal_optimized() -> bool:
             continue
     return False
 
+
 def is_davinci_installed() -> bool:
     """Проверяет, установлен ли DaVinci Resolve."""
     if os.path.exists("/opt/resolve/bin/resolve"):
@@ -165,9 +176,11 @@ def is_davinci_installed() -> bool:
     except (subprocess.TimeoutExpired, OSError):
         return False
 
+
 def is_aac_installed() -> bool:
     """Проверяет, установлен ли кодек AAC для DaVinci Resolve."""
     return os.path.exists("/opt/resolve/IOPlugins/aac_encoder_plugin.dvcp.bundle")
+
 
 def is_fairlight_installed() -> bool:
     """Проверяет, установлен ли плагин Fairlight для DaVinci Resolve."""
@@ -175,6 +188,7 @@ def is_fairlight_installed() -> bool:
         return subprocess.run(["rpm", "-q", "alsa-plugins-pulse"], capture_output=True, timeout=10).returncode == 0
     except (subprocess.TimeoutExpired, OSError):
         return False
+
 
 def is_epm_installed() -> bool:
     """Проверяет, установлен ли пакетный менеджер eepm."""

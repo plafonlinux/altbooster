@@ -12,12 +12,14 @@ from gi.repository import Gtk
 
 
 def make_icon(name: str, size: int = 22) -> Gtk.Image:
+    """Создаёт именованную иконку заданного размера в пикселях."""
     icon = Gtk.Image.new_from_icon_name(name)
     icon.set_pixel_size(size)
     return icon
 
 
 def make_button(label: str, width: int = 130, style: str = "suggested-action") -> Gtk.Button:
+    """Создаёт кнопку-«пилюлю» с минимальной шириной и CSS-классом стиля."""
     btn = Gtk.Button(label=label)
     btn.set_size_request(width, -1)
     btn.add_css_class(style)
@@ -26,27 +28,32 @@ def make_button(label: str, width: int = 130, style: str = "suggested-action") -
 
 
 def make_status_icon() -> Gtk.Image:
+    """Создаёт пустую иконку статуса (18 px) для суффиксов строк настроек."""
     icon = Gtk.Image()
     icon.set_pixel_size(18)
     return icon
 
 
 def set_status_ok(icon: Gtk.Image) -> None:
+    """Показывает зелёную галочку в иконке статуса."""
     icon.set_from_icon_name("object-select-symbolic")
     icon.add_css_class("success")
 
 
 def set_status_error(icon: Gtk.Image) -> None:
+    """Показывает красный крест в иконке статуса."""
     icon.set_from_icon_name("dialog-error-symbolic")
     icon.remove_css_class("success")
 
 
 def clear_status(icon: Gtk.Image) -> None:
+    """Сбрасывает иконку статуса в пустое состояние."""
     icon.clear()
     icon.remove_css_class("success")
 
 
 def make_suffix_box(*widgets) -> Gtk.Box:
+    """Создаёт горизонтальный бокс (spacing=10, выровнен по центру) для суффикса Adw.ActionRow."""
     box = Gtk.Box(spacing=10)
     box.set_valign(Gtk.Align.CENTER)
     for w in widgets:
@@ -56,6 +63,7 @@ def make_suffix_box(*widgets) -> Gtk.Box:
 
 
 def make_scrolled_page() -> tuple[Gtk.ScrolledWindow, Gtk.Box]:
+    """Создаёт ScrolledWindow + вертикальный Box с полями 20px — стандартная разметка страницы вкладки."""
     scroll = Gtk.ScrolledWindow()
     scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
     scroll.set_hexpand(True)

@@ -4,7 +4,7 @@ build-backend = 'setuptools.build_meta'
 
 [project]
 name = "altbooster"
-version = "5.6.7-beta"
+version = "5.6.7"
 description = "Утилита настройки и обслуживания ALT Linux"
 readme = "README.md"
 license = "MIT"

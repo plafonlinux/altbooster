@@ -35,11 +35,27 @@ class DaVinciPage(Gtk.Box):
     def __init__(self, log_fn):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._log = log_fn
+
+        overlay = Gtk.Overlay()
+        self.append(overlay)
+
         scroll, body = make_scrolled_page()
-        self.append(scroll)
+        overlay.set_child(scroll)
+
         self._build_install_group(body)
         self._build_setup_expander(body)
         self._build_cache_group(body)
+
+        # Плавающая кнопка «DaVinci Ready»
+        dr_btn = make_button("DaVinci Ready", style="suggested-action")
+        dr_btn.add_css_class("pill")
+        dr_btn.set_halign(Gtk.Align.END)
+        dr_btn.set_valign(Gtk.Align.END)
+        dr_btn.set_margin_end(12)
+        dr_btn.set_margin_bottom(12)
+
+        dr_btn.connect("clicked", self.run_ready_preset)
+        overlay.add_overlay(dr_btn)
 
     # ── Установка ────────────────────────────────────────────────────────────
 
@@ -92,7 +108,7 @@ class DaVinciPage(Gtk.Box):
         exp = Adw.ExpanderRow()
         exp.set_title("Первичная настройка")
         exp.set_subtitle("PostInstall, AMD Radeon, AAC кодек, Fairlight")
-        exp.set_expanded(True)
+        exp.set_expanded(False)
         group.add(exp)
 
         # PostInstall
@@ -193,9 +209,13 @@ class DaVinciPage(Gtk.Box):
         ))
 
     def _make_folder_row(self, title, path, state_key):
+        _descriptions = {
+            "dv_cache_path": "Папка для временных файлов кэша рендеринга",
+            "dv_proxy_path": "Папка для прокси-медиафайлов",
+        }
         row = Adw.ActionRow()
         row.set_title(title)
-        row.set_subtitle(path)
+        row.set_subtitle(path if path else _descriptions.get(state_key, "Не задано"))
         row.add_prefix(make_icon("folder-symbolic"))
         btn = Gtk.Button(label="Выбрать")
         btn.add_css_class("flat")
@@ -442,6 +462,37 @@ class DaVinciPage(Gtk.Box):
     # ── Пресет «DaVinci Resolve Ready» ───────────────────────────────────────
 
     def run_ready_preset(self, btn):
+        amd_ok = subprocess.run(["rpm", "-q", "rocm-opencl-runtime"],
+                                 capture_output=True).returncode == 0
+        aac_ok = backend.is_aac_installed()
+        fl_ok  = backend.is_fairlight_installed()
+
+        lines = ["1. PostInstall — удаление конфликтующих библиотек glib/gio/gmodule"]
+        if not amd_ok:
+            lines.append("2. AMD ROCm — libGLU, ffmpeg, rocm-opencl-runtime")
+        if not aac_ok:
+            lines.append("3. AAC кодек — плагин для экспорта AAC аудио")
+        if not fl_ok:
+            lines.append("4. Fairlight — alsa-plugins-pulse")
+
+        suffix = (
+            "\n\nВсе дополнительные компоненты уже установлены."
+            if (amd_ok and aac_ok and fl_ok) else ""
+        )
+
+        dialog = Adw.AlertDialog(
+            heading="DaVinci Resolve Ready",
+            body="\n".join(lines) + suffix,
+        )
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("run", "Выполнить")
+        dialog.set_response_appearance("run", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("run")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", lambda _, r: self._run_ready_preset_exec(btn) if r == "run" else None)
+        dialog.present(self.get_root())
+
+    def _run_ready_preset_exec(self, btn):
         btn.set_sensitive(False)
         btn.set_label("⏳ Выполняется...")
         self._log("\n▶  DaVinci Resolve Ready...\n")
@@ -474,11 +525,8 @@ class DaVinciPage(Gtk.Box):
 
             def _finish():
                 btn.set_label("✔ Готово" if all_ok else "✘ Ошибка")
-                if not all_ok:
-                    btn.set_sensitive(True)
-                else:
-                    btn.add_css_class("flat")
-                    btn.remove_css_class("suggested-action")
+                btn.set_sensitive(True)
+                if all_ok:
                     set_status_ok(self._post_st)
                     self._post_btn.set_label("Выполнено")
                     self._post_btn.set_sensitive(False)
@@ -501,7 +549,7 @@ class DaVinciPage(Gtk.Box):
                     target=lambda: GLib.idle_add(self._set_aac_ui, backend.is_aac_installed()),
                     daemon=True,
                 ).start()
-                self._reset_btn_later(btn, "DaVinci Resolve Ready")
+                self._reset_btn_later(btn, "DaVinci Ready")
                 if hasattr(win, "stop_progress"): win.stop_progress(all_ok)
 
             GLib.idle_add(_finish)
