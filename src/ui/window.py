@@ -14,7 +14,7 @@ import time
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
 import config
 import backend
@@ -63,14 +63,27 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self.set_default_size(settings.get("width", 740), settings.get("height", 880))
         self.connect("close-request", self._on_close)
 
-        # ── Структура окна: ToastOverlay → Box → Header + Stack + Log ─────────
+        # ── Структура окна (GNOME HIG): ToolbarView → ToastOverlay → Box ────────
+        # Adw.ToolbarView гарантирует, что ViewSwitcherBar (нижний бар) резервирует
+        # своё место в layouts и никогда не перекрывает контент.
+        #
+        #   ApplicationWindow
+        #     └─ BreakpointBin
+        #          └─ ToastOverlay
+        #               └─ ToolbarView
+        #                    ├─ top_bar: HeaderBar
+        #                    ├─ content: Box(VERTICAL)
+        #                    │     ├─ update_banner
+        #                    │     ├─ profile_banner
+        #                    │     ├─ stack_overlay (Overlay, vexpand)
+        #                    │     └─ log_widget
+        #                    └─ bottom_bar: ViewSwitcherBar
+
+        # Строим хедер первым (он создаёт self._stack, self._switcher, self._header)
+        header_widget = self._build_header()
+
+        # Контентная область: баннеры + стек страниц + лог
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-
-        # ToastOverlay позволяет показывать всплывающие уведомления поверх всего контента
-        self._toast_overlay = Adw.ToastOverlay()
-        self._toast_overlay.set_child(root)
-
-        root.append(self._build_header())
         root.append(self._build_update_banner())
         root.append(self._build_profile_banner())
 
@@ -116,22 +129,32 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         root.append(stack_overlay)
         root.append(self._log_widget)
 
-        # ViewSwitcherBar для узкого режима (по умолчанию скрыт; показывается breakpoint-ом)
-        self._switcher_bar = Adw.ViewSwitcherBar()
-        self._switcher_bar.set_stack(self._stack)
-        self._switcher_bar.set_reveal(False)
-        root.append(self._switcher_bar)
+        # Adw.ToolbarView управляет верхними барами по стандарту GNOME HIG
+        toolbar_view = Adw.ToolbarView()
+        toolbar_view.add_top_bar(header_widget)
+        toolbar_view.set_content(root)
 
-        # Адаптивный контейнер GNOME HIG: при ширине < 550sp прячет ViewSwitcher
-        # из хедера и показывает ViewSwitcherBar снизу (Adw.BreakpointBin)
+        # ToastOverlay поверх всей иерархии
+        self._toast_overlay = Adw.ToastOverlay()
+        self._toast_overlay.set_child(toolbar_view)
+
+        # Адаптивный контейнер: минимальная ширина 550sp — ровно столько нужно
+        # чтобы все 7 вкладок поместились в хедере (без нижнего бара)
         bp_bin = Adw.BreakpointBin()
-        bp_bin.set_size_request(360, 200)
+        bp_bin.set_size_request(750, 200)
         bp_bin.set_child(self._toast_overlay)
-        bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 550sp"))
-        bp.add_setter(self._header, "title-widget", self._window_title)
-        bp.add_setter(self._switcher_bar, "reveal", True)
-        bp_bin.add_breakpoint(bp)
+
+        # При ширине < 620sp: скрываем текст вкладок, оставляем только иконки с тултипами
+        self._bp_icons_active = False  # флаг: активен ли breakpoint на скрытие текста
+        bp_mid = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 620sp"))
+        bp_mid.connect("apply",   lambda _: self._on_bp_icons_apply(True))
+        bp_mid.connect("unapply", lambda _: self._on_bp_icons_apply(False))
+        bp_bin.add_breakpoint(bp_mid)
+
         self.set_content(bp_bin)
+
+        # Применяем сохранённые настройки видимости текста вкладок после realize
+        GLib.idle_add(self._apply_tab_label_visibility)
 
         startup_ms = (time.time() - start_time) * 1000
         self._log(f"ℹ Startup time: {startup_ms:.2f} ms\n")
@@ -148,6 +171,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._stack = Adw.ViewStack()
         self._switcher = Adw.ViewSwitcher()
         self._switcher.set_stack(self._stack)
+        self._switcher.set_policy(Adw.ViewSwitcherPolicy.NARROW)  # текст всегда под иконкой
         header.set_title_widget(self._switcher)
 
         # WindowTitle для узкого режима (используется в Adw.Breakpoint при ширине < 550sp)
@@ -159,6 +183,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         # ── Структура меню (гамбургер) ────────────────────────────────────────
         menu = Gio.Menu()
+
+        section_view = Gio.Menu()
+        section_view.append("Текст у вкладок", "win.show_tab_labels")
+        menu.append_section(None, section_view)
 
         section_diag = Gio.Menu()
         section_diag.append("Посмотреть логи", "win.open_log")
@@ -214,6 +242,12 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 padding-left: 12px;
                 padding-right: 12px;
             }
+            viewswitcher.ab-icons-only button {
+                min-height: 0;
+                min-width: 0;
+                padding: 4px 2px;
+                margin: 0;
+            }
         """)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), _dot_css,
@@ -237,11 +271,83 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             a.connect("activate", cb)
             self.add_action(a)
 
+        # Stateful action «Текст у вкладок» (сохраняется в конфиг)
+        show_labels = config.state_get("show_tab_labels", False)
+        a_labels = Gio.SimpleAction.new_stateful(
+            "show_tab_labels", None, GLib.Variant.new_boolean(show_labels)
+        )
+        a_labels.connect("change-state", self._on_show_tab_labels_changed)
+        self.add_action(a_labels)
+
         # Стандартные клавиатурные сокращения GNOME HIG
         app = self.get_application()
         app.set_accels_for_action("win.about", ["F1"])
 
         return header
+
+    def _set_labels_visible_in(self, widget, visible: bool):
+        """Рекурсивно скрывает/показывает все Gtk.Label внутри виджета.
+
+        AdwViewSwitcherButton: Button → GtkStack → GtkBox (wide/narrow) → GtkImage + GtkLabel.
+        Нужна рекурсия, т.к. Label не является прямым потомком кнопки.
+        """
+        if isinstance(widget, Gtk.Label):
+            widget.set_visible(visible)
+            return  # в Label нет вложенных Label — дальше не идём
+        child = widget.get_first_child()
+        while child is not None:
+            self._set_labels_visible_in(child, visible)
+            child = child.get_next_sibling()
+
+    def _find_child_of_type(self, widget, widget_type):
+        """Рекурсивно ищет первый потомок заданного типа."""
+        if isinstance(widget, widget_type):
+            return widget
+        child = widget.get_first_child()
+        while child is not None:
+            result = self._find_child_of_type(child, widget_type)
+            if result:
+                return result
+            child = child.get_next_sibling()
+        return None
+
+    def _apply_icons_only_to_switcher(self, switcher, icons_only: bool, pages=None):
+        """Применяет режим «только иконки» к конкретному ViewSwitcher: CSS-класс, лейблы, тултипы."""
+        if icons_only:
+            switcher.add_css_class("ab-icons-only")
+        else:
+            switcher.remove_css_class("ab-icons-only")
+        btn = switcher.get_first_child()
+        i = 0
+        while btn is not None:
+            self._set_labels_visible_in(btn, not icons_only)
+            if icons_only and pages and i < pages.get_n_items():
+                btn.set_tooltip_text(pages.get_item(i).get_title())
+            else:
+                btn.set_tooltip_text(None)
+            btn = btn.get_next_sibling()
+            i += 1
+
+    def _switcher_set_icons_only(self, icons_only: bool):
+        """Скрывает/показывает текст вкладок в хедере. При скрытии ставит тултипы."""
+        pages = self._stack.get_pages() if icons_only else None
+        self._apply_icons_only_to_switcher(self._switcher, icons_only, pages)
+
+    def _on_bp_icons_apply(self, active: bool):
+        """Вызывается при срабатывании breakpoint 620sp (скрытие/показ текста вкладок)."""
+        self._bp_icons_active = active
+        self._apply_tab_label_visibility()
+
+    def _apply_tab_label_visibility(self):
+        """Итоговая видимость текста вкладок = НЕТ, если breakpoint активен ИЛИ пользователь выключил."""
+        user_wants_labels = config.state_get("show_tab_labels", False)
+        self._switcher_set_icons_only(self._bp_icons_active or not user_wants_labels)
+
+    def _on_show_tab_labels_changed(self, action, state):
+        """Обработчик переключателя «Текст у вкладок» из гамбургер-меню."""
+        action.set_state(state)
+        config.state_set("show_tab_labels", state.get_boolean())
+        self._apply_tab_label_visibility()
 
     def _build_update_banner(self):
         """Плавающий баннер обновления под хедером — по аналогии с баннером в Приложениях."""
@@ -305,8 +411,14 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         presets = profile_module.list_presets()
         active_name = config.state_get("active_preset")
 
-        # Метка кнопки = имя активного пресета, иначе «Default»
-        self._preset_btn.set_label(active_name or "Default")
+        # Метка кнопки = имя активного пресета (с обрезкой длинных названий), иначе «Default»
+        display_name = active_name or "Default"
+        _btn_lbl = Gtk.Label(label=display_name)
+        _btn_lbl.set_max_width_chars(9)
+        _btn_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        _btn_lbl.set_tooltip_text(display_name if len(display_name) > 9 else None)
+        self._preset_btn.set_child(_btn_lbl)
+        self._preset_btn.set_always_show_arrow(True)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         box.set_margin_top(4)
