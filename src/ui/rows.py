@@ -31,6 +31,7 @@ _badge_css.load_from_data(b"""
 
 import backend
 import config
+from ui.install_preview_dialog import InstallPreviewDialog
 from widgets import (
     make_icon, make_button, make_status_icon,
     set_status_ok, set_status_error, clear_status, make_suffix_box,
@@ -75,6 +76,7 @@ class SettingRow(Adw.ActionRow):
 
         suffix_box.append(self._status)
         suffix_box.append(self._btn)
+        self._suffix_box = suffix_box
         self.add_suffix(suffix_box)
 
         if config.state_get(state_key) is True:
@@ -418,18 +420,57 @@ class AppRow(Adw.ActionRow):
     def _on_install(self, _=None):
         if self._installing or self.is_installed():
             return
-            
+
         # Определяем источник: выбранный в дропдауне
         idx = self._selected_source_index
         if idx < 0 or idx >= len(self._sources):
             idx = 0
-        
+
         if not self._sources:
              self._log("\n✘  Нет источников установки для этого приложения.\n")
              return
 
         src = self._sources[idx]
 
+        # Блокируем кнопку на время показа диалога предпросмотра
+        self._btn.set_sensitive(False)
+        self._btn.set_label("…")
+        if self._src_menu_btn:
+            self._src_menu_btn.set_sensitive(False)
+
+        cmd = list(src["cmd"])
+        is_epm = bool(cmd and cmd[0] == "epm")
+
+        self._show_preview_then_install(src, cmd, is_epm)
+
+    def _show_preview_then_install(self, src, cmd, is_epm):
+        """Показывает диалог предпросмотра, затем при подтверждении запускает установку."""
+        def on_confirm():
+            self._do_install(src, cmd, is_epm)
+
+        def on_cancel():
+            # Восстанавливаем кнопку
+            self._btn.set_sensitive(True)
+            self._btn.set_label("Установить")
+            if self._src_menu_btn:
+                self._src_menu_btn.set_sensitive(True)
+
+        # Выбираем runner в зависимости от источника:
+        # epm-команды идут через run_epm_sync, остальные — run_privileged_sync
+        runner = backend.run_epm_sync if is_epm else backend.run_privileged_sync
+
+        InstallPreviewDialog(
+            parent=self.get_root(),
+            app_name=self._app["label"],
+            source_label=src.get("label", ""),
+            cmd=cmd,
+            on_confirm=on_confirm,
+            on_cancel=on_cancel,
+            runner=runner,
+        ).present()
+
+    def _do_install(self, src, cmd, is_epm):
+        """Запускает реальную установку после подтверждения в диалоге предпросмотра."""
         self._installing = True
         self._btn.set_sensitive(False)
         if self._src_menu_btn:
@@ -439,15 +480,12 @@ class AppRow(Adw.ActionRow):
         self._prog.set_fraction(0.0)
         GLib.timeout_add(120, self._pulse)
         self._log(f"\n▶  Установка {self._app['label']} ({src['label']})...\n")
-        
+
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress(f"Установка {self._app['label']}...")
 
-        cmd = list(src["cmd"])
-        is_epm = False
-        if cmd and cmd[0] == "epm":
-            is_epm = True
-            # Автоматически добавляем -y для epm install/remove
+        # Добавляем -y для epm install/remove
+        if is_epm:
             if len(cmd) > 1 and cmd[1] in ("install", "-i", "remove", "-e") and "-y" not in cmd:
                 cmd.insert(2, "-y")
 
@@ -464,7 +502,6 @@ class AppRow(Adw.ActionRow):
                 self._install_done(False)
                 return
             self._log(f"\n▶  Повторная попытка установки {self._app['label']}...\n")
-            # При повторе используем обычный логгер
             if is_epm:
                 backend.run_epm(cmd, self._log, self._install_done)
             else:

@@ -16,8 +16,47 @@ from gi.repository import Adw, Gdk, GLib, Gtk
 
 import backend
 import config
+from ui.install_preview_dialog import InstallPreviewDialog
 from widgets import make_button, make_icon, make_scrolled_page
 from ui.rows import SettingRow
+
+# ── Зеркала APT-репозитория ───────────────────────────────────────────────────
+_SOURCES_DIR = Path("/etc/apt/sources.list.d")
+_MIRRORS = [
+    ("ALT Linux", "alt.list",    "ALT Linux (ftp.altlinux.org) — официальный"),
+    ("Яндекс",    "yandex.list", "Яндекс (mirror.yandex.ru) — быстрое, Россия"),
+    ("HEAnet",    "heanet.list", "HEAnet (ftp.heanet.ie) — Ирландия"),
+    ("IPSL",      "ipsl.list",   "IPSL (distrib-coffee.ipsl.jussieu.fr) — Франция"),
+]
+
+def _detect_active_mirror() -> str:
+    """Возвращает имя файла активного зеркала (первый .list с незакомментированной rpm-строкой)."""
+    for _, fname, _ in _MIRRORS:
+        path = _SOURCES_DIR / fname
+        if not path.exists():
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("rpm "):
+                        return fname
+        except OSError:
+            pass
+    return "alt.list"
+
+def _build_mirror_switch_cmd(new_list: str) -> list:
+    """Возвращает bash-команду переключения активного зеркала APT."""
+    parts = []
+    for _, fname, _ in _MIRRORS:
+        fpath = f"/etc/apt/sources.list.d/{fname}"
+        if fname == new_list:
+            # Раскомментировать только HTTP-строки
+            parts.append(f"sed -i '/^#rpm \\[.*\\] http:\\/\\//s/^#//' '{fpath}'")
+        else:
+            # Закомментировать все активные rpm-строки
+            parts.append(f"sed -i '/^rpm /s/^/#/' '{fpath}'")
+    return ["bash", "-c", " && ".join(parts)]
+
 
 class SetupPage(Gtk.Box):
     def __init__(self, log_fn):
@@ -283,6 +322,52 @@ class SetupPage(Gtk.Box):
             if hasattr(win, "stop_progress"): win.stop_progress(ok)
         threading.Thread(target=_do, daemon=True).start()
         
+    def _build_mirror_menu(self):
+        """Строит MenuButton выбора зеркала для строки epm update."""
+        self._selected_mirror = _detect_active_mirror()
+
+        popover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        popover_box.set_margin_top(6)
+        popover_box.set_margin_bottom(6)
+        popover_box.set_margin_start(8)
+        popover_box.set_margin_end(8)
+
+        first = None
+        for _, fname, label in _MIRRORS:
+            if not (_SOURCES_DIR / fname).exists():
+                continue
+            rb = Gtk.CheckButton(label=label)
+            if first is None:
+                first = rb
+            else:
+                rb.set_group(first)
+            if fname == self._selected_mirror:
+                rb.set_active(True)
+            rb.connect("toggled", self._on_mirror_toggled, fname)
+            popover_box.append(rb)
+
+        popover = Gtk.Popover()
+        popover.set_child(popover_box)
+
+        self._mirror_btn = Gtk.MenuButton()
+        self._mirror_btn.set_popover(popover)
+        self._mirror_btn.add_css_class("flat")
+        self._mirror_btn.set_valign(Gtk.Align.CENTER)
+        self._mirror_btn.set_tooltip_text("Зеркало репозитория")
+        self._sync_mirror_label()
+        return self._mirror_btn
+
+    def _on_mirror_toggled(self, radio, fname):
+        if radio.get_active():
+            self._selected_mirror = fname
+            self._sync_mirror_label()
+
+    def _sync_mirror_label(self):
+        for name, fname, _ in _MIRRORS:
+            if fname == self._selected_mirror:
+                self._mirror_btn.set_label(name)
+                break
+
     def _on_epm(self, row):
         # Если EPM не установлен — сначала спросить, установить ли его
         if not backend.is_epm_installed():
@@ -319,18 +404,17 @@ class SetupPage(Gtk.Box):
             return
 
         row.set_working()
-        self._log("\n▶  epm update...\n")
+        # Используем apt-get update (без apt-cache search), чтобы избежать
+        # двойного apt-cache search: epm full-upgrade сам сделает epm update
+        self._log("\n▶  Обновление списка пакетов...\n")
 
         win = self.get_root()
         if hasattr(win, "start_progress"):
             win.start_progress("Обновление системы...")
 
         def on_full_upgrade_done(ok):
-            # Всегда разблокируем кнопку, чтобы можно было обновляться снова
             GLib.idle_add(row.set_done, False)
-            # Возвращаем исходный текст кнопки
             GLib.idle_add(row._btn.set_label, "Обновить")
-
             if ok:
                 self._log("\n✔  ALT Linux обновлён!\n")
             else:
@@ -338,18 +422,68 @@ class SetupPage(Gtk.Box):
             if hasattr(win, "stop_progress"):
                 win.stop_progress(ok)
 
-        def on_update_done(ok):
-            if not ok:
-                GLib.idle_add(row.set_done, False)
-                GLib.idle_add(row._btn.set_label, "Обновить")
-                self._log("\n✘  Ошибка epm update\n")
-                if hasattr(win, "stop_progress"):
-                    win.stop_progress(False)
-                return
+        def _reset_row():
+            GLib.idle_add(row.set_done, False)
+            GLib.idle_add(row._btn.set_label, "Обновить")
+
+        def _run_full_upgrade():
             self._log("\n▶  epm full-upgrade...\n")
             backend.run_epm(["epm", "-y", "full-upgrade"], self._log, on_full_upgrade_done)
 
-        backend.run_epm(["epm", "-y", "update"], self._log, on_update_done)    
+        def on_update_done(ok):
+            if not ok:
+                _reset_row()
+                self._log("\n✘  Ошибка обновления индексов\n")
+                if hasattr(win, "stop_progress"):
+                    win.stop_progress(False)
+                return
+
+            def on_confirm():
+                _run_full_upgrade()
+
+            def on_cancel():
+                self._log("\n⚠  Обновление отменено пользователем.\n")
+                _reset_row()
+                if hasattr(win, "stop_progress"):
+                    win.stop_progress(False)
+
+            GLib.idle_add(
+                lambda: InstallPreviewDialog(
+                    parent=self.get_root(),
+                    app_name="Обновление системы",
+                    source_label="EPM",
+                    cmd=["apt-get", "dist-upgrade"],
+                    on_confirm=on_confirm,
+                    on_cancel=on_cancel,
+                    runner=backend.run_privileged_sync,
+                    empty_message="Система и приложения обновлены",
+                ).present()
+            )
+
+        def _run_epm_update():
+            # apt-get update: только обновление индексов, без apt-cache search
+            backend.run_privileged(["apt-get", "-y", "update"], self._log, on_update_done)
+
+        # Если выбрано другое зеркало — сначала переключаем, потом обновляем
+        active_mirror = _detect_active_mirror()
+        selected = getattr(self, "_selected_mirror", active_mirror)
+        if selected != active_mirror:
+            mirror_name = next((n for n, f, _ in _MIRRORS if f == selected), selected)
+            self._log(f"\n▶  Переключение зеркала на {mirror_name}...\n")
+
+            def _after_switch(ok):
+                if ok:
+                    self._log(f"✔  Зеркало переключено на {mirror_name}.\n")
+                    _run_epm_update()
+                else:
+                    self._log("✘  Ошибка переключения зеркала.\n")
+                    GLib.idle_add(_reset_row)
+                    if hasattr(win, "stop_progress"):
+                        GLib.idle_add(win.stop_progress, False)
+
+            backend.run_privileged(_build_mirror_switch_cmd(selected), self._log, _after_switch)
+        else:
+            _run_epm_update()
 
     def _on_install_epm(self, row):
         row.set_working()
@@ -384,7 +518,11 @@ class SetupPage(Gtk.Box):
         ]
 
         self._r_epm_install, self._r_epm = [SettingRow(*r) for r in pkg_rows]
-        
+
+        # Вставляем выбор зеркала между статусом и кнопкой "Обновить"
+        mirror_btn = self._build_mirror_menu()
+        self._r_epm._suffix_box.insert_child_after(mirror_btn, self._r_epm._status)
+
         for r in (self._r_epm_install, self._r_epm):
             pkg_group.add(r)
 

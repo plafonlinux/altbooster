@@ -101,6 +101,12 @@ RECOMMENDED = [
         "Позволяет группировать и скрывать значки в системном лотке.",
         "9164",
     ),
+    (
+        "right-click-next@derVedro",
+        "Right Click Next",
+        "Добавляет кнопки «Следующий трек» и «Предыдущий» в контекстное меню медиаплеера.",
+        "7600",
+    ),
 ]
 
 _USER_EXT_DIR   = Path.home() / ".local" / "share" / "gnome-shell" / "extensions"

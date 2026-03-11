@@ -29,6 +29,30 @@ _POSTINSTALL_CMD = [
 ]
 _ROCM_PKGS = ["apt-get", "install", "-y", "libGLU", "ffmpeg",
               "rocm-opencl-runtime", "hip-runtime-amd", "clinfo"]
+def _build_fairlight_cmd() -> list:
+    """Строит команду активации ALSA→PulseAudio для DaVinci Resolve.
+
+    Проблема: pipewire-alsa устанавливает start_threshold=LONG_MAX на capture-потоке,
+    из-за чего Fairlight открывает устройство, но не получает сэмплы (xfer=0) — кнопка R
+    мигает красной и тут же сереет. Воркэраунд: маршрутизировать ALSA через
+    pipewire-pulse (type pulse), а не через pipewire-alsa напрямую.
+
+    ~/.asoundrc имеет приоритет над /etc/asound.conf, поэтому пишем оба файла.
+    Используем block-format {type pulse} — именно он подтверждён как рабочий в issue PW #2870.
+    """
+    user_home = os.path.expanduser("~")
+    asound_content = (
+        "pcm.!default {\\n"
+        "    type pulse\\n"
+        "}\\n"
+        "ctl.!default pulse\\n"
+    )
+    return [
+        "bash", "-c",
+        f"apt-get install -y alsa-plugins-pulse && "
+        f"printf '{asound_content}' > /etc/asound.conf && "
+        f"printf '{asound_content}' > '{user_home}/.asoundrc'",
+    ]
 
 
 class DaVinciPage(Gtk.Box):
@@ -177,13 +201,19 @@ class DaVinciPage(Gtk.Box):
         exp.add_row(flg)
         r4 = Adw.ActionRow()
         r4.set_title("Включить Fairlight")
-        r4.set_subtitle("epm -i alsa-plugins-pulse")
+        r4.set_subtitle("alsa-plugins-pulse + /etc/asound.conf → pcm.!default pulse")
         r4.add_prefix(make_icon("audio-speakers-symbolic"))
         self._fl_st = make_status_icon()
         self._fl_btn = make_button("Установить")
         self._fl_btn.connect("clicked", self._on_fairlight)
         self._fl_btn.set_sensitive(False)
-        r4.add_suffix(make_suffix_box(self._fl_st, self._fl_btn))
+        info_btn = Gtk.Button()
+        info_btn.set_icon_name("dialog-information-symbolic")
+        info_btn.add_css_class("flat")
+        info_btn.set_valign(Gtk.Align.CENTER)
+        info_btn.set_tooltip_text("Что делать после установки")
+        info_btn.connect("clicked", self._on_fairlight_info)
+        r4.add_suffix(make_suffix_box(info_btn, self._fl_st, self._fl_btn))
         flg.add(r4)
         threading.Thread(
             target=lambda: GLib.idle_add(self._set_fl_ui, backend.is_fairlight_installed()),
@@ -279,16 +309,21 @@ class DaVinciPage(Gtk.Box):
             self._aac_btn.set_label("Установить")
 
     def _set_fl_ui(self, ok):
+        # Кнопка всегда активна — конфиг можно переприменить
+        self._fl_btn.set_sensitive(True)
         if ok:
             set_status_ok(self._fl_st)
-            self._fl_btn.set_label("Установлен")
-            self._fl_btn.set_sensitive(False)
+            self._fl_btn.set_label("Применить снова")
             self._fl_btn.remove_css_class("suggested-action")
-            self._fl_btn.add_css_class("flat")
+            self._fl_btn.remove_css_class("flat")
+            self._fl_btn.add_css_class("destructive-action")
+            self._fl_btn.set_opacity(0.6)
         else:
             clear_status(self._fl_st)
-            self._fl_btn.set_sensitive(True)
             self._fl_btn.set_label("Установить")
+            self._fl_btn.remove_css_class("flat")
+            self._fl_btn.remove_css_class("destructive-action")
+            self._fl_btn.set_opacity(1.0)
 
     # ── Обработчики ──────────────────────────────────────────────────────────
 
@@ -447,17 +482,43 @@ class DaVinciPage(Gtk.Box):
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    _FAIRLIGHT_HINT = (
+        "После перезапуска DaVinci Resolve выполните два шага:\n\n"
+        "1. Включите авто-патчинг входов:\n"
+        "   Preferences → User → Fairlight →\n"
+        "   Enable Auto Patching\n\n"
+        "2. Укажите папку для записи:\n"
+        "   File → Project Settings →\n"
+        "   Master Settings → Capture and Playback"
+    )
+
+    def _on_fairlight_info(self, _):
+        dialog = Adw.AlertDialog(
+            heading="Настройка Fairlight",
+            body=self._FAIRLIGHT_HINT,
+        )
+        dialog.add_response("ok", "Понятно")
+        dialog.set_default_response("ok")
+        dialog.present(self.get_root())
+
     def _on_fairlight(self, _):
         self._fl_btn.set_sensitive(False)
         self._fl_btn.set_label("…")
         self._log("\n▶  Fairlight...\n")
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress("Установка Fairlight...")
-        backend.run_privileged(
-            ["apt-get", "install", "-y", "alsa-plugins-pulse"],
-            self._log,
-            lambda ok: (self._set_fl_ui(ok), self._log("✔  Fairlight!\n" if ok else "✘  Ошибка\n"), win.stop_progress(ok) if hasattr(win, "stop_progress") else None),
-        )
+
+        def _done(ok):
+            self._set_fl_ui(ok)
+            if ok:
+                self._log("✔  Готово! Перезапустите DaVinci Resolve.\n")
+                self._on_fairlight_info(None)
+            else:
+                self._log("✘  Ошибка\n")
+            if hasattr(win, "stop_progress"):
+                win.stop_progress(ok)
+
+        backend.run_privileged(_build_fairlight_cmd(), self._log, _done)
 
     # ── Пресет «DaVinci Resolve Ready» ───────────────────────────────────────
 
@@ -503,7 +564,7 @@ class DaVinciPage(Gtk.Box):
             ("PostInstall", _POSTINSTALL_CMD, "privileged", None),
             ("AMD ROCm", _ROCM_PKGS, "privileged",
              lambda: subprocess.run(["rpm", "-q", "rocm-opencl-runtime"], capture_output=True).returncode == 0),
-            ("Fairlight", ["apt-get", "install", "-y", "alsa-plugins-pulse"], "privileged",
+            ("Fairlight", _build_fairlight_cmd(), "privileged",
              backend.is_fairlight_installed),
             ("AAC", None, "aac", backend.is_aac_installed),
         ]
