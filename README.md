@@ -11,6 +11,7 @@
 [![ALT Linux Sisyphus](https://img.shields.io/badge/ALT_Linux-Sisyphus-yellow)](https://packages.altlinux.org/ru/sisyphus/srpms/plafon-altbooster/)
 [![GTK](https://img.shields.io/badge/GTK-4.0-green)](https://gtk.org)
 [![Python](https://img.shields.io/badge/Python-3.10+-yellow)](https://python.org)
+![Last commit](https://img.shields.io/github/last-commit/plafonlinux/altbooster)
 
 </div>
 
@@ -18,7 +19,14 @@
   <img src="previewb.png" alt="Интерфейс ALT Booster" width="800">
 </div>
 
----
+## Навигация
+- [О проекте](#о-проекте)
+- [Ключевые возможности](#ключевые-возможности)
+- [Требования](#требования)
+- [Установка](#установка)
+- [Структура проекта](#структура-проекта)
+- [Как внести свой вклад?](#как-внести-свой-вклад)
+- [Лицензия](#лицензия)
 
 ## О проекте
 
@@ -116,6 +124,9 @@ altbooster/
 ├── CONTRIBUTING.md        # Руководство для участников
 └── README.md              # Этот файл
 ```
+
+## Как внести свой вклад?
+Читайте [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## Лицензия
 
