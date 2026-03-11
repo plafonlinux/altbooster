@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -29,7 +30,9 @@ from ui.extensions_page import ExtensionsPage
 from ui.terminal_page import TerminalPage
 from ui.davinci_page import DaVinciPage
 from ui.amd_page import AmdPage
+from ui.intel_page import IntelPage
 from ui.maintenance_page import MaintenancePage
+from ui.flatpak_page import FlatpakPage
 
 
 class AltBoosterWindow(Adw.ApplicationWindow):
@@ -44,6 +47,45 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         if not os.path.exists("/usr/share/icons/Adwaita") and os.path.exists("/usr/share/icons/alt-workstation"):
             icon_theme = "alt-workstation"
         Gtk.Settings.get_default().set_property("gtk-icon-theme-name", icon_theme)
+
+        # ── Регистрация bundled-иконок ────────────────────────────────────────
+        _icons_base = Path(__file__).parent.parent.parent / "icons"
+
+        # 1. Копируем SVG в ~/.local/share/icons/hicolor/ — стандартный путь GTK.
+        #    Сравниваем байты: копируем только изменившиеся/новые файлы.
+        _src_base = _icons_base / "hicolor" / "scalable"
+        _dst_hicolor = Path.home() / ".local" / "share" / "icons" / "hicolor"
+        _dst_base = _dst_hicolor / "scalable"
+        for _cat in ("apps", "devices"):
+            _src_cat = _src_base / _cat
+            _dst_cat = _dst_base / _cat
+            if not _src_cat.exists():
+                continue
+            _dst_cat.mkdir(parents=True, exist_ok=True)
+            for _svg in _src_cat.glob("*.svg"):
+                _dst = _dst_cat / _svg.name
+                try:
+                    if not _dst.exists() or _dst.read_bytes() != _svg.read_bytes():
+                        shutil.copy2(_svg, _dst)
+                except OSError:
+                    pass
+
+        # 2. Пересоздаём icon-theme.cache через gtk-update-icon-cache.
+        #    Это необходимо: GTK читает кэш ДО inotify-уведомлений, поэтому
+        #    без обновлённого кэша новые иконки не видны до перезапуска DE.
+        #    Запускаем всегда (или только при изменениях — зависит от скорости).
+        try:
+            subprocess.run(
+                ["gtk-update-icon-cache", "-f", "-t", str(_dst_hicolor)],
+                capture_output=True, timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+        # 3. add_search_path — дополнительный fallback: GTK ищет иконки
+        #    и в директории проекта, независимо от состояния ~/.local/share/
+        _it = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        _it.add_search_path(str(_icons_base))
 
         # ── Лог (строится первым, чтобы все остальные компоненты могли писать в него) ──
         self._pulse_timer_id = None
@@ -105,14 +147,18 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 return lbl
 
         self._amd = AmdPage(self._log)
+        self._intel = IntelPage(self._log)
+        self._flatpak = FlatpakPage(self._log)
 
         # Регистрируем все страницы в ViewStack; порядок определяет порядок вкладок
         for widget, name, title, icon in [
             (self._setup,       "setup",       "Начало",          "go-home-symbolic"),
-            (self._apps,        "apps",        "Приложения",      "flathub-symbolic"),
+            (self._apps,        "apps",        "Приложения",      "grid-large-symbolic"),
             (self._extensions,  "extensions",  "Расширения",      "application-x-addon-symbolic"),
+            (self._flatpak,     "flatpak",     "Flatpak",         "flatpak-symbolic"),
             (self._terminal,   "terminal",    "Терминал",        "utilities-terminal-symbolic"),
             (self._amd,        "amd",         "AMD Radeon",      "video-display-symbolic"),
+            (self._intel,      "intel",       "Intel",           "processor-symbolic"),
             (self._davinci,    "davinci",     "DaVinci Resolve", "davinci-symbolic"),
             (self._maint,      "maintenance", "Обслуживание",    "emblem-system-symbolic"),
         ]:

@@ -8,12 +8,18 @@ widgets.py — общие фабрики виджетов GTK4 / Adwaita.
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk
+from gi.repository import Gio, Gtk
 
 
-def make_icon(name: str, size: int = 22) -> Gtk.Image:
-    """Создаёт именованную иконку заданного размера в пикселях."""
-    icon = Gtk.Image.new_from_icon_name(name)
+def make_icon(name: str, size: int = 22, fallback: str = "application-x-executable-symbolic") -> Gtk.Image:
+    """Создаёт именованную иконку заданного размера в пикселях.
+
+    Использует Gio.ThemedIcon с цепочкой имён: если name отсутствует
+    в текущей теме (например Papirus не содержит cpu-symbolic) —
+    GTK автоматически берёт fallback вместо заглушки «image-missing».
+    """
+    gicon = Gio.ThemedIcon.new_from_names([name, fallback])
+    icon = Gtk.Image.new_from_gicon(gicon)
     icon.set_pixel_size(size)
     return icon
 

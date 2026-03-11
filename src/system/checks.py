@@ -183,9 +183,16 @@ def is_aac_installed() -> bool:
 
 
 def is_fairlight_installed() -> bool:
-    """Проверяет, установлен ли плагин Fairlight для DaVinci Resolve."""
+    """Проверяет, настроен ли ALSA-аудио для DaVinci Resolve (Fairlight + Edit).
+    Требуется: пакет alsa-plugins-pulse + /etc/asound.conf с правилом pulse."""
     try:
-        return subprocess.run(["rpm", "-q", "alsa-plugins-pulse"], capture_output=True, timeout=10).returncode == 0
+        pkg_ok = subprocess.run(["rpm", "-q", "alsa-plugins-pulse"], capture_output=True, timeout=10).returncode == 0
+        if not pkg_ok:
+            return False
+        asound = "/etc/asound.conf"
+        if not os.path.exists(asound):
+            return False
+        return "pcm.!default pulse" in open(asound).read()
     except (subprocess.TimeoutExpired, OSError):
         return False
 
