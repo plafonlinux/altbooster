@@ -1,12 +1,6 @@
 
 from typing import Callable
 
-from builtin_actions.appearance import (
-    apply_papirus_icons,
-    apply_adwaita_theme,
-    apply_folder_color,
-    reset_folder_color,
-)
 from builtin_actions.terminal import (
     check_ptyxis_default,
     set_ptyxis_default,
@@ -32,10 +26,6 @@ from builtin_actions.amd import (
 )
 
 BUILTIN_REGISTRY: dict[str, Callable] = {
-    "apply_papirus_icons":      apply_papirus_icons,
-    "apply_adwaita_theme":      apply_adwaita_theme,
-    "apply_folder_color":       apply_folder_color,
-    "reset_folder_color":       reset_folder_color,
     "check_ptyxis_default":     check_ptyxis_default,
     "set_ptyxis_default":       set_ptyxis_default,
     "check_shortcut_1":         check_shortcut_1,
