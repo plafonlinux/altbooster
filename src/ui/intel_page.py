@@ -88,7 +88,11 @@ class IntelPage(Gtk.Box):
         body.set_margin_start(20)
         body.set_margin_end(20)
 
-        scroll.set_child(body)
+        clamp = Adw.Clamp()
+        clamp.set_maximum_size(1152)
+        clamp.set_tightening_threshold(864)
+        clamp.set_child(body)
+        scroll.set_child(clamp)
 
         # Overlay: баннер «Экспериментально» плавает поверх контента снизу
         overlay = Gtk.Overlay()

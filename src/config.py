@@ -21,6 +21,9 @@ STATE_FILE  = CONFIG_DIR / "state.json"
 
 VERSION = "5.6.8-beta"
 
+# Флаг отладочного режима — устанавливается из main.py при запуске с --debug
+DEBUG: bool = False
+
 PRESETS_DIR = CONFIG_DIR / "presets"
 
 

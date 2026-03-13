@@ -2,9 +2,26 @@
 
 import sys
 import os
+import traceback
 
 # Добавляем директорию скрипта в путь поиска модулей
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# ── Debug-режим: разбираем --debug до инициализации GTK ───────────────────────
+_DEBUG = "--debug" in sys.argv
+if _DEBUG:
+    sys.argv.remove("--debug")
+    # Все GLib/GTK предупреждения выводятся в терминал
+    os.environ.setdefault("G_MESSAGES_DEBUG", "all")
+
+    def _excepthook(exc_type, exc_value, exc_tb):
+        print("\n[DEBUG] Необработанное исключение:", file=sys.stderr)
+        traceback.print_exception(exc_type, exc_value, exc_tb, file=sys.stderr)
+
+    sys.excepthook = _excepthook
+    print(f"[DEBUG] ALT Booster запущен в режиме отладки. Python {sys.version}")
+# ──────────────────────────────────────────────────────────────────────────────
+
 import gi
 gi.require_version("Gio", "2.0")
 gi.require_version("Gtk", "4.0")
@@ -12,6 +29,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Gio, Adw, GLib
 
 import config
+config.DEBUG = _DEBUG
 from ui import PlafonWindow
 
 class AltBoosterApp(Adw.Application):

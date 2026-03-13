@@ -105,23 +105,24 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self.set_default_size(settings.get("width", 740), settings.get("height", 880))
         self.connect("close-request", self._on_close)
 
-        # ── Структура окна (GNOME HIG): ToolbarView → ToastOverlay → Box ────────
-        # Adw.ToolbarView гарантирует, что ViewSwitcherBar (нижний бар) резервирует
-        # своё место в layouts и никогда не перекрывает контент.
-        #
+        # ── Структура окна ────────────────────────────────────────────────────
         #   ApplicationWindow
         #     └─ BreakpointBin
         #          └─ ToastOverlay
         #               └─ ToolbarView
-        #                    ├─ top_bar: HeaderBar
-        #                    ├─ content: Box(VERTICAL)
-        #                    │     ├─ update_banner
-        #                    │     ├─ profile_banner
-        #                    │     ├─ stack_overlay (Overlay, vexpand)
-        #                    │     └─ log_widget
-        #                    └─ bottom_bar: ViewSwitcherBar
+        #                    ├─ top_bar: HeaderBar (WindowTitle + меню)
+        #                    └─ content: OverlaySplitView
+        #                          ├─ sidebar: Box(VERTICAL)
+        #                          │     └─ ListBox (навигация по вкладкам)
+        #                          └─ content: Box(VERTICAL)
+        #                                ├─ update_banner
+        #                                ├─ profile_banner
+        #                                ├─ stack_overlay (Overlay, vexpand)
+        #                                │     ├─ ViewStack  (main child)
+        #                                │     └─ relogin_revealer (overlay)
+        #                                └─ log_widget
 
-        # Строим хедер первым (он создаёт self._stack, self._switcher, self._header)
+        # Строим хедер первым (он создаёт self._stack, self._header)
         header_widget = self._build_header()
 
         # Контентная область: баннеры + стек страниц + лог
@@ -166,7 +167,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             p.set_icon_name(icon)
 
         self._stack.set_vexpand(True)
-        # Оборачиваем стек в Overlay для плавающей кнопки перелогина
+        # Оборачиваем стек в Overlay для кнопки перелогина
         stack_overlay = Gtk.Overlay()
         stack_overlay.set_child(self._stack)
         stack_overlay.set_vexpand(True)
@@ -175,31 +176,43 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         root.append(stack_overlay)
         root.append(self._log_widget)
 
+        # Боковая панель навигации — Paned позволяет тащить разделитель мышью
+        self._split_view = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self._split_view.set_start_child(self._build_sidebar())
+        self._split_view.set_end_child(root)
+        # False — минимум sidebar задаётся через set_size_request на self._sidebar_widget:
+        # с текстом min=90px (< порога 110px, поэтому порог достигается при сужении),
+        # в режиме иконок min=44px.
+        self._split_view.set_shrink_start_child(False)
+        self._split_view.set_resize_start_child(False)
+        self._split_view.set_shrink_end_child(False)
+        sidebar_width = settings.get("sidebar_width")
+        # Сохранённую ширину запоминаем для восстановления при переключении из режима иконок.
+        # Если значения нет — не задаём position явно: Paned сам встанет по натуральной
+        # ширине контента (иконки + подписи + отступы), разделитель окажется вплотную к тексту.
+        self._sidebar_saved_width = sidebar_width
+        if sidebar_width is not None:
+            GLib.idle_add(self._split_view.set_position, sidebar_width)
+        # Автопереключение иконки/текст при изменении ширины sidebar перетаскиванием
+        self._split_view.connect("notify::position", self._on_sidebar_position_changed)
+
         # Adw.ToolbarView управляет верхними барами по стандарту GNOME HIG
         toolbar_view = Adw.ToolbarView()
         toolbar_view.add_top_bar(header_widget)
-        toolbar_view.set_content(root)
+        toolbar_view.set_content(self._split_view)
 
         # ToastOverlay поверх всей иерархии
         self._toast_overlay = Adw.ToastOverlay()
         self._toast_overlay.set_child(toolbar_view)
 
-        # Адаптивный контейнер: минимальная ширина 550sp — ровно столько нужно
-        # чтобы все 7 вкладок поместились в хедере (без нижнего бара)
+        # Адаптивный контейнер: минимальная ширина — боковая панель + контент
         bp_bin = Adw.BreakpointBin()
         bp_bin.set_size_request(750, 200)
         bp_bin.set_child(self._toast_overlay)
 
-        # При ширине < 620sp: скрываем текст вкладок, оставляем только иконки с тултипами
-        self._bp_icons_active = False  # флаг: активен ли breakpoint на скрытие текста
-        bp_mid = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 620sp"))
-        bp_mid.connect("apply",   lambda _: self._on_bp_icons_apply(True))
-        bp_mid.connect("unapply", lambda _: self._on_bp_icons_apply(False))
-        bp_bin.add_breakpoint(bp_mid)
-
         self.set_content(bp_bin)
 
-        # Применяем сохранённые настройки видимости текста вкладок после realize
+        # Применяем сохранённые настройки видимости текста в боковой панели после realize
         GLib.idle_add(self._apply_tab_label_visibility)
 
         startup_ms = (time.time() - start_time) * 1000
@@ -208,31 +221,25 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     # ── Заголовок окна и меню ─────────────────────────────────────────────────
 
     def _build_header(self):
-        """Строит HeaderBar с переключателем вкладок и меню настроек."""
+        """Строит HeaderBar с названием приложения и меню настроек (без переключателя вкладок)."""
         header = Adw.HeaderBar()
         self._header = header
 
         # ViewStack создаём здесь (до регистрации страниц в __init__),
         # чтобы он был доступен при добавлении вкладок в цикле выше
         self._stack = Adw.ViewStack()
-        self._switcher = Adw.ViewSwitcher()
-        self._switcher.set_stack(self._stack)
-        self._switcher.set_policy(Adw.ViewSwitcherPolicy.NARROW)  # текст всегда под иконкой
-        header.set_title_widget(self._switcher)
 
-        # WindowTitle для узкого режима (используется в Adw.Breakpoint при ширине < 550sp)
+        # Переключатель вкладок вынесен в боковую панель (_build_sidebar),
+        # хедер показывает только название приложения + кнопки
         self._window_title = Adw.WindowTitle()
         self._window_title.set_title("ALT Booster")
+        header.set_title_widget(self._window_title)
 
         # ── Кнопка выбора пресета (левый угол) ───────────────────────────────
         header.pack_start(self._build_preset_button())
 
         # ── Структура меню (гамбургер) ────────────────────────────────────────
         menu = Gio.Menu()
-
-        section_view = Gio.Menu()
-        section_view.append("Текст у вкладок", "win.show_tab_labels")
-        menu.append_section(None, section_view)
 
         section_diag = Gio.Menu()
         section_diag.append("Посмотреть логи", "win.open_log")
@@ -249,29 +256,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         section_about.append("О приложении", "win.about")
         menu.append_section(None, section_about)
 
-        mb = Gtk.MenuButton()
-        mb.set_icon_name("open-menu-symbolic")
-        mb.set_menu_model(menu)
-        header.pack_end(mb)
+        # Меню сохраняем — строка «Настройки» в sidebar будет использовать его
+        self._app_menu = menu
 
-        # Кнопка проверки обновлений — с синим кружком при наличии stable-обновления
-        self._update_check_btn = Gtk.Button()
-        self._update_check_btn.set_tooltip_text("Проверить обновления")
-        self._update_check_btn.add_css_class("flat")
-        self._update_check_btn.connect("clicked", self._check_for_updates)
-
-        _upd_icon = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
-        self._update_badge_dot = Gtk.Label(label="")
-        self._update_badge_dot.add_css_class("ab-update-dot")
-        self._update_badge_dot.set_halign(Gtk.Align.END)
-        self._update_badge_dot.set_valign(Gtk.Align.START)
-        self._update_badge_dot.set_visible(False)
-        _upd_overlay = Gtk.Overlay()
-        _upd_overlay.set_child(_upd_icon)
-        _upd_overlay.add_overlay(self._update_badge_dot)
-        self._update_check_btn.set_child(_upd_overlay)
-
-        # CSS кружка — регистрируем один раз при построении хедера
+        # CSS кружка обновления — регистрируем здесь, раньше чем sidebar
         _dot_css = Gtk.CssProvider()
         _dot_css.load_from_data(b"""
             .ab-update-dot {
@@ -283,24 +271,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 padding: 0;
                 font-size: 0;
             }
-            viewswitcher button {
-                min-width: 0;
-                padding-left: 12px;
-                padding-right: 12px;
-            }
-            viewswitcher.ab-icons-only button {
-                min-height: 0;
-                min-width: 0;
-                padding: 4px 2px;
-                margin: 0;
-            }
         """)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), _dot_css,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
-
-        header.pack_end(self._update_check_btn)
 
         # Регистрируем действия меню как GAction на уровне окна
         actions = [
@@ -331,66 +306,235 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         return header
 
-    def _set_labels_visible_in(self, widget, visible: bool):
-        """Рекурсивно скрывает/показывает все Gtk.Label внутри виджета.
+    def _build_sidebar(self) -> Gtk.Widget:
+        """Боковая панель навигации — список вкладок слева окна.
 
-        AdwViewSwitcherButton: Button → GtkStack → GtkBox (wide/narrow) → GtkImage + GtkLabel.
-        Нужна рекурсия, т.к. Label не является прямым потомком кнопки.
+        Сохраняет ссылки self._nav_images / self._nav_labels для динамической
+        смены размера иконок и видимости подписей в _apply_tab_label_visibility().
         """
-        if isinstance(widget, Gtk.Label):
-            widget.set_visible(visible)
-            return  # в Label нет вложенных Label — дальше не идём
-        child = widget.get_first_child()
-        while child is not None:
-            self._set_labels_visible_in(child, visible)
-            child = child.get_next_sibling()
+        nav_list = Gtk.ListBox()
+        nav_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        nav_list.add_css_class("navigation-sidebar")
+        self._nav_list = nav_list
+        self._nav_images: list[Gtk.Image] = []
+        self._nav_labels: list[Gtk.Label] = []
 
-    def _find_child_of_type(self, widget, widget_type):
-        """Рекурсивно ищет первый потомок заданного типа."""
-        if isinstance(widget, widget_type):
-            return widget
-        child = widget.get_first_child()
-        while child is not None:
-            result = self._find_child_of_type(child, widget_type)
-            if result:
-                return result
-            child = child.get_next_sibling()
-        return None
+        for name, title, icon_name in [
+            ("setup",       "Начало",          "go-home-symbolic"),
+            ("apps",        "Приложения",      "grid-large-symbolic"),
+            ("extensions",  "Расширения",      "application-x-addon-symbolic"),
+            ("flatpak",     "Flatpak",         "flatpak-symbolic"),
+            ("terminal",    "Терминал",        "utilities-terminal-symbolic"),
+            ("amd",         "AMD Radeon",      "video-display-symbolic"),
+            ("intel",       "Intel",           "processor-symbolic"),
+            ("davinci",     "DaVinci Resolve", "davinci-symbolic"),
+            ("maintenance", "Обслуживание",    "emblem-system-symbolic"),
+        ]:
+            row = Gtk.ListBoxRow()
+            row.set_name(name)
+            row.set_tooltip_text(title)
+            box = Gtk.Box(spacing=7)
+            box.set_margin_top(8)
+            box.set_margin_bottom(8)
+            box.set_margin_start(7)
+            box.set_margin_end(7)
+            img = Gtk.Image.new_from_icon_name(icon_name)
+            img.set_pixel_size(16)
+            lbl = Gtk.Label(label=title)
+            lbl.set_xalign(0.0)
+            lbl.set_hexpand(True)
+            # END позволяет GTK дать label меньше места при сужении sidebar —
+            # без этого минимальная ширина label = полный текст (~130px для «DaVinci Resolve»)
+            # и set_shrink_start_child=False блокирует сужение до порога 110px
+            lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            box.append(img)
+            box.append(lbl)
+            row.set_child(box)
+            nav_list.append(row)
+            self._nav_images.append(img)
+            self._nav_labels.append(lbl)
 
-    def _apply_icons_only_to_switcher(self, switcher, icons_only: bool, pages=None):
-        """Применяет режим «только иконки» к конкретному ViewSwitcher: CSS-класс, лейблы, тултипы."""
-        if icons_only:
-            switcher.add_css_class("ab-icons-only")
+        nav_list.select_row(nav_list.get_row_at_index(0))
+        nav_list.connect("row-selected", self._on_nav_row_selected)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_child(nav_list)
+        scroll.set_vexpand(True)
+
+        self._sidebar_widget = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self._sidebar_widget.append(scroll)
+        self._sidebar_widget.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+        self._sidebar_widget.append(self._build_sidebar_bottom())
+        return self._sidebar_widget
+
+    def _build_sidebar_bottom(self) -> Gtk.Widget:
+        """Нижняя часть боковой панели: строка обновлений и строка меню настроек.
+
+        Обе строки визуально идентичны пунктам навигации (navigation-sidebar ListBox),
+        но расположены под сепаратором в самом низу sidebar.
+        Ссылки на иконки и метки добавляются в self._bottom_images / self._bottom_labels
+        для синхронного изменения размера вместе с nav-строками.
+        """
+        bottom_list = Gtk.ListBox()
+        bottom_list.add_css_class("navigation-sidebar")
+        bottom_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._bottom_images: list[Gtk.Image] = []
+        self._bottom_labels: list[Gtk.Label] = []
+
+        def _make_row_box():
+            box = Gtk.Box(spacing=7)
+            box.set_margin_top(8)
+            box.set_margin_bottom(8)
+            box.set_margin_start(7)
+            box.set_margin_end(7)
+            return box
+
+        # ── Строка «Обновления» ───────────────────────────────────────────────
+        upd_row = Gtk.ListBoxRow()
+        upd_row.set_name("update")
+        upd_row.set_activatable(True)
+        upd_row.set_tooltip_text("Проверить обновления")
+        upd_box = _make_row_box()
+
+        # Иконка без обёрток — отступ до текста совпадает с остальными строками
+        upd_icon = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
+        upd_icon.set_pixel_size(16)
+
+        upd_lbl = Gtk.Label(label="Обновления")
+        upd_lbl.set_xalign(0.0)
+        upd_lbl.set_hexpand(True)
+        upd_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+
+        # Бейдж — цветная точка в правом конце строки; видна только при наличии обновления
+        self._update_badge_dot = Gtk.Label(label="")
+        self._update_badge_dot.add_css_class("ab-update-dot")
+        self._update_badge_dot.set_valign(Gtk.Align.CENTER)
+        self._update_badge_dot.set_visible(False)
+
+        upd_box.append(upd_icon)
+        upd_box.append(upd_lbl)
+        upd_box.append(self._update_badge_dot)
+        upd_row.set_child(upd_box)
+        bottom_list.append(upd_row)
+        self._bottom_images.append(upd_icon)
+        self._bottom_labels.append(upd_lbl)
+
+        # ── Строка «Настройки» ────────────────────────────────────────────────
+        # Обычный ListBoxRow (структура идентична «Обновления») + PopoverMenu по клику
+        menu_row = Gtk.ListBoxRow()
+        menu_row.set_name("settings")
+        menu_row.set_activatable(True)
+        menu_row.set_tooltip_text("Настройки")
+
+        mb_box = _make_row_box()
+        mb_icon = Gtk.Image.new_from_icon_name("sliders-vertical-symbolic")
+        mb_icon.set_pixel_size(16)
+        mb_lbl = Gtk.Label(label="Настройки")
+        mb_lbl.set_xalign(0.0)
+        mb_lbl.set_hexpand(True)
+        mb_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        mb_box.append(mb_icon)
+        mb_box.append(mb_lbl)
+        menu_row.set_child(mb_box)
+
+        # PopoverMenu привязываем к строке; открываем в _on_bottom_row_activated
+        self._settings_popover = Gtk.PopoverMenu.new_from_model(self._app_menu)
+        self._settings_popover.set_parent(menu_row)
+        self._settings_popover.set_has_arrow(False)
+        self._settings_popover.set_position(Gtk.PositionType.TOP)
+
+        bottom_list.append(menu_row)
+        self._bottom_images.append(mb_icon)
+        self._bottom_labels.append(mb_lbl)
+
+        bottom_list.connect("row-activated", self._on_bottom_row_activated)
+        return bottom_list
+
+    def _on_bottom_row_activated(self, _, row):
+        """Обрабатывает нажатия на нижние строки sidebar."""
+        name = row.get_name()
+        if name == "update":
+            self._check_for_updates()
+        elif name == "settings":
+            self._settings_popover.popup()
+
+    def _on_nav_row_selected(self, _, row):
+        """Переключает вкладку ViewStack при выборе строки в боковой панели."""
+        if row is not None:
+            self._stack.set_visible_child_name(row.get_name())
+
+    # Размеры иконок: с подписями — 16px, только иконки — +30% = 21px
+    _ICON_SIZE_WITH_LABELS = 16
+    _ICON_SIZE_ICONS_ONLY  = 21
+    # Минимальная ширина sidebar в режиме иконок: margins(7+7) + icon(21) + handle(~6) = 41px
+    _SIDEBAR_ICONS_ONLY_WIDTH = 44
+    # Порог перетаскивания: шире — показываем текст, уже — только иконки
+    _SIDEBAR_LABELS_THRESHOLD = 110
+
+    def _apply_tab_label_visibility(self, show: bool | None = None, from_drag: bool = False):
+        """Показывает/скрывает подписи в sidebar; меняет размер иконок и ширину панели.
+
+        Режим «только иконки» (show=False):
+          - иконки 21px (+30%), подписи скрыты
+          - sidebar схлопывается до минимума (только иконки)
+        Режим «с подписями» (show=True):
+          - иконки 16px, подписи видны
+          - при вызове из меню восстанавливает сохранённую ширину
+
+        from_drag=True: вызов из обработчика перетаскивания — не трогаем _sidebar_saved_width
+        и не восстанавливаем позицию (пользователь сам тянет разделитель).
+        """
+        if show is None:
+            show = config.state_get("show_tab_labels", True)
+        icon_size = self._ICON_SIZE_WITH_LABELS if show else self._ICON_SIZE_ICONS_ONLY
+
+        for img, lbl in zip(
+            self._nav_images + self._bottom_images,
+            self._nav_labels + self._bottom_labels,
+        ):
+            img.set_pixel_size(icon_size)
+            lbl.set_visible(show)
+
+        if show:
+            # min=90px: меньше порога 110px, поэтому пользователь может дотянуть до threshold;
+            # одновременно sidebar нельзя полностью схлопнуть
+            self._sidebar_widget.set_size_request(90, -1)
+            if not from_drag:
+                # Вызов из меню — восстанавливаем сохранённую ширину
+                saved = getattr(self, "_sidebar_saved_width", None)
+                if saved:
+                    GLib.idle_add(self._split_view.set_position, saved)
         else:
-            switcher.remove_css_class("ab-icons-only")
-        btn = switcher.get_first_child()
-        i = 0
-        while btn is not None:
-            self._set_labels_visible_in(btn, not icons_only)
-            if icons_only and pages and i < pages.get_n_items():
-                btn.set_tooltip_text(pages.get_item(i).get_title())
-            else:
-                btn.set_tooltip_text(None)
-            btn = btn.get_next_sibling()
-            i += 1
+            if not from_drag:
+                # Вызов из меню — сохраняем текущую ширину перед схлопыванием
+                self._sidebar_saved_width = self._split_view.get_position()
+            self._sidebar_widget.set_size_request(self._SIDEBAR_ICONS_ONLY_WIDTH, -1)
+            GLib.idle_add(self._split_view.set_position, self._SIDEBAR_ICONS_ONLY_WIDTH)
 
-    def _switcher_set_icons_only(self, icons_only: bool):
-        """Скрывает/показывает текст вкладок в хедере. При скрытии ставит тултипы."""
-        pages = self._stack.get_pages() if icons_only else None
-        self._apply_icons_only_to_switcher(self._switcher, icons_only, pages)
+    def _on_sidebar_position_changed(self, paned, *_):
+        """Автопереключение текст/иконки при перетаскивании разделителя sidebar.
 
-    def _on_bp_icons_apply(self, active: bool):
-        """Вызывается при срабатывании breakpoint 620sp (скрытие/показ текста вкладок)."""
-        self._bp_icons_active = active
-        self._apply_tab_label_visibility()
+        При пересечении порога _SIDEBAR_LABELS_THRESHOLD:
+          - расширение: показываем подписи
+          - сужение: прячем подписи и снапим к ширине иконок
+        """
+        pos = paned.get_position()
+        currently_showing = bool(self._nav_labels and self._nav_labels[0].get_visible())
+        should_show = pos > self._SIDEBAR_LABELS_THRESHOLD
 
-    def _apply_tab_label_visibility(self):
-        """Итоговая видимость текста вкладок = НЕТ, если breakpoint активен ИЛИ пользователь выключил."""
-        user_wants_labels = config.state_get("show_tab_labels", False)
-        self._switcher_set_icons_only(self._bp_icons_active or not user_wants_labels)
+        if should_show == currently_showing:
+            return
+
+        if not should_show:
+            # Сохраняем ширину до снапа, чтобы кнопка меню «Текст у вкладок» могла восстановить
+            self._sidebar_saved_width = pos
+
+        config.state_set("show_tab_labels", should_show)
+        self._apply_tab_label_visibility(show=should_show, from_drag=True)
 
     def _on_show_tab_labels_changed(self, action, state):
-        """Обработчик переключателя «Текст у вкладок» из гамбургер-меню."""
+        """Обработчик переключателя «Текст у вкладок» из меню настроек."""
         action.set_state(state)
         config.state_set("show_tab_labels", state.get_boolean())
         self._apply_tab_label_visibility()
@@ -1339,7 +1483,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         try:
             os.makedirs(config.CONFIG_DIR, exist_ok=True)
             with open(config.CONFIG_FILE, "w") as f:
-                json.dump({"width": self.get_width(), "height": self.get_height()}, f)
+                json.dump({
+                    "width": self.get_width(),
+                    "height": self.get_height(),
+                    "sidebar_width": self._split_view.get_position(),
+                }, f)
         except OSError:
             pass
         # Сентинел None останавливает _log_writer_loop и закрывает файл

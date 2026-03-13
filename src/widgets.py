@@ -8,7 +8,7 @@ widgets.py — общие фабрики виджетов GTK4 / Adwaita.
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gio, Gtk
+from gi.repository import Adw, Gio, Gtk
 
 
 def make_icon(name: str, size: int = 22, fallback: str = "application-x-executable-symbolic") -> Gtk.Image:
@@ -69,15 +69,26 @@ def make_suffix_box(*widgets) -> Gtk.Box:
 
 
 def make_scrolled_page() -> tuple[Gtk.ScrolledWindow, Gtk.Box]:
-    """Создаёт ScrolledWindow + вертикальный Box с полями 20px — стандартная разметка страницы вкладки."""
+    """Создаёт ScrolledWindow → Adw.Clamp → Box с полями 20px.
+
+    Adw.Clamp ограничивает ширину контента до 800px (GNOME HIG) и центрирует
+    его на широких экранах. Поля задаём на Box, а не на Clamp, чтобы они
+    работали корректно при узких окнах (< 800px).
+    """
     scroll = Gtk.ScrolledWindow()
     scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
     scroll.set_hexpand(True)
     scroll.set_vexpand(True)
+
     body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
     body.set_margin_top(20)
     body.set_margin_bottom(20)
     body.set_margin_start(20)
     body.set_margin_end(20)
-    scroll.set_child(body)
+
+    clamp = Adw.Clamp()
+    clamp.set_maximum_size(1152)
+    clamp.set_tightening_threshold(864)
+    clamp.set_child(body)
+    scroll.set_child(clamp)
     return scroll, body

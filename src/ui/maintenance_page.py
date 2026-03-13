@@ -18,7 +18,7 @@ from widgets import (
     set_status_ok, set_status_error, clear_status
 )
 from ui.common import load_module
-from ui.rows import TaskRow, SettingRow
+from ui.rows import TaskRow
 
 
 class CacheTaskRow(Adw.ExpanderRow):
@@ -214,28 +214,6 @@ class CacheTaskRow(Adw.ExpanderRow):
             self._on_progress()
 
 
-class ConfirmTaskRow(TaskRow):
-    """Строка задачи с подтверждением перед запуском."""
-    def __init__(self, task, log_fn, on_progress, title, body):
-        super().__init__(task, log_fn, on_progress)
-        self._confirm_title = title
-        self._confirm_body = body
-
-    def start(self, *args):
-        if getattr(self, "_running", False):
-            return
-
-        dialog = Adw.AlertDialog(heading=self._confirm_title, body=self._confirm_body)
-        dialog.add_response("cancel", "Отмена")
-        dialog.add_response("run", "Удалить")
-        dialog.set_response_appearance("run", Adw.ResponseAppearance.DESTRUCTIVE)
-        dialog.set_default_response("cancel")
-        dialog.set_close_response("cancel")
-
-        dialog.connect("response", lambda d, r: super(ConfirmTaskRow, self).start() if r == "run" else None)
-        dialog.present(self.get_root())
-
-
 class MaintenancePage(Gtk.Box):
     def __init__(self, log_fn):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -252,16 +230,14 @@ class MaintenancePage(Gtk.Box):
         except (OSError, json.JSONDecodeError):
             all_tasks = []
 
-        flatpak_ids = ["flatpak", "flatpak_repair", "flatpak_home"]
-        fix_ids = ["fix_gdm_usb", "fix_gsconnect", "disable_tracker"]
+        flatpak_ids = {"flatpak", "flatpak_repair", "flatpak_home"}
+        fix_ids = {"fix_gdm_usb", "fix_gsconnect", "disable_tracker"}
 
-        flatpak_tasks = [t for t in all_tasks if t["id"] in flatpak_ids]
         fix_tasks = [t for t in all_tasks if t["id"] in fix_ids]
         other_tasks = [t for t in all_tasks if t["id"] not in flatpak_ids and t["id"] not in fix_ids]
 
-        self._build_header(body, len(all_tasks) + 1) # +1 для CacheTaskRow
+        self._build_header(body, len(other_tasks) + len(fix_tasks) + 1)  # +1 для CacheTaskRow
         self._build_tasks(body, other_tasks)
-        self._build_flatpak_group(body, flatpak_tasks)
         self._build_fixes_group(body, fix_tasks)
 
     def _build_header(self, body, total):
@@ -288,32 +264,6 @@ class MaintenancePage(Gtk.Box):
         self._btn_all.connect("clicked", self._run_all)
         body.append(self._btn_all)
 
-    def _build_flatpak_group(self, body, tasks):
-        group = Adw.PreferencesGroup()
-        group.set_title("Flatpak и Flathub")
-        group.set_description("Управление подсистемой Flatpak")
-        body.append(group)
-
-        # 1. Подключить Flathub
-        row = SettingRow(
-            "application-x-addon-symbolic",       "Подключить Flathub",          "Устанавливает flatpak и flathub",               "Включить",     self._on_flathub,        backend.is_flathub_enabled,            "setting_flathub", "Активировано", self._on_flathub_undo, "Удалить"
-        )
-        group.add(row)
-
-        # 2. Задачи (Уборка, Доступ к Home)
-        for task in tasks:
-            if task["id"] == "flatpak":
-                row = ConfirmTaskRow(
-                    task, self._log, self._update_progress,
-                    "Удалить мусор Flatpak?",
-                    "Будут удалены runtime-библиотеки, которые не требуются установленным приложениям.\n\n"
-                    "⚠ Внимание: Если вы устанавливали runtime вручную для сторонних программ (не из Flathub), они могут перестать работать."
-                )
-            else:
-                row = TaskRow(task, self._log, self._update_progress)
-            self._rows.append(row)
-            group.add(row)
-
     def _build_fixes_group(self, body, tasks):
         if not tasks:
             return
@@ -325,35 +275,6 @@ class MaintenancePage(Gtk.Box):
             row = TaskRow(task, self._log, self._update_progress, btn_label="Применить")
             self._rows.append(row)
             group.add(row)
-
-    def _on_flathub(self, row):
-        row.set_working()
-        self._log("\n▶  Установка Flatpak и Flathub...\n")
-        win = self.get_root()
-        if hasattr(win, "start_progress"): win.start_progress("Установка Flatpak...")
-
-        def step2(ok):
-            if not ok:
-                row.set_done(False)
-                return
-            backend.run_privileged(
-                ["apt-get", "install", "-y", "flatpak-repo-flathub"],
-                self._log,
-                lambda ok2: (row.set_done(ok2), self._log("✔  Flathub готов!\n" if ok2 else "✘  Ошибка\n"), win.stop_progress(ok2) if hasattr(win, "stop_progress") else None),
-            )
-
-        backend.run_privileged(["apt-get", "install", "-y", "flatpak"], self._log, step2)
-
-    def _on_flathub_undo(self, row):
-        row.set_working()
-        self._log("\n▶  Удаление Flatpak и Flathub...\n")
-        win = self.get_root()
-        if hasattr(win, "start_progress"): win.start_progress("Удаление Flatpak...")
-        backend.run_privileged(
-            ["apt-get", "remove", "-y", "flatpak", "flatpak-repo-flathub"],
-            self._log,
-            lambda ok: (row.set_undo_done(ok), self._log("✔  Flatpak удалён!\n" if ok else "✘  Ошибка\n"), win.stop_progress(ok) if hasattr(win, "stop_progress") else None),
-        )
 
     def _build_tasks(self, body, tasks):
         # Отдельная группа для очистки кэша
