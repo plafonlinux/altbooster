@@ -14,6 +14,9 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
 import backend
+import config
+from ui.common import load_module
+from ui.rows import TaskRow, SettingRow
 from widgets import make_icon, make_scrolled_page, make_suffix_box
 
 
@@ -184,6 +187,34 @@ def _make_app_icon(icon_path: str | None) -> Gtk.Widget:
     return make_icon("package-x-generic-symbolic")
 
 
+# ── Строка задачи с подтверждением (Уборка Flatpak) ───────────────────────────
+
+class ConfirmFlatpakRow(TaskRow):
+    """TaskRow с диалогом подтверждения перед удалением мусора Flatpak."""
+
+    def __init__(self, task, log_fn):
+        super().__init__(task, log_fn, None)
+
+    def start(self, *args):
+        if getattr(self, "_running", False):
+            return
+        dialog = Adw.AlertDialog(
+            heading="Удалить мусор Flatpak?",
+            body=(
+                "Будут удалены runtime-библиотеки, которые не требуются установленным приложениям.\n\n"
+                "⚠ Внимание: Если вы устанавливали runtime вручную для сторонних программ "
+                "(не из Flathub), они могут перестать работать."
+            ),
+        )
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("run", "Удалить")
+        dialog.set_response_appearance("run", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", lambda d, r: super(ConfirmFlatpakRow, self).start() if r == "run" else None)
+        dialog.present(self.get_root())
+
+
 # ── Главный класс ──────────────────────────────────────────────────────────────
 
 class FlatpakPage(Gtk.Box):
@@ -201,12 +232,13 @@ class FlatpakPage(Gtk.Box):
 
         self._build_header_group()
         self._build_apps_group()
+        self._build_manage_group()
 
     # ── Построение UI ──────────────────────────────────────────────────────────
 
     def _build_header_group(self):
         group = Adw.PreferencesGroup()
-        group.set_title("Flatpak-приложения")
+        group.set_title("Установленные приложения Flatpak")
         group.set_description(
             "Установленные Flatpak-приложения. "
             "Можно обновлять, удалять и замораживать обновления по отдельности."
@@ -486,6 +518,82 @@ class FlatpakPage(Gtk.Box):
             _run_user_op(cmd, self._log, _done)
         else:
             backend.run_privileged(cmd, self._log, _done)
+
+    # ── Группа «Flatpak и Flathub» (управление подсистемой) ───────────────────
+
+    def _build_manage_group(self):
+        """Группа «Обслуживание Flatpak» — под спойлером, свёрнута по умолчанию."""
+        group = Adw.PreferencesGroup()
+        self._body.append(group)
+
+        expander = Adw.ExpanderRow()
+        expander.set_title("Обслуживание Flatpak")
+        expander.set_expanded(False)
+        group.add(expander)
+
+        flathub_row = SettingRow(
+            "application-x-addon-symbolic",
+            "Подключить Flathub",
+            "Устанавливает flatpak и flathub",
+            "Включить", self._on_flathub, backend.is_flathub_enabled,
+            "setting_flathub", "Активировано", self._on_flathub_undo, "Удалить",
+        )
+        expander.add_row(flathub_row)
+
+        try:
+            data = load_module("maintenance")
+            tasks = data.get("tasks", [])
+        except (OSError, Exception):
+            tasks = []
+
+        flatpak_ids = {"flatpak", "flatpak_repair", "flatpak_home"}
+        for task in tasks:
+            if task["id"] not in flatpak_ids:
+                continue
+            if task["id"] == "flatpak":
+                task_row = ConfirmFlatpakRow(task, self._log)
+            else:
+                task_row = TaskRow(task, self._log, None)
+            expander.add_row(task_row)
+
+    def _on_flathub(self, row):
+        row.set_working()
+        self._log("\n▶  Установка Flatpak и Flathub...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress("Установка Flatpak...")
+
+        def step2(ok):
+            if not ok:
+                row.set_done(False)
+                return
+            backend.run_privileged(
+                ["apt-get", "install", "-y", "flatpak-repo-flathub"],
+                self._log,
+                lambda ok2: (
+                    row.set_done(ok2),
+                    self._log("✔  Flathub готов!\n" if ok2 else "✘  Ошибка\n"),
+                    win.stop_progress(ok2) if hasattr(win, "stop_progress") else None,
+                ),
+            )
+
+        backend.run_privileged(["apt-get", "install", "-y", "flatpak"], self._log, step2)
+
+    def _on_flathub_undo(self, row):
+        row.set_working()
+        self._log("\n▶  Удаление Flatpak и Flathub...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress("Удаление Flatpak...")
+        backend.run_privileged(
+            ["apt-get", "remove", "-y", "flatpak", "flatpak-repo-flathub"],
+            self._log,
+            lambda ok: (
+                row.set_undo_done(ok),
+                self._log("✔  Flatpak удалён!\n" if ok else "✘  Ошибка\n"),
+                win.stop_progress(ok) if hasattr(win, "stop_progress") else None,
+            ),
+        )
 
     def _on_update_all(self):
         """Обновляет все Flatpak-приложения: сначала user, потом system."""

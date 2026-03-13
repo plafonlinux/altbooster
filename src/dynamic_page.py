@@ -432,16 +432,20 @@ class DynamicPage(Gtk.Box):
         scroll.set_hexpand(True)
         scroll.set_vexpand(True)
 
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
-        body.set_margin_top(20)
-        body.set_margin_bottom(20)
-        body.set_margin_start(20)
-        body.set_margin_end(20)
+        self._body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        self._body.set_margin_top(20)
+        self._body.set_margin_bottom(20)
+        self._body.set_margin_start(20)
+        self._body.set_margin_end(20)
 
-        scroll.set_child(body)
+        clamp = Adw.Clamp()
+        clamp.set_maximum_size(1152)
+        clamp.set_tightening_threshold(864)
+        clamp.set_child(self._body)
+        scroll.set_child(clamp)
         self.append(scroll)
 
-        self._build(body)
+        self._build(self._body)
 
         # Одноразовый фоновый поллинг статусов
         threading.Thread(target=self._poll_checks, daemon=True).start()
