@@ -1,4 +1,3 @@
-"""Вкладка «Flatpak» — управление установленными Flatpak-приложениями."""
 
 from __future__ import annotations
 
@@ -20,30 +19,21 @@ from ui.rows import TaskRow, SettingRow
 from widgets import make_icon, make_scrolled_page, make_suffix_box
 
 
-# ── Структура данных ───────────────────────────────────────────────────────────
-
 @dataclass
 class FlatpakApp:
-    app_id: str        # com.example.App
-    name: str          # читаемое имя
-    version: str       # может быть пустым
-    installation: str  # "user" | "system"
-    masked: bool = field(default=False)      # True = обновления заморожены
-    icon_path: str | None = field(default=None)  # путь к PNG-иконке из appstream
+    app_id: str
+    name: str
+    version: str
+    installation: str
+    masked: bool = field(default=False)
+    icon_path: str | None = field(default=None)
 
-
-# ── Вспомогательные функции (без GTK) ─────────────────────────────────────────
 
 def _is_flatpak_available() -> bool:
     return shutil.which("flatpak") is not None
 
 
 def _list_flatpak_apps() -> list[FlatpakApp]:
-    """Возвращает список установленных Flatpak-приложений.
-
-    Запускает flatpak list без привилегий — это безопасно для чтения.
-    Разделитель полей — табуляция; имя приложения может содержать пробелы.
-    """
     try:
         r = subprocess.run(
             ["flatpak", "list", "--app", "--columns=application,name,version,installation"],
@@ -67,11 +57,6 @@ def _list_flatpak_apps() -> list[FlatpakApp]:
 
 
 def _get_masked_ids() -> set[str]:
-    """Возвращает множество app_id приложений с замороженными обновлениями.
-
-    Опрашивает маски для user- и system-установок отдельно, чтобы
-    не пропустить маски ни одного типа.
-    """
     masked: set[str] = set()
     for scope in ("--user", "--system"):
         try:
@@ -89,11 +74,6 @@ def _get_masked_ids() -> set[str]:
 
 
 def _run_user_op(cmd: list, on_line, on_done) -> None:
-    """Запускает команду flatpak без sudo (для пользовательских приложений).
-
-    Аналог backend.run_privileged, но без эскалации привилегий.
-    on_line(text) и on_done(ok: bool) вызываются из main-потока через GLib.idle_add.
-    """
     def _worker():
         ok = False
         try:
@@ -114,18 +94,8 @@ def _run_user_op(cmd: list, on_line, on_done) -> None:
 
 
 def _build_icon_index() -> dict[str, str]:
-    """Строит индекс {app_id: icon_path} из двух источников.
-
-    Стратегия 1 — appstream-кэш (быстрый bulk-scan):
-      <base>/<remote>/<arch>/active/icons/<size>/<app_id>.png|svg
-
-    Стратегия 2 — hicolor-иконки установленных приложений (надёжный fallback,
-    работает даже когда appstream-кэш недоступен):
-      <base>/app/<app_id>/current/active/files/share/icons/hicolor/<size>/apps/<app_id>.*
-    """
     index: dict[str, str] = {}
 
-    # Стратегия 1: appstream-кэш
     for size in ("64x64", "128x128", "scalable"):
         for base in (
             Path.home() / ".local" / "share" / "flatpak" / "appstream",
@@ -138,7 +108,6 @@ def _build_icon_index() -> dict[str, str]:
                     if icon_file.stem not in index:
                         index[icon_file.stem] = str(icon_file)
 
-    # Стратегия 2: hicolor из установленных приложений
     for app_base in (
         Path.home() / ".local" / "share" / "flatpak" / "app",
         Path("/var/lib/flatpak/app"),
@@ -167,11 +136,6 @@ def _build_icon_index() -> dict[str, str]:
 
 
 def _make_app_icon(icon_path: str | None) -> Gtk.Widget:
-    """Создаёт виджет иконки: из PNG-файла appstream или generic-заглушку.
-
-    Использует GdkPixbuf для масштабирования до 32×32 пикселей.
-    При любой ошибке возвращает стандартную заглушку.
-    """
     if icon_path:
         try:
             gi.require_version("GdkPixbuf", "2.0")
@@ -187,10 +151,7 @@ def _make_app_icon(icon_path: str | None) -> Gtk.Widget:
     return make_icon("package-x-generic-symbolic")
 
 
-# ── Строка задачи с подтверждением (Уборка Flatpak) ───────────────────────────
-
 class ConfirmFlatpakRow(TaskRow):
-    """TaskRow с диалогом подтверждения перед удалением мусора Flatpak."""
 
     def __init__(self, task, log_fn):
         super().__init__(task, log_fn, None)
@@ -215,10 +176,7 @@ class ConfirmFlatpakRow(TaskRow):
         dialog.present(self.get_root())
 
 
-# ── Главный класс ──────────────────────────────────────────────────────────────
-
 class FlatpakPage(Gtk.Box):
-    """Вкладка «Flatpak» — просмотр и управление установленными Flatpak-приложениями."""
 
     def __init__(self, log_fn):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -234,7 +192,6 @@ class FlatpakPage(Gtk.Box):
         self._build_apps_group()
         self._build_manage_group()
 
-    # ── Построение UI ──────────────────────────────────────────────────────────
 
     def _build_header_group(self):
         group = Adw.PreferencesGroup()
@@ -271,10 +228,8 @@ class FlatpakPage(Gtk.Box):
         self._body.append(self._apps_group)
         self._refresh()
 
-    # ── Загрузка данных ────────────────────────────────────────────────────────
 
     def _refresh(self):
-        """Перезагружает список Flatpak-приложений из системы."""
         self._clear_apps_group()
         if self._refresh_btn:
             self._refresh_btn.set_sensitive(False)
@@ -292,14 +247,12 @@ class FlatpakPage(Gtk.Box):
         threading.Thread(target=self._load_apps, daemon=True).start()
 
     def _clear_apps_group(self):
-        """Пересоздаёт apps_group — Adw.PreferencesGroup не поддерживает remove строк."""
         if self._apps_group:
             self._body.remove(self._apps_group)
         self._apps_group = Adw.PreferencesGroup()
         self._body.append(self._apps_group)
 
     def _load_apps(self):
-        """Фоновый поток: загружает список приложений, маски и иконки."""
         if not _is_flatpak_available():
             GLib.idle_add(self._show_unavailable_state)
             return
@@ -312,7 +265,6 @@ class FlatpakPage(Gtk.Box):
         GLib.idle_add(self._populate_apps, apps)
 
     def _populate_apps(self, apps: list[FlatpakApp]):
-        """Заполняет список приложений. Вызывается из main-потока через GLib.idle_add."""
         self._clear_apps_group()
         if self._refresh_btn:
             self._refresh_btn.set_sensitive(True)
@@ -366,7 +318,6 @@ class FlatpakPage(Gtk.Box):
         if self._update_all_btn:
             self._update_all_btn.set_sensitive(False)
 
-    # ── Строка приложения ──────────────────────────────────────────────────────
 
     def _make_app_row(self, app: FlatpakApp) -> Adw.ActionRow:
         row = Adw.ActionRow()
@@ -379,7 +330,6 @@ class FlatpakPage(Gtk.Box):
         ver_label.add_css_class("caption")
         ver_label.set_valign(Gtk.Align.CENTER)
 
-        # Кнопка-снежинка: нажата (accent) = обновления заморожены
         freeze_btn = Gtk.ToggleButton(label="❄")
         freeze_btn.set_active(app.masked)
         freeze_btn.add_css_class("flat")
@@ -388,7 +338,6 @@ class FlatpakPage(Gtk.Box):
         freeze_btn.set_tooltip_text("Заморозить обновления (flatpak mask)")
         if app.masked:
             freeze_btn.add_css_class("accent")
-        # handler_id нужен для silent-переключения при откате ошибки
         _hid: list[int] = []
         _hid.append(freeze_btn.connect(
             "toggled",
@@ -415,10 +364,8 @@ class FlatpakPage(Gtk.Box):
         row.add_suffix(make_suffix_box(ver_label, freeze_btn, upd_btn, del_btn))
         return row
 
-    # ── Хендлеры действий ─────────────────────────────────────────────────────
 
     def _on_remove_app(self, app: FlatpakApp):
-        """Диалог подтверждения перед удалением приложения."""
         dialog = Adw.AlertDialog()
         dialog.set_heading("Удалить приложение?")
         dialog.set_body(
@@ -453,7 +400,6 @@ class FlatpakPage(Gtk.Box):
             backend.run_privileged(cmd, self._log, _done)
 
     def _on_update_app(self, app: FlatpakApp):
-        """Обновляет отдельное приложение."""
         self._log(f"\n▶  Обновление {app.name} ({app.app_id})...\n")
         win = self.get_root()
         if hasattr(win, "start_progress"):
@@ -475,11 +421,6 @@ class FlatpakPage(Gtk.Box):
             backend.run_privileged(cmd, self._log, _done)
 
     def _on_freeze_toggle(self, app: FlatpakApp, btn: Gtk.ToggleButton, hid: list[int]):
-        """Замораживает или размораживает обновления через flatpak mask.
-
-        hid — список с handler_id кнопки; используется для silent-отката состояния
-        при ошибке без повторного вызова этого хендлера.
-        """
         state = btn.get_active()
         scope = "--user" if app.installation == "user" else "--system"
         if state:
@@ -492,7 +433,6 @@ class FlatpakPage(Gtk.Box):
         btn.set_sensitive(False)
 
         def _apply_state(new_state: bool):
-            """Применяет состояние кнопки без срабатывания обработчика."""
             btn.handler_block(hid[0])
             btn.set_active(new_state)
             if new_state:
@@ -512,17 +452,15 @@ class FlatpakPage(Gtk.Box):
                     f"✘  Не удалось изменить заморозку для {app.name}\n"
                     "   Команда flatpak mask доступна в flatpak ≥ 1.8\n",
                 )
-                GLib.idle_add(_apply_state, not state)  # откат к исходному состоянию
+                GLib.idle_add(_apply_state, not state)
 
         if app.installation == "user":
             _run_user_op(cmd, self._log, _done)
         else:
             backend.run_privileged(cmd, self._log, _done)
 
-    # ── Группа «Flatpak и Flathub» (управление подсистемой) ───────────────────
 
     def _build_manage_group(self):
-        """Группа «Обслуживание Flatpak» — под спойлером, свёрнута по умолчанию."""
         group = Adw.PreferencesGroup()
         self._body.append(group)
 
@@ -596,7 +534,6 @@ class FlatpakPage(Gtk.Box):
         )
 
     def _on_update_all(self):
-        """Обновляет все Flatpak-приложения: сначала user, потом system."""
         win = self.get_root()
         if hasattr(win, "start_progress"):
             win.start_progress("Обновление всех Flatpak-приложений...")
@@ -607,7 +544,7 @@ class FlatpakPage(Gtk.Box):
             self._refresh_btn.set_sensitive(False)
 
         def _done_system(ok_sys):
-            ok = ok_sys  # ok_user захвачен из внешней функции
+            ok = ok_sys
             msg = "✔  Все Flatpak-приложения обновлены!\n" if ok else "⚠  Обновление завершено с ошибками\n"
             GLib.idle_add(self._log, msg)
             if hasattr(win, "stop_progress"):
@@ -617,7 +554,7 @@ class FlatpakPage(Gtk.Box):
         def _done_user(ok_user):
             if not ok_user:
                 GLib.idle_add(self._log, "⚠  Ошибки при обновлении пользовательских приложений\n")
-            # Запускаем system-обновление цепочкой
             backend.run_privileged(["flatpak", "update", "-y", "--system"], self._log, _done_system)
 
         _run_user_op(["flatpak", "update", "-y", "--user"], self._log, _done_user)
+

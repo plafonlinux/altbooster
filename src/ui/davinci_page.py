@@ -1,4 +1,3 @@
-"""Вкладка «DaVinci Resolve» — установка, настройка, кэш."""
 
 import os
 import subprocess
@@ -30,16 +29,6 @@ _POSTINSTALL_CMD = [
 _ROCM_PKGS = ["apt-get", "install", "-y", "libGLU", "ffmpeg",
               "rocm-opencl-runtime", "hip-runtime-amd", "clinfo"]
 def _build_fairlight_cmd() -> list:
-    """Строит команду активации ALSA→PulseAudio для DaVinci Resolve.
-
-    Проблема: pipewire-alsa устанавливает start_threshold=LONG_MAX на capture-потоке,
-    из-за чего Fairlight открывает устройство, но не получает сэмплы (xfer=0) — кнопка R
-    мигает красной и тут же сереет. Воркэраунд: маршрутизировать ALSA через
-    pipewire-pulse (type pulse), а не через pipewire-alsa напрямую.
-
-    ~/.asoundrc имеет приоритет над /etc/asound.conf, поэтому пишем оба файла.
-    Используем block-format {type pulse} — именно он подтверждён как рабочий в issue PW #2870.
-    """
     user_home = os.path.expanduser("~")
     asound_content = (
         "pcm.!default {\\n"
@@ -70,7 +59,6 @@ class DaVinciPage(Gtk.Box):
         self._build_setup_expander(body)
         self._build_cache_group(body)
 
-        # Плавающая кнопка «DaVinci Ready»
         dr_btn = make_button("DaVinci Ready", style="suggested-action")
         dr_btn.add_css_class("pill")
         dr_btn.set_halign(Gtk.Align.END)
@@ -81,14 +69,12 @@ class DaVinciPage(Gtk.Box):
         dr_btn.connect("clicked", self.run_ready_preset)
         overlay.add_overlay(dr_btn)
 
-    # ── Установка ────────────────────────────────────────────────────────────
 
     def _build_install_group(self, body):
         group = Adw.PreferencesGroup()
         group.set_title("Установка")
         body.append(group)
 
-        # Официальный установщик с сайта Blackmagic
         self._dv_file_row = Adw.ActionRow()
         self._dv_file_row.set_title("Официальный установщик")
         self._dv_file_row.set_subtitle("Выберите .zip или .run скачанный с blackmagicdesign.com")
@@ -124,7 +110,6 @@ class DaVinciPage(Gtk.Box):
             daemon=True,
         ).start()
 
-    # ── Первичная настройка ──────────────────────────────────────────────────
 
     def _build_setup_expander(self, body):
         group = Adw.PreferencesGroup()
@@ -135,7 +120,6 @@ class DaVinciPage(Gtk.Box):
         exp.set_expanded(False)
         group.add(exp)
 
-        # PostInstall
         pg = Adw.PreferencesGroup()
         pg.set_title("PostInstall")
         pg.set_description("Выполните после установки DaVinci Resolve")
@@ -150,7 +134,6 @@ class DaVinciPage(Gtk.Box):
         r.add_suffix(make_suffix_box(self._post_st, self._post_btn))
         pg.add(r)
 
-        # AMD ROCm
         ag = Adw.PreferencesGroup()
         ag.set_title("AMD Radeon")
         ag.set_description("Пакеты для работы с видеокартами AMD")
@@ -176,7 +159,6 @@ class DaVinciPage(Gtk.Box):
                 daemon=True,
             ).start()
 
-        # AAC кодек
         acg = Adw.PreferencesGroup()
         acg.set_title("AAC Audio кодек")
         exp.add_row(acg)
@@ -195,7 +177,6 @@ class DaVinciPage(Gtk.Box):
             daemon=True,
         ).start()
 
-        # Fairlight
         flg = Adw.PreferencesGroup()
         flg.set_title("Fairlight Audio")
         exp.add_row(flg)
@@ -220,7 +201,6 @@ class DaVinciPage(Gtk.Box):
             daemon=True,
         ).start()
 
-    # ── Кэш ──────────────────────────────────────────────────────────────────
 
     def _build_cache_group(self, body):
         group = Adw.PreferencesGroup()
@@ -276,7 +256,6 @@ class DaVinciPage(Gtk.Box):
         except Exception:
             pass
 
-    # ── UI-состояния ─────────────────────────────────────────────────────────
 
     def _set_install_ui(self, ok):
         if ok:
@@ -309,7 +288,6 @@ class DaVinciPage(Gtk.Box):
             self._aac_btn.set_label("Установить")
 
     def _set_fl_ui(self, ok):
-        # Кнопка всегда активна — конфиг можно переприменить
         self._fl_btn.set_sensitive(True)
         if ok:
             set_status_ok(self._fl_st)
@@ -325,7 +303,6 @@ class DaVinciPage(Gtk.Box):
             self._fl_btn.remove_css_class("destructive-action")
             self._fl_btn.set_opacity(1.0)
 
-    # ── Обработчики ──────────────────────────────────────────────────────────
 
     def _on_pick_dv_installer(self, _):
         dialog = Gtk.FileDialog()
@@ -520,7 +497,6 @@ class DaVinciPage(Gtk.Box):
 
         backend.run_privileged(_build_fairlight_cmd(), self._log, _done)
 
-    # ── Пресет «DaVinci Resolve Ready» ───────────────────────────────────────
 
     def run_ready_preset(self, btn):
         amd_ok = subprocess.run(["rpm", "-q", "rocm-opencl-runtime"],
@@ -594,7 +570,6 @@ class DaVinciPage(Gtk.Box):
                     self._post_btn.remove_css_class("destructive-action")
                     self._post_btn.add_css_class("flat")
 
-                # Обновляем UI всех компонентов
                 threading.Thread(
                     target=lambda: GLib.idle_add(
                         self._set_amd_ui,
@@ -618,7 +593,6 @@ class DaVinciPage(Gtk.Box):
         threading.Thread(target=_worker, daemon=True).start()
 
     def _install_aac_sync(self) -> bool:
-        """Синхронная установка AAC кодека (для пресета)."""
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 arch = os.path.join(tmp, "aac.tar.gz")
@@ -633,13 +607,12 @@ class DaVinciPage(Gtk.Box):
             GLib.idle_add(self._log, f"✘  {e}\n")
             return False
 
-    # ── Утилиты ──────────────────────────────────────────────────────────────
 
     @staticmethod
     def _reset_btn_later(btn, label, delay=3000):
-        """Возвращает кнопку в исходное состояние через delay мс."""
         def _reset():
             btn.set_sensitive(True)
             btn.set_label(label)
             return False
         GLib.timeout_add(delay, _reset)
+

@@ -3,6 +3,18 @@
 Все значимые изменения в этом проекте документируются здесь.
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/).
 
+## [5.6.8-beta] — 2026-03-13
+
+### Рефакторинг
+- Удалены все комментарии и docstring из 30 файлов Python (src/main.py, config.py, backend.py, widgets.py, dynamic_page.py, system/*.py, ui/*.py, builtin_actions/*.py)
+- Удалён мёртвый код: функция `_dp()` в `window.py`, неиспользуемые импорты `DynamicPage` и `load_module`
+- Перемещены inline-импорты (`datetime`, `shutil`, `json`, `pathlib`) на уровень модуля в `window.py`
+
+### Исправлено
+- Утечка файлового дескриптора в `src/system/checks.py` (`is_fairlight_installed`): `open()` без `with` → контекстный менеджер
+- Утечка файлового дескриптора в `src/ui/rows.py` (`_check_file_contains`): `open()` без `with` → контекстный менеджер
+- `AttributeError` при сохранении пресета/экспорте: `datetime.now()` → `datetime.datetime.now()` в `window.py` (строки 646, 765, 820)
+
 ## [5.6.8-beta] — 2026-03-12
 
 ### Изменено

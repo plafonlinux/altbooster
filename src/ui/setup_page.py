@@ -1,4 +1,3 @@
-"""Вкладка «Начало» — системные настройки и раскладка клавиатуры."""
 
 import ast
 import os
@@ -20,7 +19,6 @@ from ui.install_preview_dialog import InstallPreviewDialog
 from widgets import make_button, make_icon, make_scrolled_page
 from ui.rows import SettingRow
 
-# ── Зеркала APT-репозитория ───────────────────────────────────────────────────
 _SOURCES_DIR = Path("/etc/apt/sources.list.d")
 _MIRRORS = [
     ("ALT Linux", "alt.list",    "ALT Linux (ftp.altlinux.org) — официальный"),
@@ -30,7 +28,6 @@ _MIRRORS = [
 ]
 
 def _detect_active_mirror() -> str:
-    """Возвращает имя файла активного зеркала (первый .list с незакомментированной rpm-строкой)."""
     for _, fname, _ in _MIRRORS:
         path = _SOURCES_DIR / fname
         if not path.exists():
@@ -45,15 +42,12 @@ def _detect_active_mirror() -> str:
     return "alt.list"
 
 def _build_mirror_switch_cmd(new_list: str) -> list:
-    """Возвращает bash-команду переключения активного зеркала APT."""
     parts = []
     for _, fname, _ in _MIRRORS:
         fpath = f"/etc/apt/sources.list.d/{fname}"
         if fname == new_list:
-            # Раскомментировать только HTTP-строки
             parts.append(f"sed -i '/^#rpm \\[.*\\] http:\\/\\//s/^#//' '{fpath}'")
         else:
-            # Закомментировать все активные rpm-строки
             parts.append(f"sed -i '/^rpm /s/^/#/' '{fpath}'")
     return ["bash", "-c", " && ".join(parts)]
 
@@ -63,7 +57,6 @@ class SetupPage(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._log = log_fn
 
-        # CSS для цветных иконок каналов обновления (регистрируем здесь — дисплей уже готов)
         _css = Gtk.CssProvider()
         _css.load_from_data(b"""
             .ab-icon-green { color: @success_color; }
@@ -82,7 +75,6 @@ class SetupPage(Gtk.Box):
         self._build_keyboard_group(body)
 
     def _is_sisyphus(self):
-        # Проверяем и altlinux-release, и os-release (стандарт freedesktop)
         for path in ["/etc/altlinux-release", "/etc/os-release"]:
             try:
                 if os.path.exists(path):
@@ -95,7 +87,6 @@ class SetupPage(Gtk.Box):
 
     @staticmethod
     def _is_newer(version, current):
-        """True если version > current. Сравниваем только цифровые части (до дефиса)."""
         if not version:
             return False
         try:
@@ -110,12 +101,6 @@ class SetupPage(Gtk.Box):
             return False
 
     def check_for_updates(self, manual=False, on_update_found=None):
-        """Проверяет оба канала (stable + beta) и показывает раздел обновления.
-
-        on_update_found(version) — callback для окна (синий кружок + баннер).
-        Вызывается ТОЛЬКО при наличии stable-обновления.
-        Beta в авто-режиме не показывается — только при ручной проверке.
-        """
         if manual:
             self._log("\n▶  Проверка обновлений...\n")
 
@@ -128,13 +113,11 @@ class SetupPage(Gtk.Box):
             beta_ver   = _results["beta"]
             has_stable_update = self._is_newer(stable_ver, config.VERSION)
 
-            # Авто-режим: только stable триггерит глобальное уведомление, beta скрыта
             if not manual:
                 if has_stable_update and on_update_found:
                     GLib.idle_add(on_update_found, stable_ver)
                 return
 
-            # Ручная проверка: показываем полный раздел с обоими каналами
             GLib.idle_add(self._show_update_section, stable_ver, beta_ver)
             if has_stable_update and on_update_found:
                 GLib.idle_add(on_update_found, stable_ver)
@@ -161,8 +144,6 @@ class SetupPage(Gtk.Box):
         dialog.present(self.get_root())
 
     def _show_update_section(self, stable_ver, beta_ver):
-        """Показывает раздел с двумя каналами: Stable и Beta."""
-        # Убираем старый раздел если есть
         if hasattr(self, "_update_group") and self._update_group:
             try:
                 self._body.remove(self._update_group)
@@ -170,7 +151,6 @@ class SetupPage(Gtk.Box):
                 pass
             self._update_group = None
 
-        # Оба канала недоступны — ничего нового
         if not stable_ver and not beta_ver:
             self._show_no_update_dialog()
             return
@@ -179,10 +159,8 @@ class SetupPage(Gtk.Box):
         self._update_group.set_title("Обновление ALT Booster")
         self._body.prepend(self._update_group)
 
-        # Пользователь на бета-канале если: суффикс "-" в VERSION или сам выбирал бета-канал ранее
         is_on_beta = "-" in config.VERSION or config.state_get("update_channel") == "beta"
 
-        # ── Строка Stable ──────────────────────────────────────────────────
         if stable_ver:
             row = Adw.ActionRow()
             _icon_s = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
@@ -208,7 +186,6 @@ class SetupPage(Gtk.Box):
                 row.add_suffix(btn)
             self._update_group.add(row)
 
-        # ── Строка Beta ────────────────────────────────────────────────────
         if beta_ver:
             row_b = Adw.ActionRow()
             _icon_b = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
@@ -227,8 +204,6 @@ class SetupPage(Gtk.Box):
             self._update_group.add(row_b)
 
     def _do_update(self, btn, version, channel="stable"):
-        # Защита от инъекции: версия приходит из GitHub API и подставляется в shell-команду.
-        # Допускаем суффикс вроде -beta, -rc1 и т.п.
         if not re.fullmatch(r"\d+\.\d+(\.\d+)*(-[a-zA-Z0-9]+)?", version):
             self._log(f"✘  Неверный формат версии: {version!r}\n")
             return
@@ -257,7 +232,6 @@ class SetupPage(Gtk.Box):
 
         def _done(ok):
             def _ui():
-                # Убираем баннер обновления в любом случае
                 if hasattr(self, "_update_group") and self._update_group:
                     try:
                         self._body.remove(self._update_group)
@@ -287,12 +261,11 @@ class SetupPage(Gtk.Box):
             backend.run_privileged(["bash", "-c", cmd_str], self._log, _done)
 
     def _restart_app(self):
-        """Перезапускает текущее приложение."""
         try:
             os.execl(sys.executable, sys.executable, *sys.argv)
         except OSError as e:
             GLib.idle_add(self._log, f"✘  Не удалось перезапустить: {e}\nЗапустите altbooster вручную.\n")
-        return False  # GLib.timeout_add: не повторять
+        return False
 
     def _on_gnome_software_updates(self, row):
         row.set_working()
@@ -301,7 +274,6 @@ class SetupPage(Gtk.Box):
         if hasattr(win, "start_progress"): win.start_progress("Настройка GNOME Software...")
         
         def _do():
-            # Устанавливаем ключ в false
             ok = backend.run_gsettings(["set", "org.gnome.software", "download-updates", "false"])
             GLib.idle_add(row.set_done, ok)
             GLib.idle_add(self._log, "✔  Автообновления отключены. Центр приложений теперь будет летать!\n" if ok else "✘  Ошибка применения настроек GNOME\n")
@@ -323,7 +295,6 @@ class SetupPage(Gtk.Box):
         threading.Thread(target=_do, daemon=True).start()
         
     def _build_mirror_menu(self):
-        """Строит MenuButton выбора зеркала для строки epm update."""
         self._selected_mirror = _detect_active_mirror()
 
         popover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -369,7 +340,6 @@ class SetupPage(Gtk.Box):
                 break
 
     def _on_epm(self, row):
-        # Если EPM не установлен — сначала спросить, установить ли его
         if not backend.is_epm_installed():
             d = Adw.MessageDialog(
                 heading="EPM не установлен",
@@ -383,7 +353,6 @@ class SetupPage(Gtk.Box):
 
             def _on_response(dialog, response):
                 if response == "install":
-                    # Устанавливаем EPM через run_privileged, затем запускаем обновление
                     self._r_epm_install.set_working()
                     self._log("\n▶ Установка EPM (eepm)...\n")
                     win = self.get_root()
@@ -404,8 +373,6 @@ class SetupPage(Gtk.Box):
             return
 
         row.set_working()
-        # Используем apt-get update (без apt-cache search), чтобы избежать
-        # двойного apt-cache search: epm full-upgrade сам сделает epm update
         self._log("\n▶  Обновление списка пакетов...\n")
 
         win = self.get_root()
@@ -461,10 +428,8 @@ class SetupPage(Gtk.Box):
             )
 
         def _run_epm_update():
-            # apt-get update: только обновление индексов, без apt-cache search
             backend.run_privileged(["apt-get", "-y", "update"], self._log, on_update_done)
 
-        # Если выбрано другое зеркало — сначала переключаем, потом обновляем
         active_mirror = _detect_active_mirror()
         selected = getattr(self, "_selected_mirror", active_mirror)
         if selected != active_mirror:
@@ -500,14 +465,11 @@ class SetupPage(Gtk.Box):
         self._log("\n▶ Удаление EPM (eepm)...\n")
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress("Удаление EPM...")
-        # Удаляем eepm
         backend.run_privileged(["apt-get", "remove", "-y", "eepm"], self._log, 
             lambda ok: (row.set_undo_done(ok), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
 
-    # ── Системные настройки ──────────────────────────────────────────────────
 
     def _build_system_group(self, body):
-        # --- ГРУППА 1: ОБНОВЛЕНИЕ И ПАКЕТЫ ---
         pkg_group = Adw.PreferencesGroup()
         pkg_group.set_title("Обновление и пакеты")
         body.append(pkg_group)
@@ -519,14 +481,12 @@ class SetupPage(Gtk.Box):
 
         self._r_epm_install, self._r_epm = [SettingRow(*r) for r in pkg_rows]
 
-        # Вставляем выбор зеркала между статусом и кнопкой "Обновить"
         mirror_btn = self._build_mirror_menu()
         self._r_epm._suffix_box.insert_child_after(mirror_btn, self._r_epm._status)
 
         for r in (self._r_epm_install, self._r_epm):
             pkg_group.add(r)
 
-        # --- ГРУППА 2: СИСТЕМА ---
         sys_group = Adw.PreferencesGroup()
         sys_group.set_title("Система")
         body.append(sys_group)
@@ -565,7 +525,6 @@ class SetupPage(Gtk.Box):
             except Exception:
                 return False
 
-        # Настройка f3d в зависимости от ветки
         is_sisyphus = self._is_sisyphus()
         f3d_btn_label = "Установить" if is_sisyphus else "Только Sisyphus"
 
@@ -581,7 +540,6 @@ class SetupPage(Gtk.Box):
             SettingRow(*r) for r in rows
         ]
         
-        # Если не Sisyphus, блокируем кнопку установки f3d
         if not is_sisyphus:
             orig_set_ui = self._r_f3d._set_ui
             def _disabled_set_ui(enabled):
@@ -729,8 +687,6 @@ class SetupPage(Gtk.Box):
             backend.run_epm(cmd, self._log, _final_done)
 
         def _retry_install_after_dedup(ok):
-            # Если dedup помог (или даже если нет), пробуем установить.
-            # Если снова ошибка — идем на update.
             def _after_dedup_install(ok2):
                 if ok2:
                     _final_done(True)
@@ -790,8 +746,6 @@ class SetupPage(Gtk.Box):
             if hasattr(win, "stop_progress"): win.stop_progress(ok)
             if ok: subprocess.run(["nautilus", "-q"])
         
-        # Используем apt-repo напрямую, так как epm install task:ID может не сработать
-        # (передает аргумент в apt-get, который не понимает синтаксис task:)
         cmd = [
             "bash", "-c",
             f"apt-get install -y apt-repo && "
@@ -814,7 +768,6 @@ class SetupPage(Gtk.Box):
             if ok: subprocess.run(["nautilus", "-q"])
         backend.run_epm(["epm", "-e", "-y", "f3d"], self._log, _done)
 
-    # ── Раскладка клавиатуры ─────────────────────────────────────────────────
 
     def _build_keyboard_group(self, body):
         group = Adw.PreferencesGroup()
@@ -841,7 +794,6 @@ class SetupPage(Gtk.Box):
         group.add(self._r_ctrl)
         threading.Thread(target=self._detect_kbd_mode, daemon=True).start()
 
-    # ── Обработчики системных настроек ───────────────────────────────────────
 
     def _on_sudo(self, row):
         row.set_working()
@@ -850,8 +802,6 @@ class SetupPage(Gtk.Box):
         if hasattr(win, "start_progress"): win.start_progress("Включение sudo...")
 
         def _do():
-            # Используем pkexec, так как sudo может быть еще не настроен (чистая установка).
-            # pkexec запросит пароль root или администратора через GUI.
             cmd = ["pkexec", "/usr/sbin/control", "sudowheel", "enabled"]
             try:
                 res = subprocess.run(cmd, capture_output=True, text=True)
@@ -969,7 +919,6 @@ class SetupPage(Gtk.Box):
             if hasattr(win, "stop_progress"): win.stop_progress(ok)
         threading.Thread(target=_do, daemon=True).start()
 
-    # ── Обработчики раскладки ────────────────────────────────────────────────
 
     def _detect_kbd_mode(self):
         value = backend.gsettings_get(config.GSETTINGS_KEYBINDINGS, "switch-input-source")
@@ -977,8 +926,6 @@ class SetupPage(Gtk.Box):
         is_ctrl = "Control" in value
         is_alt = "Alt" in value and not is_ctrl
         
-        # Обновляем состояние в state.json, чтобы оно было актуальным
-        # при следующем запуске, даже если настройки меняли извне.
         config.state_set("setting_kbd_altshift", is_alt)
         config.state_set("setting_kbd_capslock", is_caps)
         config.state_set("setting_kbd_ctrlshift", is_ctrl)
@@ -1054,9 +1001,7 @@ class SetupPage(Gtk.Box):
 
         threading.Thread(target=_do, daemon=True).start()
 
-    # ── Papirus иконки ────────────────────────────────────────────────────────
 
-    # Ключи цветов папок Papirus (lowercase = имя темы после capitalize())
     _PAPIRUS_COLOR_KEYS = [
         "adwaita", "yaru", "nordic", "breeze", "blue",
         "brown", "cyan", "green", "grey", "indigo",
@@ -1065,22 +1010,15 @@ class SetupPage(Gtk.Box):
     ]
 
     def _create_papirus_row(self):
-        """Строка установки/применения иконок Papirus.
-
-        Фаза 1 (пакет не установлен): кнопка «Установить».
-        Фаза 2 (пакет есть): dropdown цвета + корзина + «Применить».
-        Тема: Papirus-{Dark|Light}-{SelectedColor} по системной цветовой схеме.
-        """
         row = Adw.ActionRow()
         row.set_title("Иконки Papirus")
         row.set_subtitle("Пакет papirus-remix-icon-theme — тема подбирается по светлой/тёмной схеме")
         row.add_prefix(make_icon("application-x-addon-symbolic"))
 
-        # Dropdown выбора цвета папок
         model = Gtk.StringList.new([k.capitalize() for k in self._PAPIRUS_COLOR_KEYS])
         self._papirus_color_drop = Gtk.DropDown.new(model, None)
         self._papirus_color_drop.set_valign(Gtk.Align.CENTER)
-        self._papirus_color_drop.set_visible(False)  # виден только после установки
+        self._papirus_color_drop.set_visible(False)
 
         self._papirus_trash_btn = Gtk.Button.new_from_icon_name("user-trash-symbolic")
         self._papirus_trash_btn.add_css_class("destructive-action")
@@ -1090,7 +1028,7 @@ class SetupPage(Gtk.Box):
         self._papirus_trash_btn.set_visible(False)
 
         self._papirus_btn = make_button("Установить", width=130)
-        self._papirus_btn.set_sensitive(False)  # ждём результата фоновой проверки
+        self._papirus_btn.set_sensitive(False)
         self._papirus_btn.connect("clicked", self._on_papirus_btn_clicked)
 
         suffix = Gtk.Box(spacing=8)
@@ -1101,8 +1039,6 @@ class SetupPage(Gtk.Box):
         row.add_suffix(suffix)
 
         self._papirus_installed = False
-        # Предзагрузка из кэша: показываем правильный UI без ожидания фоновой проверки.
-        # Это важно на уже настроенных системах — тема видна сразу при запуске.
         cached_installed = config.state_get("app_papirus_icons") is True
         if cached_installed:
             cached_applied = config.state_get("papirus_applied") is True
@@ -1113,8 +1049,6 @@ class SetupPage(Gtk.Box):
     def _check_papirus(self):
         installed = backend.check_app_installed({"check": ["rpm", "papirus-remix-icon-theme"]})
         config.state_set("app_papirus_icons", installed)
-        # Дополнительно проверяем gsettings: применена ли Papirus-тема уже.
-        # На преднастроенных системах пакет установлен и тема уже активна.
         applied = False
         if installed:
             icon_theme = backend.gsettings_get("org.gnome.desktop.interface", "icon-theme")
@@ -1130,7 +1064,7 @@ class SetupPage(Gtk.Box):
             self._papirus_trash_btn.set_sensitive(True)
             if applied:
                 self._papirus_btn.set_label("Применено")
-                self._papirus_btn.set_sensitive(True)  # можно применить повторно (другой цвет)
+                self._papirus_btn.set_sensitive(True)
                 self._papirus_btn.remove_css_class("suggested-action")
                 self._papirus_btn.add_css_class("flat")
             else:
@@ -1192,7 +1126,6 @@ class SetupPage(Gtk.Box):
         backend.run_privileged(["apt-get", "remove", "-y", "papirus-remix-icon-theme"], self._log, _done)
 
     def _on_apply_papirus(self):
-        """Применяет Papirus-{Dark|Light}-{Color} по системной схеме и выбранному цвету папок."""
         idx = self._papirus_color_drop.get_selected()
         color = self._PAPIRUS_COLOR_KEYS[idx].capitalize() if idx != Gtk.INVALID_LIST_POSITION else "Adwaita"
 
@@ -1211,3 +1144,4 @@ class SetupPage(Gtk.Box):
             if hasattr(win, "stop_progress"): GLib.idle_add(win.stop_progress, ok)
 
         threading.Thread(target=_do, daemon=True).start()
+

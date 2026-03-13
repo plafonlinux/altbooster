@@ -1,8 +1,3 @@
-"""
-builtin_actions — встроенные функции для Data-Driven UI.
-
-Сигнатура каждой функции: fn(page, arg) -> bool
-"""
 
 from typing import Callable
 
@@ -37,12 +32,10 @@ from builtin_actions.amd import (
 )
 
 BUILTIN_REGISTRY: dict[str, Callable] = {
-    # appearance
     "apply_papirus_icons":      apply_papirus_icons,
     "apply_adwaita_theme":      apply_adwaita_theme,
     "apply_folder_color":       apply_folder_color,
     "reset_folder_color":       reset_folder_color,
-    # terminal
     "check_ptyxis_default":     check_ptyxis_default,
     "set_ptyxis_default":       set_ptyxis_default,
     "check_shortcut_1":         check_shortcut_1,
@@ -56,7 +49,6 @@ BUILTIN_REGISTRY: dict[str, Callable] = {
     "install_fastfetch_config": install_fastfetch_config,
     "check_zsh_aliases":        check_zsh_aliases,
     "add_zsh_aliases":          add_zsh_aliases,
-    # amd
     "check_overclock":          check_overclock,
     "enable_overclock":         enable_overclock,
     "check_wheel":              check_wheel,
@@ -64,3 +56,4 @@ BUILTIN_REGISTRY: dict[str, Callable] = {
     "apply_lact_config":        apply_lact_config,
     "confirm_reboot":           confirm_reboot,
 }
+

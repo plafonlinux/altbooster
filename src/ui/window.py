@@ -1,4 +1,3 @@
-"""Главное окно приложения ALT Booster."""
 
 import datetime
 import json
@@ -19,8 +18,6 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
 import config
 import backend
-from dynamic_page import DynamicPage
-from ui.common import load_module
 from ui.dialogs import clear_saved_password
 from system import profile as profile_module
 from ui.profile_dialog import show_preset_save_dialog, show_preset_import_dialog
@@ -40,19 +37,13 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         start_time = time.time()
         super().__init__(**kwargs)
 
-        # ── Тема иконок ───────────────────────────────────────────────────────
-        # Принудительно выставляем Adwaita, чтобы иконки оставались монохромными
-        # даже если в системе выбрана сторонняя тема с цветными иконками.
         icon_theme = "Adwaita"
         if not os.path.exists("/usr/share/icons/Adwaita") and os.path.exists("/usr/share/icons/alt-workstation"):
             icon_theme = "alt-workstation"
         Gtk.Settings.get_default().set_property("gtk-icon-theme-name", icon_theme)
 
-        # ── Регистрация bundled-иконок ────────────────────────────────────────
         _icons_base = Path(__file__).parent.parent.parent / "icons"
 
-        # 1. Копируем SVG в ~/.local/share/icons/hicolor/ — стандартный путь GTK.
-        #    Сравниваем байты: копируем только изменившиеся/новые файлы.
         _src_base = _icons_base / "hicolor" / "scalable"
         _dst_hicolor = Path.home() / ".local" / "share" / "icons" / "hicolor"
         _dst_base = _dst_hicolor / "scalable"
@@ -70,10 +61,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 except OSError:
                     pass
 
-        # 2. Пересоздаём icon-theme.cache через gtk-update-icon-cache.
-        #    Это необходимо: GTK читает кэш ДО inotify-уведомлений, поэтому
-        #    без обновлённого кэша новые иконки не видны до перезапуска DE.
-        #    Запускаем всегда (или только при изменениях — зависит от скорости).
         try:
             subprocess.run(
                 ["gtk-update-icon-cache", "-f", "-t", str(_dst_hicolor)],
@@ -82,55 +69,30 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         except (OSError, subprocess.TimeoutExpired):
             pass
 
-        # 3. add_search_path — дополнительный fallback: GTK ищет иконки
-        #    и в директории проекта, независимо от состояния ~/.local/share/
         _it = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
         _it.add_search_path(str(_icons_base))
 
-        # ── Лог (строится первым, чтобы все остальные компоненты могли писать в него) ──
         self._pulse_timer_id = None
         self._reset_status_timer_id = None
-        # SimpleQueue потокобезопасна без блокировок — идеально для лог-потока
         self._log_queue = queue.SimpleQueue()
         self._log_widget = self._build_log_panel()
 
         self.set_title("ALT Booster")
         settings = self._load_settings()
 
-        # Путь к лог-файлу инициализируем сразу; ротацию и запись заголовка
-        # выполняем в фоновом потоке, чтобы не тормозить старт UI.
         self._log_file = config.CONFIG_DIR / "altbooster.log"
         threading.Thread(target=self._log_writer_loop, daemon=True).start()
 
         self.set_default_size(settings.get("width", 740), settings.get("height", 880))
         self.connect("close-request", self._on_close)
 
-        # ── Структура окна ────────────────────────────────────────────────────
-        #   ApplicationWindow
-        #     └─ BreakpointBin
-        #          └─ ToastOverlay
-        #               └─ ToolbarView
-        #                    ├─ top_bar: HeaderBar (WindowTitle + меню)
-        #                    └─ content: OverlaySplitView
-        #                          ├─ sidebar: Box(VERTICAL)
-        #                          │     └─ ListBox (навигация по вкладкам)
-        #                          └─ content: Box(VERTICAL)
-        #                                ├─ update_banner
-        #                                ├─ profile_banner
-        #                                ├─ stack_overlay (Overlay, vexpand)
-        #                                │     ├─ ViewStack  (main child)
-        #                                │     └─ relogin_revealer (overlay)
-        #                                └─ log_widget
 
-        # Строим хедер первым (он создаёт self._stack, self._header)
         header_widget = self._build_header()
 
-        # Контентная область: баннеры + стек страниц + лог
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         root.append(self._build_update_banner())
         root.append(self._build_profile_banner())
 
-        # ── Страницы приложения ───────────────────────────────────────────────
         self._setup = SetupPage(self._log)
         self._apps = AppsPage(self._log)
         self._extensions = ExtensionsPage(self._log)
@@ -138,20 +100,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._davinci = DaVinciPage(self._log)
         self._maint = MaintenancePage(self._log)
 
-        def _dp(name):
-            # DynamicPage строится из JSON-описания; при ошибке показываем сообщение вместо краша
-            try:
-                return DynamicPage(load_module(name), self._log)
-            except Exception as e:
-                lbl = Gtk.Label(label=f"Ошибка {name}.json:\n{e}")
-                lbl.set_wrap(True)
-                return lbl
-
         self._amd = AmdPage(self._log)
         self._intel = IntelPage(self._log)
         self._flatpak = FlatpakPage(self._log)
 
-        # Регистрируем все страницы в ViewStack; порядок определяет порядок вкладок
         for widget, name, title, icon in [
             (self._setup,       "setup",       "Начало",          "go-home-symbolic"),
             (self._apps,        "apps",        "Приложения",      "grid-large-symbolic"),
@@ -167,78 +119,70 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             p.set_icon_name(icon)
 
         self._stack.set_vexpand(True)
-        # Оборачиваем стек в Overlay для кнопки перелогина
         stack_overlay = Gtk.Overlay()
         stack_overlay.set_child(self._stack)
         stack_overlay.set_vexpand(True)
         self._relogin_revealer = self._build_relogin_banner()
         stack_overlay.add_overlay(self._relogin_revealer)
         root.append(stack_overlay)
-        root.append(self._log_widget)
 
-        # Боковая панель навигации — Paned позволяет тащить разделитель мышью
         self._split_view = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         self._split_view.set_start_child(self._build_sidebar())
         self._split_view.set_end_child(root)
-        # False — минимум sidebar задаётся через set_size_request на self._sidebar_widget:
-        # с текстом min=90px (< порога 110px, поэтому порог достигается при сужении),
-        # в режиме иконок min=44px.
+        self._split_view.set_vexpand(True)
         self._split_view.set_shrink_start_child(False)
         self._split_view.set_resize_start_child(False)
         self._split_view.set_shrink_end_child(False)
+
+        self._bottom_paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self._bottom_paned.set_start_child(self._bottom_list_widget)
+        self._bottom_paned.set_end_child(self._log_widget)
+        self._bottom_paned.set_shrink_start_child(False)
+        self._bottom_paned.set_resize_start_child(False)
+        self._bottom_paned.set_shrink_end_child(False)
+
+        outer_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer_vbox.append(self._split_view)
+        outer_vbox.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+        outer_vbox.append(self._bottom_paned)
+
         sidebar_width = settings.get("sidebar_width")
-        # Сохранённую ширину запоминаем для восстановления при переключении из режима иконок.
-        # Если значения нет — не задаём position явно: Paned сам встанет по натуральной
-        # ширине контента (иконки + подписи + отступы), разделитель окажется вплотную к тексту.
         self._sidebar_saved_width = sidebar_width
         if sidebar_width is not None:
             GLib.idle_add(self._split_view.set_position, sidebar_width)
-        # Автопереключение иконки/текст при изменении ширины sidebar перетаскиванием
         self._split_view.connect("notify::position", self._on_sidebar_position_changed)
 
-        # Adw.ToolbarView управляет верхними барами по стандарту GNOME HIG
         toolbar_view = Adw.ToolbarView()
         toolbar_view.add_top_bar(header_widget)
-        toolbar_view.set_content(self._split_view)
+        toolbar_view.set_content(outer_vbox)
 
-        # ToastOverlay поверх всей иерархии
         self._toast_overlay = Adw.ToastOverlay()
         self._toast_overlay.set_child(toolbar_view)
 
-        # Адаптивный контейнер: минимальная ширина — боковая панель + контент
         bp_bin = Adw.BreakpointBin()
         bp_bin.set_size_request(750, 200)
         bp_bin.set_child(self._toast_overlay)
 
         self.set_content(bp_bin)
 
-        # Применяем сохранённые настройки видимости текста в боковой панели после realize
         GLib.idle_add(self._apply_tab_label_visibility)
 
         startup_ms = (time.time() - start_time) * 1000
         self._log(f"ℹ Startup time: {startup_ms:.2f} ms\n")
 
-    # ── Заголовок окна и меню ─────────────────────────────────────────────────
 
     def _build_header(self):
-        """Строит HeaderBar с названием приложения и меню настроек (без переключателя вкладок)."""
         header = Adw.HeaderBar()
         self._header = header
 
-        # ViewStack создаём здесь (до регистрации страниц в __init__),
-        # чтобы он был доступен при добавлении вкладок в цикле выше
         self._stack = Adw.ViewStack()
 
-        # Переключатель вкладок вынесен в боковую панель (_build_sidebar),
-        # хедер показывает только название приложения + кнопки
         self._window_title = Adw.WindowTitle()
         self._window_title.set_title("ALT Booster")
         header.set_title_widget(self._window_title)
 
-        # ── Кнопка выбора пресета (левый угол) ───────────────────────────────
         header.pack_start(self._build_preset_button())
 
-        # ── Структура меню (гамбургер) ────────────────────────────────────────
         menu = Gio.Menu()
 
         section_diag = Gio.Menu()
@@ -256,10 +200,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         section_about.append("О приложении", "win.about")
         menu.append_section(None, section_about)
 
-        # Меню сохраняем — строка «Настройки» в sidebar будет использовать его
         self._app_menu = menu
 
-        # CSS кружка обновления — регистрируем здесь, раньше чем sidebar
         _dot_css = Gtk.CssProvider()
         _dot_css.load_from_data(b"""
             .ab-update-dot {
@@ -277,7 +219,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
-        # Регистрируем действия меню как GAction на уровне окна
         actions = [
             ("check_update",   self._check_for_updates),
             ("about",          self._show_about),
@@ -292,7 +233,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             a.connect("activate", cb)
             self.add_action(a)
 
-        # Stateful action «Текст у вкладок» (сохраняется в конфиг)
         show_labels = config.state_get("show_tab_labels", False)
         a_labels = Gio.SimpleAction.new_stateful(
             "show_tab_labels", None, GLib.Variant.new_boolean(show_labels)
@@ -300,18 +240,12 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         a_labels.connect("change-state", self._on_show_tab_labels_changed)
         self.add_action(a_labels)
 
-        # Стандартные клавиатурные сокращения GNOME HIG
         app = self.get_application()
         app.set_accels_for_action("win.about", ["F1"])
 
         return header
 
     def _build_sidebar(self) -> Gtk.Widget:
-        """Боковая панель навигации — список вкладок слева окна.
-
-        Сохраняет ссылки self._nav_images / self._nav_labels для динамической
-        смены размера иконок и видимости подписей в _apply_tab_label_visibility().
-        """
         nav_list = Gtk.ListBox()
         nav_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         nav_list.add_css_class("navigation-sidebar")
@@ -343,9 +277,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             lbl = Gtk.Label(label=title)
             lbl.set_xalign(0.0)
             lbl.set_hexpand(True)
-            # END позволяет GTK дать label меньше места при сужении sidebar —
-            # без этого минимальная ширина label = полный текст (~130px для «DaVinci Resolve»)
-            # и set_shrink_start_child=False блокирует сужение до порога 110px
             lbl.set_ellipsize(Pango.EllipsizeMode.END)
             box.append(img)
             box.append(lbl)
@@ -362,20 +293,13 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         scroll.set_child(nav_list)
         scroll.set_vexpand(True)
 
+        self._bottom_list_widget = self._build_sidebar_bottom()
+
         self._sidebar_widget = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self._sidebar_widget.append(scroll)
-        self._sidebar_widget.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-        self._sidebar_widget.append(self._build_sidebar_bottom())
         return self._sidebar_widget
 
     def _build_sidebar_bottom(self) -> Gtk.Widget:
-        """Нижняя часть боковой панели: строка обновлений и строка меню настроек.
-
-        Обе строки визуально идентичны пунктам навигации (navigation-sidebar ListBox),
-        но расположены под сепаратором в самом низу sidebar.
-        Ссылки на иконки и метки добавляются в self._bottom_images / self._bottom_labels
-        для синхронного изменения размера вместе с nav-строками.
-        """
         bottom_list = Gtk.ListBox()
         bottom_list.add_css_class("navigation-sidebar")
         bottom_list.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -390,14 +314,12 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             box.set_margin_end(7)
             return box
 
-        # ── Строка «Обновления» ───────────────────────────────────────────────
         upd_row = Gtk.ListBoxRow()
         upd_row.set_name("update")
         upd_row.set_activatable(True)
         upd_row.set_tooltip_text("Проверить обновления")
         upd_box = _make_row_box()
 
-        # Иконка без обёрток — отступ до текста совпадает с остальными строками
         upd_icon = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
         upd_icon.set_pixel_size(16)
 
@@ -406,7 +328,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         upd_lbl.set_hexpand(True)
         upd_lbl.set_ellipsize(Pango.EllipsizeMode.END)
 
-        # Бейдж — цветная точка в правом конце строки; видна только при наличии обновления
         self._update_badge_dot = Gtk.Label(label="")
         self._update_badge_dot.add_css_class("ab-update-dot")
         self._update_badge_dot.set_valign(Gtk.Align.CENTER)
@@ -420,8 +341,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._bottom_images.append(upd_icon)
         self._bottom_labels.append(upd_lbl)
 
-        # ── Строка «Настройки» ────────────────────────────────────────────────
-        # Обычный ListBoxRow (структура идентична «Обновления») + PopoverMenu по клику
         menu_row = Gtk.ListBoxRow()
         menu_row.set_name("settings")
         menu_row.set_activatable(True)
@@ -438,7 +357,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         mb_box.append(mb_lbl)
         menu_row.set_child(mb_box)
 
-        # PopoverMenu привязываем к строке; открываем в _on_bottom_row_activated
         self._settings_popover = Gtk.PopoverMenu.new_from_model(self._app_menu)
         self._settings_popover.set_parent(menu_row)
         self._settings_popover.set_has_arrow(False)
@@ -452,7 +370,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         return bottom_list
 
     def _on_bottom_row_activated(self, _, row):
-        """Обрабатывает нажатия на нижние строки sidebar."""
         name = row.get_name()
         if name == "update":
             self._check_for_updates()
@@ -460,31 +377,15 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             self._settings_popover.popup()
 
     def _on_nav_row_selected(self, _, row):
-        """Переключает вкладку ViewStack при выборе строки в боковой панели."""
         if row is not None:
             self._stack.set_visible_child_name(row.get_name())
 
-    # Размеры иконок: с подписями — 16px, только иконки — +30% = 21px
     _ICON_SIZE_WITH_LABELS = 16
     _ICON_SIZE_ICONS_ONLY  = 21
-    # Минимальная ширина sidebar в режиме иконок: margins(7+7) + icon(21) + handle(~6) = 41px
     _SIDEBAR_ICONS_ONLY_WIDTH = 44
-    # Порог перетаскивания: шире — показываем текст, уже — только иконки
     _SIDEBAR_LABELS_THRESHOLD = 110
 
     def _apply_tab_label_visibility(self, show: bool | None = None, from_drag: bool = False):
-        """Показывает/скрывает подписи в sidebar; меняет размер иконок и ширину панели.
-
-        Режим «только иконки» (show=False):
-          - иконки 21px (+30%), подписи скрыты
-          - sidebar схлопывается до минимума (только иконки)
-        Режим «с подписями» (show=True):
-          - иконки 16px, подписи видны
-          - при вызове из меню восстанавливает сохранённую ширину
-
-        from_drag=True: вызов из обработчика перетаскивания — не трогаем _sidebar_saved_width
-        и не восстанавливаем позицию (пользователь сам тянет разделитель).
-        """
         if show is None:
             show = config.state_get("show_tab_labels", True)
         icon_size = self._ICON_SIZE_WITH_LABELS if show else self._ICON_SIZE_ICONS_ONLY
@@ -497,29 +398,24 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             lbl.set_visible(show)
 
         if show:
-            # min=90px: меньше порога 110px, поэтому пользователь может дотянуть до threshold;
-            # одновременно sidebar нельзя полностью схлопнуть
             self._sidebar_widget.set_size_request(90, -1)
+            self._bottom_list_widget.set_size_request(90, -1)
             if not from_drag:
-                # Вызов из меню — восстанавливаем сохранённую ширину
                 saved = getattr(self, "_sidebar_saved_width", None)
                 if saved:
                     GLib.idle_add(self._split_view.set_position, saved)
+                    GLib.idle_add(self._bottom_paned.set_position, saved)
         else:
             if not from_drag:
-                # Вызов из меню — сохраняем текущую ширину перед схлопыванием
                 self._sidebar_saved_width = self._split_view.get_position()
             self._sidebar_widget.set_size_request(self._SIDEBAR_ICONS_ONLY_WIDTH, -1)
+            self._bottom_list_widget.set_size_request(self._SIDEBAR_ICONS_ONLY_WIDTH, -1)
             GLib.idle_add(self._split_view.set_position, self._SIDEBAR_ICONS_ONLY_WIDTH)
+            GLib.idle_add(self._bottom_paned.set_position, self._SIDEBAR_ICONS_ONLY_WIDTH)
 
     def _on_sidebar_position_changed(self, paned, *_):
-        """Автопереключение текст/иконки при перетаскивании разделителя sidebar.
-
-        При пересечении порога _SIDEBAR_LABELS_THRESHOLD:
-          - расширение: показываем подписи
-          - сужение: прячем подписи и снапим к ширине иконок
-        """
         pos = paned.get_position()
+        self._bottom_paned.set_position(pos)
         currently_showing = bool(self._nav_labels and self._nav_labels[0].get_visible())
         should_show = pos > self._SIDEBAR_LABELS_THRESHOLD
 
@@ -527,20 +423,17 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             return
 
         if not should_show:
-            # Сохраняем ширину до снапа, чтобы кнопка меню «Текст у вкладок» могла восстановить
             self._sidebar_saved_width = pos
 
         config.state_set("show_tab_labels", should_show)
         self._apply_tab_label_visibility(show=should_show, from_drag=True)
 
     def _on_show_tab_labels_changed(self, action, state):
-        """Обработчик переключателя «Текст у вкладок» из меню настроек."""
         action.set_state(state)
         config.state_set("show_tab_labels", state.get_boolean())
         self._apply_tab_label_visibility()
 
     def _build_update_banner(self):
-        """Плавающий баннер обновления под хедером — по аналогии с баннером в Приложениях."""
         outer = Gtk.Box()
         outer.set_halign(Gtk.Align.CENTER)
         outer.set_margin_top(6)
@@ -582,10 +475,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._update_banner_revealer.set_reveal_child(False)
         return self._update_banner_revealer
 
-    # ── Пресеты ───────────────────────────────────────────────────────────────
 
     def _build_preset_button(self) -> Gtk.MenuButton:
-        """Строит кнопку выбора пресета для левого угла хедера."""
         self._preset_btn = Gtk.MenuButton()
         self._preset_btn.add_css_class("flat")
 
@@ -597,11 +488,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         return self._preset_btn
 
     def _refresh_preset_menu(self):
-        """Перестраивает содержимое popover'а пресетов и обновляет метку кнопки."""
         presets = profile_module.list_presets()
         active_name = config.state_get("active_preset")
 
-        # Метка кнопки = имя активного пресета (с обрезкой длинных названий), иначе «Default»
         display_name = active_name or "Default"
         _btn_lbl = Gtk.Label(label=display_name)
         _btn_lbl.set_max_width_chars(9)
@@ -617,7 +506,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         box.set_margin_end(4)
 
         def _flat_row(label: str, icon: str, cb, sensitive: bool = True) -> Gtk.Button:
-            """Плоская кнопка-строка для popover-меню."""
             row = Gtk.Box(spacing=8)
             row.set_margin_start(4)
             img = Gtk.Image.new_from_icon_name(icon)
@@ -634,7 +522,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             btn.connect("clicked", cb)
             return btn
 
-        # ── Список сохранённых пресетов ──────────────────────────────────────
         if presets:
             for p_name, _ in presets:
                 row = Gtk.Box(spacing=8)
@@ -662,7 +549,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
-        # ── Действия с пресетами ─────────────────────────────────────────────
         has_active = bool(active_name and any(n == active_name for n, _ in presets))
         box.append(_flat_row("Сохранить как новый…",    "list-add-symbolic",        self._on_preset_save_new))
         box.append(_flat_row("Переименовать текущий…",  "document-edit-symbolic",   self._on_preset_rename,  has_active))
@@ -670,20 +556,17 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
-        # ── Файловый экспорт/импорт ───────────────────────────────────────────
         box.append(_flat_row("Экспортировать в файл…",  "document-send-symbolic",   self._on_preset_export_file))
         box.append(_flat_row("Импортировать из файла…", "document-open-symbolic",   self._on_preset_import_file))
 
         box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
 
-        # ── Отдельный экспорт расширений и приложений ────────────────────────
         box.append(_flat_row("Экспорт расширений…",    "application-x-addon-symbolic",       self._on_export_extensions))
         box.append(_flat_row("Экспорт приложений…",    "application-x-executable-symbolic",  self._on_export_apps))
 
         self._preset_popover.set_child(box)
 
     def _on_preset_selected(self, name: str):
-        """Выбор пресета из списка — показывает диалог применения."""
         self._preset_popover.popdown()
         for p_name, path in profile_module.list_presets():
             if p_name == name:
@@ -695,13 +578,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 return
 
     def _on_preset_save_new(self, *_):
-        """Сохранить текущее состояние как новый пресет."""
         self._preset_popover.popdown()
         existing = [n for n, _ in profile_module.list_presets()]
         show_preset_save_dialog(self, existing, self._do_save_preset)
 
     def _on_preset_rename(self, *_):
-        """Переименовать текущий активный пресет."""
         self._preset_popover.popdown()
         active_name = config.state_get("active_preset")
         if not active_name:
@@ -726,7 +607,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         show_preset_save_dialog(self, existing, _do_rename)
 
     def _on_preset_delete(self, *_):
-        """Удалить текущий активный пресет (с подтверждением)."""
         self._preset_popover.popdown()
         active_name = config.state_get("active_preset")
         if not active_name:
@@ -760,16 +640,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.present(self)
 
     def _on_preset_export_file(self, *_):
-        """Экспортировать текущий пресет (или текущее состояние) в .altbooster файл.
-
-        Если активный пресет сохранён — копирует его файл напрямую.
-        Если нет — собирает текущее состояние системы и сохраняет как «Default».
-        """
         self._preset_popover.popdown()
         active_name = config.state_get("active_preset") or "Default"
 
-        import datetime as _dt
-        date_str = _dt.datetime.now().strftime("%Y-%m-%d")
+        date_str = datetime.datetime.now().strftime("%Y-%m-%d")
         safe_name = "".join(c if c.isalnum() or c in " _-" else "_" for c in active_name).strip()
         filename = f"{safe_name}-{date_str}.altbooster"
 
@@ -782,25 +656,20 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 file = d.save_finish(res)
                 if not file:
                     return
-                # Ищем уже сохранённый файл пресета
                 for p_name, path in profile_module.list_presets():
                     if p_name == active_name:
-                        import shutil as _sh
-                        _sh.copy2(path, file.get_path())
+                        shutil.copy2(path, file.get_path())
                         self._log(f"✔ Пресет «{active_name}» экспортирован в {file.get_path()}\n")
                         self.add_toast(Adw.Toast(title="Пресет экспортирован"))
                         return
-                # Пресет не сохранён — собираем текущее состояние в фоне
                 dest = file.get_path()
                 self._log(f"💾 Собираю текущее состояние для экспорта...\n")
 
                 def _collect():
                     try:
-                        import json as _json
                         data = profile_module.collect_profile(active_name, self._apps._data)
-                        from pathlib import Path as _P
-                        _P(dest).write_text(
-                            _json.dumps(data, ensure_ascii=False, indent=2),
+                        Path(dest).write_text(
+                            json.dumps(data, ensure_ascii=False, indent=2),
                             encoding="utf-8",
                         )
                         GLib.idle_add(self._log, f"✔ Пресет экспортирован в {dest}\n")
@@ -810,14 +679,13 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
                 threading.Thread(target=_collect, daemon=True).start()
             except GLib.Error as e:
-                if e.code != 2:  # 2 = Dismissed by user — не ошибка
+                if e.code != 2:
                     self._log(f"✘ Ошибка экспорта: {e}\n")
 
-        self._file_dialog = dialog  # держим ссылку, иначе GC уничтожит до колбэка
+        self._file_dialog = dialog
         dialog.save(self, None, _on_save)
 
     def _on_preset_import_file(self, *_):
-        """Импортировать пресет из .altbooster файла."""
         self._preset_popover.popdown()
         dialog = Gtk.FileDialog()
         dialog.set_title("Импортировать пресет")
@@ -847,14 +715,13 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 if file:
                     self._load_and_show_preset(file.get_path())
             except GLib.Error as e:
-                if e.code != 2:  # 2 = Dismissed by user — не ошибка
+                if e.code != 2:
                     self._log(f"✘ Ошибка выбора файла: {e}\n")
 
-        self._file_dialog = dialog  # держим ссылку, иначе GC уничтожит до колбэка
+        self._file_dialog = dialog
         dialog.open(self, None, _on_open)
 
     def _on_export_extensions(self, *_):
-        """Экспорт расширений: диалог выбора — только список или список + конфиги."""
         self._preset_popover.popdown()
 
         d = Adw.AlertDialog(
@@ -874,7 +741,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             include_dconf = (response == "full")
 
             def _collect_and_save():
-                # Собираем данные в фоне, потом открываем диалог в main thread
                 try:
                     r_list = subprocess.run(
                         ["gnome-extensions", "list", "--enabled"],
@@ -896,8 +762,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                     GLib.idle_add(self._log, f"✘ Ошибка сбора данных расширений: {e}\n")
 
             def _show_save_dialog(ext_data):
-                import datetime as _dt
-                date_str = _dt.datetime.now().strftime("%Y-%m-%d")
+                date_str = datetime.datetime.now().strftime("%Y-%m-%d")
                 suffix = "-full" if include_dconf else "-list"
                 filename = f"extensions{suffix}-{date_str}.json"
 
@@ -917,10 +782,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                         file = fd.save_finish(res)
                         if not file:
                             return
-                        import json as _json
-                        from pathlib import Path as _P
-                        _P(file.get_path()).write_text(
-                            _json.dumps(ext_data, ensure_ascii=False, indent=2),
+                        Path(file.get_path()).write_text(
+                            json.dumps(ext_data, ensure_ascii=False, indent=2),
                             encoding="utf-8",
                         )
                         self._log(f"✔ Расширения экспортированы в {file.get_path()}\n")
@@ -929,7 +792,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                         if e.code != 2:
                             self._log(f"✘ Ошибка сохранения: {e}\n")
 
-                self._file_dialog = fdialog  # держим ссылку, иначе GC уничтожит до колбэка
+                self._file_dialog = fdialog
                 fdialog.save(self, None, _on_save)
 
             threading.Thread(target=_collect_and_save, daemon=True).start()
@@ -938,7 +801,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.present(self)
 
     def _on_export_apps(self, *_):
-        """Экспорт списка установленных приложений в JSON-файл."""
         self._preset_popover.popdown()
 
         self._log("💾 Собираю список установленных приложений...\n")
@@ -955,8 +817,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 GLib.idle_add(self._log, f"✘ Ошибка сбора приложений: {e}\n")
 
         def _show_save_dialog(apps_data):
-            import datetime as _dt
-            date_str = _dt.datetime.now().strftime("%Y-%m-%d")
+            date_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
             fdialog = Gtk.FileDialog()
             fdialog.set_title("Экспорт приложений")
@@ -974,10 +835,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                     file = fd.save_finish(res)
                     if not file:
                         return
-                    import json as _json
-                    from pathlib import Path as _P
-                    _P(file.get_path()).write_text(
-                        _json.dumps(apps_data, ensure_ascii=False, indent=2),
+                    Path(file.get_path()).write_text(
+                        json.dumps(apps_data, ensure_ascii=False, indent=2),
                         encoding="utf-8",
                     )
                     count = len(apps_data["apps"])
@@ -987,22 +846,19 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                     if e.code != 2:
                         self._log(f"✘ Ошибка сохранения: {e}\n")
 
-            self._file_dialog = fdialog  # держим ссылку, иначе GC уничтожит до колбэка
+            self._file_dialog = fdialog
             fdialog.save(self, None, _on_save)
 
         threading.Thread(target=_collect, daemon=True).start()
 
     def _load_and_show_preset(self, path_str: str):
-        """Загружает .altbooster файл и показывает диалог применения."""
-        from pathlib import Path as _Path
         try:
-            data = profile_module.load_preset(_Path(path_str))
+            data = profile_module.load_preset(Path(path_str))
             show_preset_import_dialog(self, data, self._do_apply_preset)
         except Exception as e:
             self._log(f"✘ Ошибка чтения пресета: {e}\n")
 
     def _do_save_preset(self, name: str):
-        """Собирает текущее состояние и сохраняет пресет с указанным именем."""
         self._log(f"💾 Сохраняю пресет «{name}»...\n")
 
         def _worker():
@@ -1019,7 +875,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         threading.Thread(target=_worker, daemon=True).start()
 
     def _find_app_install_cmd(self, app_info: dict) -> list | None:
-        """Ищет команду установки для приложения по ID в текущем каталоге."""
         app_id = app_info.get("id")
         source_label = app_info.get("source_label", "")
         for group in self._apps._data.get("groups", []):
@@ -1029,32 +884,27 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 sources = item.get("sources") or (
                     [item["source"]] if item.get("source") else []
                 )
-                # Предпочитаем источник с тем же лейблом, что был при экспорте
                 for src in sources:
                     if not source_label or src.get("label") == source_label:
                         return src.get("cmd")
-                # Fallback: первый доступный источник
                 if sources:
                     return sources[0].get("cmd")
         return None
 
     def _do_apply_preset(self, data: dict, flags: dict):
-        """Применяет пресет: настройки сразу, установка в фоне."""
         name = data.get("name", "Пресет")
 
         deferred_settings: list[dict] = []
         if flags.get("settings"):
             deferred_settings = profile_module.apply_settings(data)
             self._log("✔ Настройки из пресета применены.\n")
-            # Обновляем страницу приложений если был custom_apps
             if data.get("custom_apps"):
                 GLib.idle_add(self._apps._load_and_build)
 
         config.state_set("active_preset", name)
         GLib.idle_add(self._refresh_preset_menu)
 
-        # Собираем команды для установки
-        cmds: list[tuple[str, list, str]] = []  # (label, cmd, type)
+        cmds: list[tuple[str, list, str]] = []
 
         if flags.get("apps"):
             for app_info in data.get("apps") or []:
@@ -1063,17 +913,15 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                     kind = "epm" if cmd and cmd[0] == "epm" else "privileged"
                     cmds.append((app_info.get("label", app_info["id"]), cmd, kind))
 
-        # Для отложенных тем: если пакет известен — ставим его перед применением gsettings
         for entry in deferred_settings:
             pkg = profile_module.theme_package(entry.get("value", ""))
             if pkg:
                 cmds.append((entry["value"], ["apt-get", "install", "-y", pkg], "privileged"))
 
         if flags.get("extensions"):
-            import pathlib as _pl
-            _system_ext_dir = _pl.Path("/usr/share/gnome-shell/extensions")
+            _system_ext_dir = Path("/usr/share/gnome-shell/extensions")
             gext = shutil.which("gext") or str(
-                _pl.Path.home() / ".local" / "bin" / "gext"
+                Path.home() / ".local" / "bin" / "gext"
             )
 
             installed_uuids = set()
@@ -1099,7 +947,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         def _worker():
             ok_count = 0
 
-            # Проверяем prerequisites: если среди команд есть flatpak — убеждаемся что он установлен
             has_flatpak_src = any(
                 cmd and cmd[0] == "flatpak"
                 for _, cmd, _ in cmds
@@ -1122,13 +969,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 if ok:
                     ok_count += 1
 
-            # Применяем отложенные gsettings тем — пакеты уже должны быть установлены
             for entry in deferred_settings:
                 if profile_module.theme_exists(entry.get("value", "")):
                     backend.run_gsettings(["set", entry["schema"], entry["key"], entry["value"]])
 
-            # После установки расширений — восстанавливаем их dconf-настройки
-            # (схемы должны быть уже зарегистрированы после установки)
             dconf_text = data.get("extensions_dconf", "")
             if dconf_text and flags.get("extensions"):
                 GLib.idle_add(self._log, "▶ Восстанавливаю конфиги расширений...\n")
@@ -1152,10 +996,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    # ── Баннер обнаруженного профиля ──────────────────────────────────────────
 
     def _build_profile_banner(self) -> Gtk.Revealer:
-        """Строит баннер для предложения импорта найденного .altbooster файла."""
         outer = Gtk.Box()
         outer.set_halign(Gtk.Align.CENTER)
         outer.set_margin_top(4)
@@ -1195,18 +1037,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._profile_banner_revealer.set_transition_duration(300)
         self._profile_banner_revealer.set_child(outer)
         self._profile_banner_revealer.set_reveal_child(False)
-        self._profile_banner_path = None  # текущий предложенный файл
+        self._profile_banner_path = None
         return self._profile_banner_revealer
 
-    # ── Плавающая кнопка перелогина (появляется после установки расширений) ──────
 
     def _build_relogin_banner(self) -> Gtk.Revealer:
-        """Плавающая кнопка в правом нижнем углу — предлагает перезайти в сессию GNOME.
-
-        Показывается после установки или удаления расширений, т.к. изменения
-        вступают в силу только после перезапуска сессии. Кнопка выезжает снизу
-        (SLIDE_UP), позиционируется через Overlay поверх ViewStack.
-        """
         btn = Gtk.Button()
         btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         icon = Gtk.Image.new_from_icon_name("system-log-out-symbolic")
@@ -1229,23 +1064,19 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         revealer.set_reveal_child(False)
         revealer.set_halign(Gtk.Align.END)
         revealer.set_valign(Gtk.Align.END)
-        # set_can_target(False) пока скрыта — чтобы не перехватывать клики мимо кнопки
         revealer.set_can_target(False)
         return revealer
 
     def show_relogin_banner(self):
-        """Показывает плавающую кнопку перелогина (вызывается из extensions_page)."""
         self._relogin_revealer.set_can_target(True)
         self._relogin_revealer.set_reveal_child(True)
 
     def _on_relogin_clicked(self, _btn):
-        """Скрывает кнопку и запускает logout из GNOME-сессии."""
         self._relogin_revealer.set_reveal_child(False)
         self._relogin_revealer.set_can_target(False)
         subprocess.Popen(["gnome-session-quit", "--logout", "--no-prompt"])
 
     def _check_for_import_candidates(self):
-        """Ищет .altbooster файлы в ~/Downloads и ~/, показывает баннер если найдено."""
         def _find():
             candidates = profile_module.find_import_candidates()
             dismissed = set(config.state_get("dismissed_profiles") or [])
@@ -1257,19 +1088,16 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         threading.Thread(target=_find, daemon=True).start()
 
     def _show_profile_banner(self, path):
-        """Показывает баннер с именем найденного файла пресета."""
         self._profile_banner_path = path
         self._profile_banner_label.set_text(f"Найден пресет: {path.name}")
         self._profile_banner_revealer.set_reveal_child(True)
 
     def _on_profile_banner_import(self, *_):
-        """Кнопка «Импортировать» в баннере."""
         self._profile_banner_revealer.set_reveal_child(False)
         if self._profile_banner_path:
             self._load_and_show_preset(str(self._profile_banner_path))
 
     def _on_profile_banner_dismiss(self, *_):
-        """Кнопка ✕ в баннере — добавляет файл в список отклонённых."""
         self._profile_banner_revealer.set_reveal_child(False)
         if self._profile_banner_path:
             dismissed = list(config.state_get("dismissed_profiles") or [])
@@ -1279,28 +1107,21 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 config.state_set("dismissed_profiles", dismissed)
 
     def _on_update_found_global(self, version):
-        """Показывает баннер и синий кружок — вызывается только для stable-обновления."""
         self._update_banner_label.set_text(f"Доступна новая версия {version}")
         self._update_banner_revealer.set_reveal_child(True)
         self._update_badge_dot.set_visible(True)
 
     def _go_to_update(self, *_):
-        """Переходит на вкладку «Начало» и скрывает баннер."""
         self._update_banner_revealer.set_reveal_child(False)
         self._stack.set_visible_child_name("setup")
 
-    # ── Панель лога (снизу окна) ──────────────────────────────────────────────
 
     def _build_log_panel(self):
-        """Строит нижнюю панель: статус-строка + прогресс-бар + раскрывающийся лог."""
         self._last_log_line = ""
         self._progress_nesting = 0
         self._on_cancel_cb = None
         self._log_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
 
-        self._log_container.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-
-        # Статус-строка: показывает последнюю значимую строку лога или «Готов к работе»
         self._status_label = Gtk.Label(label="Ожидание авторизации...")
         self._status_label.set_halign(Gtk.Align.START)
         self._status_label.set_margin_start(12)
@@ -1309,7 +1130,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._status_label.add_css_class("heading")
         self._log_container.append(self._status_label)
 
-        # Прогресс-бар + кнопка остановки операции
         hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         hbox.set_margin_start(12)
         hbox.set_margin_end(12)
@@ -1331,7 +1151,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         self._log_container.append(hbox)
 
-        # Раскрывающийся спойлер с полным текстом терминального вывода
         self._log_expander = Gtk.Expander(label="Лог терминала")
         self._log_expander.set_margin_start(12)
         self._log_expander.set_margin_end(12)
@@ -1357,20 +1176,13 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         return self._log_container
 
-    # ── Инициализация лог-файла ───────────────────────────────────────────────
 
     def _setup_logging(self):
-        """Настраивает лог-файл: ротация при превышении 2 МБ, запись заголовка сессии.
-
-        Вызывается в фоновом потоке (_log_writer_loop), чтобы не задерживать старт UI.
-        """
         try:
             os.makedirs(config.CONFIG_DIR, exist_ok=True)
-            # Ротация: если файл больше 2 МБ — переименовываем в .old и начинаем новый
             if self._log_file.exists() and self._log_file.stat().st_size > 2 * 1024 * 1024:
                 shutil.move(self._log_file, self._log_file.with_suffix(".log.old"))
 
-            # Собираем краткую информацию о системе для заголовка сессии
             sys_info = [f"v{config.VERSION}"]
             try:
                 sys_info.append(f"Kernel: {platform.release()}")
@@ -1388,32 +1200,16 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         except Exception as e:
             print(f"Log setup failed: {e}")
 
-    # ── Авторизация ───────────────────────────────────────────────────────────
 
     def ask_password(self):
-        """Определяет метод аутентификации и запрашивает пароль (или обходит запрос).
-
-        Запускается в фоновом потоке: проверки через subprocess могут занимать время.
-        Все вызовы UI — через GLib.idle_add, чтобы не нарушать GTK-тред.
-
-        Порядок проверок:
-        1. sudo не найден → pkexec
-        2. sudo работает без пароля (NOPASSWD/кэш) → сразу _auth_ok
-        3. Есть сохранённый пароль → проверяем его тихо
-        4. Пользователь не в группе wheel → pkexec
-        5. sudowheel отключён → предлагаем включить через pkexec
-        6. Всё остальное → диалог ввода пароля
-        """
         self._maint.set_sensitive_all(False)
 
         def _check():
-            # 1. sudo не установлен → pkexec единственный вариант
             if not shutil.which("sudo"):
                 GLib.idle_add(self._log, "ℹ Sudo не найден. Включен режим pkexec.\n")
                 GLib.idle_add(self._use_pkexec_auth)
                 return
 
-            # 2. sudo уже работает без пароля (NOPASSWD в sudoers или живой кэш)
             try:
                 if subprocess.run(["sudo", "-n", "true"], capture_output=True, timeout=1).returncode == 0:
                     backend.set_sudo_nopass(True)
@@ -1422,9 +1218,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             except Exception:
                 pass
 
-            # 2.5. Используем pkexec для аутентификации (polkit-диалог).
-            # start_pkexec_shell блокирует фоновый поток до ответа пользователя — это
-            # нормально, мы находимся в _check(), а не в GTK-потоке.
             GLib.idle_add(self._log, "ℹ Инициализация pkexec...\n")
             backend.set_pkexec_mode(True)
             ok, is_cancel = backend.start_pkexec_shell()
@@ -1440,38 +1233,30 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         threading.Thread(target=_check, daemon=True).start()
 
     def _use_pkexec_auth(self):
-        """Переключает всё приложение в pkexec-режим (без sudo)."""
         backend.set_pkexec_mode(True)
         self._log("🔑 Используется pkexec (polkit) для привилегированных команд.\n")
         self._auth_ok()
 
     def _restart_app(self):
-        """Планирует перезапуск процесса через 600 мс (чтобы успел отрисоваться лог)."""
         GLib.timeout_add(600, self._do_restart)
 
     def _do_restart(self):
         try:
-            # execv заменяет текущий процесс — чисто и без лишних процессов
             os.execv(sys.executable, [sys.executable] + sys.argv)
         except Exception:
-            # Если execv не сработал — запускаем новый процесс и закрываем старый
             subprocess.Popen([sys.executable] + sys.argv)
             self.get_application().quit()
         return False
 
     def _auth_ok(self):
-        """Вызывается после успешной аутентификации: разблокирует UI и показывает приветствие."""
         self._maint.set_sensitive_all(True)
         self._maint.refresh_checks()
         self._log("👋 Добро пожаловать в ALT Booster. С чего начнём?\n")
         self._status_label.set_label("Готов к работе")
-        # Проверяем наличие .altbooster файлов в ~/Downloads и ~/
         GLib.idle_add(self._check_for_import_candidates)
 
-    # ── Настройки окна ────────────────────────────────────────────────────────
 
     def _load_settings(self):
-        """Загружает сохранённые размеры окна. При ошибке возвращает пустой dict."""
         try:
             with open(config.CONFIG_FILE) as f:
                 return json.load(f)
@@ -1479,7 +1264,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             return {}
 
     def _on_close(self, _):
-        """Сохраняет текущие размеры окна и сигнализирует лог-потоку о завершении."""
         try:
             os.makedirs(config.CONFIG_DIR, exist_ok=True)
             with open(config.CONFIG_FILE, "w") as f:
@@ -1490,14 +1274,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 }, f)
         except OSError:
             pass
-        # Сентинел None останавливает _log_writer_loop и закрывает файл
         self._log_queue.put(None)
         return False
 
-    # ── Действия меню ─────────────────────────────────────────────────────────
 
     def _check_for_updates(self, *_):
-        """Переключается на вкладку «Начало» и запускает проверку обновлений."""
         self._stack.set_visible_child_name("setup")
         self._update_badge_dot.set_visible(False)
         self._setup.check_for_updates(manual=True, on_update_found=self._on_update_found_global)
@@ -1520,12 +1301,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.present(self)
 
     def _clear_log(self, *_):
-        """Очищает текстовый буфер лога в UI (файл на диске не трогает)."""
         self._buf.set_text("")
         self._last_log_line = ""
 
     def _reset_state(self, *_):
-        """Показывает диалог подтверждения и удаляет кэш статусов проверок."""
         d = Adw.AlertDialog(
             heading="Очистить кэш?",
             body="Все сохранённые статусы проверок будут удалены.\n"
@@ -1547,21 +1326,18 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.present(self)
 
     def _reset_password(self, *_):
-        """Сбрасывает все сохранённые данные аутентификации и повторяет авторизацию."""
         clear_saved_password()
         backend.set_sudo_password(None)
         backend.set_sudo_nopass(False)
         backend.set_pkexec_mode(False)
         self._log("🔑 Сохраненный пароль сброшен.\n")
         self.add_toast(Adw.Toast(title="Пароль сброшен"))
-        # sudo -k инвалидирует кэш сессии — запускаем в потоке, чтобы не тормозить GTK
         def _invalidate_and_reauth():
             subprocess.run(["sudo", "-k"], capture_output=True)
             GLib.idle_add(self.ask_password)
         threading.Thread(target=_invalidate_and_reauth, daemon=True).start()
 
     def _reset_config(self, *_):
-        """Предупреждает и полностью удаляет директорию конфига с перезапуском."""
         dialog = Adw.AlertDialog(
             heading="Сброс настроек приложения?",
             body="Внимание! Это действие удалит все ваши настройки, списки приложений и кэш.\n"
@@ -1590,7 +1366,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _open_log_file(self, *_):
-        """Открывает лог-файл в подходящем редакторе (или через системную ассоциацию)."""
         if not self._log_file.exists():
             self.add_toast(Adw.Toast(title="Файл логов еще не создан"))
             return
@@ -1598,7 +1373,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         path = str(self._log_file)
         cmd = []
 
-        # Приоритет: gnome-text-editor → gedit → терминал + nano
         if shutil.which("gnome-text-editor"):
             cmd = ["gnome-text-editor", path]
         elif shutil.which("gedit"):
@@ -1615,22 +1389,13 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             except Exception:
                 pass
 
-        # Последний fallback — системная ассоциация файлов
         Gio.AppInfo.launch_default_for_uri(self._log_file.as_uri(), None)
 
     def add_toast(self, toast):
-        """Показывает всплывающее уведомление поверх контента."""
         self._toast_overlay.add_toast(toast)
 
-    # ── Прогресс-бар и статус ─────────────────────────────────────────────────
 
     def start_progress(self, message: str, on_cancel=None):
-        """Запускает пульсирующий прогресс-бар с указанным сообщением.
-
-        on_cancel — колбэк для кнопки «Стоп». Если None — кнопка скрыта.
-        Поддерживает вложенность: вложенные операции инкрементируют счётчик
-        и не скрывают кнопку Stop пока не завершится верхнеуровневая.
-        """
         if on_cancel is not None:
             self._on_cancel_cb = on_cancel
 
@@ -1646,7 +1411,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             if self._pulse_timer_id:
                 GLib.source_remove(self._pulse_timer_id)
             self._pulse_timer_id = GLib.timeout_add(100, self._pulse_progress)
-            # Отменяем отложенный сброс статуса, если операции начались заново
             if self._reset_status_timer_id:
                 GLib.source_remove(self._reset_status_timer_id)
                 self._reset_status_timer_id = None
@@ -1654,7 +1418,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         GLib.idle_add(_do)
 
     def _on_stop_clicked(self, _):
-        """Показывает диалог подтверждения остановки текущей операции."""
         if not self._on_cancel_cb:
             return
 
@@ -1678,15 +1441,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def _pulse_progress(self):
-        """Анимирует прогресс-бар (пульс каждые 100 мс). Возвращает True чтобы продолжаться."""
         self._progressbar.pulse()
         return True
 
     def stop_progress(self, success: bool = True):
-        """Останавливает прогресс-бар, показывает итоговый статус.
-
-        Через 4 секунды статус автоматически возвращается в «Готов к работе».
-        """
         def _do():
             if self._pulse_timer_id:
                 GLib.source_remove(self._pulse_timer_id)
@@ -1706,31 +1464,21 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         GLib.idle_add(_do)
 
     def _reset_status_label(self):
-        """Таймерный колбэк: сбрасывает статус-строку в «Готов к работе»."""
         self._reset_status_timer_id = None
         self._status_label.set_label("Готов к работе")
         return False
 
-    # ── Лог ──────────────────────────────────────────────────────────────────
 
     def _log(self, text):
-        """Потокобезопасная запись в лог: всегда выполняет UI-обновление в главном потоке."""
         GLib.idle_add(self._log_internal, text)
 
     def _log_internal(self, text):
-        """Добавляет текст в TextView и очередь для записи в файл.
-
-        Вызывается только из UI-потока (через GLib.idle_add).
-        """
         stripped = text.strip()
         if stripped:
-            # Сохраняем последнюю значимую строку для статус-строки
             self._last_log_line = stripped
 
-        # Ставим в очередь для фонового лог-потока (без блокировки UI)
         self._log_queue.put(text)
 
-        # Вставляем текст в буфер и прокручиваем до конца
         end = self._buf.get_end_iter()
         self._buf.insert(end, text)
         end = self._buf.get_end_iter()
@@ -1742,12 +1490,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._tv.scroll_mark_onscreen(mark)
 
     def _log_writer_loop(self):
-        """Фоновый поток: читает из очереди и пишет строки в лог-файл.
-
-        Также выполняет ротацию и запись заголовка сессии при первом запуске.
-        Файл держится открытым на протяжении всей сессии — это снижает накладные
-        расходы при высоком темпе вывода (apt/epm могут выдавать сотни строк).
-        """
         self._setup_logging()
         try:
             log_f = open(self._log_file, "a", encoding="utf-8")
@@ -1757,7 +1499,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         while True:
             text = self._log_queue.get()
             if text is None:
-                # Сентинел: корректное завершение потока при закрытии приложения
                 break
             if log_f is None:
                 continue
@@ -1772,3 +1513,4 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 log_f.close()
             except Exception:
                 pass
+

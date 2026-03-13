@@ -1,4 +1,3 @@
-"""Вкладка «Intel» — scx_meteor планировщик задач для LP-ядер."""
 
 from __future__ import annotations
 
@@ -57,7 +56,6 @@ WantedBy=multi-user.target
 
 
 def _get_cpu_model() -> str:
-    """Читает модель процессора из /proc/cpuinfo."""
     try:
         with open("/proc/cpuinfo", encoding="utf-8") as f:
             for line in f:
@@ -69,9 +67,6 @@ def _get_cpu_model() -> str:
 
 
 class IntelPage(Gtk.Box):
-    """Вкладка управления планировщиком scx_meteor для Intel с LP-ядрами
-    (Meteor Lake, Lunar Lake, Arrow Lake, Panther Lake).
-    """
 
     def __init__(self, log_fn):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -94,7 +89,6 @@ class IntelPage(Gtk.Box):
         clamp.set_child(body)
         scroll.set_child(clamp)
 
-        # Overlay: баннер «Экспериментально» плавает поверх контента снизу
         overlay = Gtk.Overlay()
         overlay.set_vexpand(True)
         overlay.set_child(scroll)
@@ -104,7 +98,6 @@ class IntelPage(Gtk.Box):
         body.append(self._build_compat_group())
         body.append(self._build_scx_meteor_group())
 
-    # ── Экспериментальный баннер ───────────────────────────────────────────
 
     def _build_experimental_banner(self) -> Gtk.Box:
         Gtk.StyleContext.add_provider_for_display(
@@ -132,7 +125,6 @@ class IntelPage(Gtk.Box):
 
         return box
 
-    # ── Группа совместимости ───────────────────────────────────────────────
 
     def _build_compat_group(self) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup()
@@ -143,7 +135,6 @@ class IntelPage(Gtk.Box):
             "Требуется ядро Linux с поддержкой sched_ext (CONFIG_SCHED_CLASS_EXT)."
         )
 
-        # Строка: sched_ext в ядре
         self._row_sched_ext = Adw.ActionRow()
         self._row_sched_ext.set_title("sched_ext в ядре")
         self._row_sched_ext.set_subtitle("Проверка /sys/kernel/sched_ext…")
@@ -153,7 +144,6 @@ class IntelPage(Gtk.Box):
         self._row_sched_ext.add_suffix(self._status_sched)
         group.add(self._row_sched_ext)
 
-        # Строка: модель процессора
         row_cpu = Adw.ActionRow()
         row_cpu.set_title("Процессор")
         row_cpu.set_subtitle(_get_cpu_model())
@@ -178,7 +168,6 @@ class IntelPage(Gtk.Box):
                 "Не поддерживается — обновите ядро или добавьте CONFIG_SCHED_CLASS_EXT"
             )
 
-    # ── Группа scx_meteor ──────────────────────────────────────────────────
 
     def _build_scx_meteor_group(self) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup()
@@ -189,7 +178,6 @@ class IntelPage(Gtk.Box):
             "на 30–50% по сравнению со стандартным планировщиком."
         )
 
-        # Строка: установка / удаление
         self._row_install = SettingRow(
             "application-x-executable-symbolic",
             "scx_meteor",
@@ -210,7 +198,6 @@ class IntelPage(Gtk.Box):
         )
         group.add(self._row_install)
 
-        # Строка: systemd-сервис (автозапуск)
         self._row_service = SettingRow(
             "system-run-symbolic",
             "Автозапуск при загрузке",
@@ -229,7 +216,6 @@ class IntelPage(Gtk.Box):
 
         return group
 
-    # ── Проверки ───────────────────────────────────────────────────────────
 
     def _check_scx_meteor_installed(self) -> bool:
         return os.path.isfile(_SCX_METEOR_BIN)
@@ -244,7 +230,6 @@ class IntelPage(Gtk.Box):
         except OSError:
             return False
 
-    # ── Установка ─────────────────────────────────────────────────────────
 
     def _install_scx_meteor(self, row):
         row.set_working()
@@ -254,14 +239,12 @@ class IntelPage(Gtk.Box):
             win.start_progress("Установка scx_meteor...")
 
         def _thread():
-            # 1. Зависимости сборки
             self._log("▶  Установка зависимостей (rust, cargo, git, clang)...\n")
             backend.run_privileged_sync(
                 ["epm", "install", "-y", "rust", "cargo", "git", "clang", "llvm"],
                 self._log,
             )
 
-            # 2. Клонирование и сборка
             build_script = (
                 "set -e\n"
                 "BUILDDIR=$(mktemp -d)\n"
@@ -278,7 +261,6 @@ class IntelPage(Gtk.Box):
             )
             ok = backend.run_privileged_sync(["bash", "-c", build_script], self._log)
 
-            # 3. Создаём service-файл
             if ok:
                 ok = self._write_service_file()
 
@@ -297,7 +279,6 @@ class IntelPage(Gtk.Box):
         threading.Thread(target=_thread, daemon=True).start()
 
     def _write_service_file(self) -> bool:
-        """Создаёт /etc/systemd/system/scx_meteor.service и выполняет daemon-reload."""
         try:
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".service", delete=False, encoding="utf-8"
@@ -316,7 +297,6 @@ class IntelPage(Gtk.Box):
         ]
         return backend.run_privileged_sync(cmd, self._log)
 
-    # ── Удаление ──────────────────────────────────────────────────────────
 
     def _uninstall_scx_meteor(self, row):
         row.set_working()
@@ -341,7 +321,6 @@ class IntelPage(Gtk.Box):
 
         backend.run_privileged(cmd, self._log, _on_done)
 
-    # ── Управление сервисом ────────────────────────────────────────────────
 
     def _enable_scx_meteor_service(self, row):
         row.set_working()
@@ -351,7 +330,6 @@ class IntelPage(Gtk.Box):
             win.start_progress("Включение scx_meteor...")
 
         def _thread():
-            # Если service-файл отсутствует — создаём его
             if not os.path.exists(_SCX_METEOR_SERVICE):
                 ok_svc = self._write_service_file()
                 if not ok_svc:
@@ -396,3 +374,4 @@ class IntelPage(Gtk.Box):
             ["systemctl", "disable", "--now", "scx_meteor"],
             self._log, _on_done,
         )
+

@@ -1,7 +1,3 @@
-"""
-backend.py — точка входа для доступа к системным функциям.
-"""
-
 from system.privileges import (
     set_sudo_password,
     get_sudo_password,

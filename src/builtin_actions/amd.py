@@ -1,4 +1,3 @@
-"""Встроенные функции для вкладки «AMD Radeon»."""
 
 from __future__ import annotations
 
@@ -85,3 +84,4 @@ def confirm_reboot(page, _arg: Any) -> bool:
     if page:
         GLib.idle_add(page._show_reboot_dialog)
     return True
+

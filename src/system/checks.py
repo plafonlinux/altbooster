@@ -1,7 +1,3 @@
-"""
-checks.py — Проверки состояния системы.
-"""
-
 from __future__ import annotations
 
 import os
@@ -15,14 +11,6 @@ from .gsettings import gsettings_get
 import config
 
 def is_sudo_enabled() -> bool:
-    """Проверяет статус sudo через control sudowheel в ALT Linux."""
-
-    # Способ 1: sudo -n true.
-    # В GNOME-сессии (нет TTY) sudo -n true возвращает 0 из-за PAM-bypass:
-    # сессионный агент аутентифицирует автоматически, даже если sudowheel отключён.
-    # Поэтому returncode == 0 доверяем только при запуске из терминала (isatty).
-    # "password is required" в stderr надёжен в любом режиме — sudo выдаёт его
-    # до обращения к PAM, когда знает что пароль нужен, но -n запрещает спрашивать.
     try:
         env = os.environ.copy()
         env["LC_ALL"] = "C"
@@ -34,8 +22,6 @@ def is_sudo_enabled() -> bool:
     except Exception:
         pass
 
-    # Способ 2: sudo -S с сохранённым паролем → control sudowheel.
-    # control sudowheel читает реальный /etc/sudoers, не даёт ложных срабатываний.
     password = get_sudo_password()
     if password:
         try:
@@ -55,8 +41,6 @@ def is_sudo_enabled() -> bool:
         except Exception:
             pass
 
-    # Способ 3: pkexec-режим (запуск из GNOME без TTY, пароль sudo не сохранён).
-    # Вызов из фонового потока SettingRow._refresh — блокировка безопасна.
     if not sys.stdin.isatty():
         control = shutil.which("control") or "/usr/sbin/control"
         lines: list[str] = []
@@ -69,7 +53,6 @@ def is_sudo_enabled() -> bool:
 
 
 def is_flathub_enabled() -> bool:
-    """Проверяет, включен ли репозиторий Flathub."""
     env = os.environ.copy()
     env["LC_ALL"] = "C"
     try:
@@ -80,7 +63,6 @@ def is_flathub_enabled() -> bool:
 
 
 def is_fstrim_enabled() -> bool:
-    """Проверяет, включен ли таймер fstrim."""
     try:
         result = subprocess.run(["systemctl", "is-enabled", "fstrim.timer"], capture_output=True, timeout=5)
         return result.returncode == 0
@@ -89,13 +71,11 @@ def is_fstrim_enabled() -> bool:
 
 
 def is_fractional_scaling_enabled() -> bool:
-    """Проверяет, включено ли дробное масштабирование."""
     value = gsettings_get("org.gnome.mutter", "experimental-features")
     return "scale-monitor-framebuffer" in value
 
 
 def is_system_busy() -> bool:
-    """Проверяет занятость пакетного менеджера."""
     try:
         if subprocess.run(["pgrep", "-f", "packagekitd"], capture_output=True, timeout=5).returncode == 0:
             return True
@@ -108,7 +88,6 @@ def is_system_busy() -> bool:
 
 
 def check_app_installed(source: dict) -> bool:
-    """Проверяет, установлено ли приложение."""
     kind, value = source["check"]
     try:
         if kind == "flatpak":
@@ -120,8 +99,6 @@ def check_app_installed(source: dict) -> bool:
         if kind == "rpm":
             if subprocess.run(["rpm", "-q", value], capture_output=True, timeout=10).returncode == 0:
                 return True
-            # Fallback: пакет мог установиться под другим именем (через provides),
-            # проверяем наличие бинарника в PATH (например, pipewire-utils → pipewire-settings)
             return shutil.which(value) is not None
         if kind == "path":
             return os.path.exists(os.path.expanduser(value))
@@ -133,7 +110,6 @@ def check_app_installed(source: dict) -> bool:
 
 
 def is_vm_dirty_optimized() -> bool:
-    """Проверяет, оптимизированы ли параметры vm dirty."""
     try:
         content = Path("/etc/sysctl.d/90-dirty.conf").read_text(encoding="utf-8")
         return "67108864" in content
@@ -142,11 +118,6 @@ def is_vm_dirty_optimized() -> bool:
 
 
 def is_drive_menu_patched() -> bool:
-    """Проверяет, пропатчено ли расширение drive-menu.
-
-    Признак нового патча: наличие this._mounts.some в файле расширения
-    (проверка дубликатов монтирований перед добавлением в меню).
-    """
     try:
         ext_path = "/usr/share/gnome-shell/extensions/drive-menu@gnome-shell-extensions.gcampax.github.com/extension.js"
         content = Path(ext_path).read_text(encoding="utf-8")
@@ -156,7 +127,6 @@ def is_drive_menu_patched() -> bool:
 
 
 def is_journal_optimized() -> bool:
-    """Проверяет, оптимизирован ли журнал systemd."""
     paths = ["/etc/systemd/journald.conf", "/etc/systemd/journald.conf.d/99-altbooster.conf"]
     for p in paths:
         try:
@@ -168,7 +138,6 @@ def is_journal_optimized() -> bool:
 
 
 def is_davinci_installed() -> bool:
-    """Проверяет, установлен ли DaVinci Resolve."""
     if os.path.exists("/opt/resolve/bin/resolve"):
         return True
     try:
@@ -178,13 +147,10 @@ def is_davinci_installed() -> bool:
 
 
 def is_aac_installed() -> bool:
-    """Проверяет, установлен ли кодек AAC для DaVinci Resolve."""
     return os.path.exists("/opt/resolve/IOPlugins/aac_encoder_plugin.dvcp.bundle")
 
 
 def is_fairlight_installed() -> bool:
-    """Проверяет, настроен ли ALSA-аудио для DaVinci Resolve (Fairlight + Edit).
-    Требуется: пакет alsa-plugins-pulse + /etc/asound.conf с правилом pulse."""
     try:
         pkg_ok = subprocess.run(["rpm", "-q", "alsa-plugins-pulse"], capture_output=True, timeout=10).returncode == 0
         if not pkg_ok:
@@ -192,13 +158,13 @@ def is_fairlight_installed() -> bool:
         asound = "/etc/asound.conf"
         if not os.path.exists(asound):
             return False
-        return "pcm.!default pulse" in open(asound).read()
+        with open(asound) as f:
+            return "pcm.!default pulse" in f.read()
     except (subprocess.TimeoutExpired, OSError):
         return False
 
 
 def is_epm_installed() -> bool:
-    """Проверяет, установлен ли пакетный менеджер eepm."""
     try:
         return subprocess.run(["rpm", "-q", "eepm"], capture_output=True, timeout=10).returncode == 0
     except (subprocess.TimeoutExpired, OSError):
