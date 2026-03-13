@@ -54,7 +54,7 @@ def clear_saved_password():
         pass
 
 
-class PasswordDialog(Adw.MessageDialog):
+class PasswordDialog(Adw.AlertDialog):
 
     def __init__(self, parent, on_success, on_cancel):
         super().__init__(
@@ -62,7 +62,7 @@ class PasswordDialog(Adw.MessageDialog):
             body="ALT Booster выполняет системные команды от имени root.\n"
                  "Пароль сохраняется только на время сессии.",
         )
-        self.set_transient_for(parent)
+        self._parent = parent
         self._on_success = on_success
         self._on_cancel = on_cancel
         self._attempts = 0
@@ -91,7 +91,7 @@ class PasswordDialog(Adw.MessageDialog):
         self.set_default_response("ok")
         self.set_close_response("cancel")
         self.connect("response", self._on_response)
-        self.present()
+        self.present(parent)
 
     def _on_text_changed(self, *_):
         self.set_response_enabled("ok", bool(self._entry.get_text()))
@@ -134,7 +134,7 @@ class PasswordDialog(Adw.MessageDialog):
             self._entry.grab_focus()
 
 
-class AppEditDialog(Adw.PreferencesWindow):
+class AppEditDialog(Adw.PreferencesDialog):
 
     def __init__(self, parent, on_save, group_ids, group_titles,
                  existing_item=None, current_group=""):
@@ -153,8 +153,6 @@ class AppEditDialog(Adw.PreferencesWindow):
         self._source_widgets = []
 
         self.set_title("Редактировать" if existing_item else "Добавить приложение")
-        self.set_transient_for(parent)
-        self.set_modal(True)
         self.set_search_enabled(False)
 
         page = Adw.PreferencesPage()
@@ -211,7 +209,7 @@ class AppEditDialog(Adw.PreferencesWindow):
         if existing_item:
             self._fill(existing_item, current_group)
 
-        self.present()
+        self.present(parent)
 
     def _refresh_sources_ui(self):
         for row in self._source_widgets:

@@ -69,19 +69,16 @@ class CacheTaskRow(Adw.ExpanderRow):
         self._refresh_custom_rows()
 
     def _add_switch(self, title, subtitle, key, default):
-        row = Adw.ActionRow()
+        row = Adw.SwitchRow()
         row.set_title(title)
         row.set_subtitle(subtitle)
-        sw = Gtk.Switch()
-        sw.set_valign(Gtk.Align.CENTER)
         val = config.state_get(key)
         if val is None:
             val = default
-        sw.set_active(val)
-        sw.connect("notify::active", lambda s, p: config.state_set(key, s.get_active()))
-        row.add_suffix(sw)
+        row.set_active(val)
+        row.connect("notify::active", lambda r, p: config.state_set(key, r.get_active()))
         self.add_row(row)
-        return sw
+        return row
 
     def _refresh_custom_rows(self):
         paths = config.state_get("clean_custom_paths") or []
@@ -227,7 +224,7 @@ class MaintenancePage(Gtk.Box):
         fix_tasks = [t for t in all_tasks if t["id"] in fix_ids]
         other_tasks = [t for t in all_tasks if t["id"] not in flatpak_ids and t["id"] not in fix_ids]
 
-        self._build_header(body, len(other_tasks) + len(fix_tasks) + 1)
+        self._build_header(body, len(other_tasks) + 1)
         self._build_tasks(body, other_tasks)
         self._build_fixes_group(body, fix_tasks)
 
@@ -263,8 +260,7 @@ class MaintenancePage(Gtk.Box):
         body.append(group)
 
         for task in tasks:
-            row = TaskRow(task, self._log, self._update_progress, btn_label="Применить")
-            self._rows.append(row)
+            row = TaskRow(task, self._log, None, btn_label="Применить")
             group.add(row)
 
     def _build_tasks(self, body, tasks):

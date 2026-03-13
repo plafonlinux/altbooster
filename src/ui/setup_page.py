@@ -143,6 +143,16 @@ class SetupPage(Gtk.Box):
         dialog.set_default_response("ok")
         dialog.present(self.get_root())
 
+    def dismiss_update_section(self):
+        if hasattr(self, "_update_group") and self._update_group:
+            try:
+                self._body.remove(self._update_group)
+            except Exception:
+                pass
+            self._update_group = None
+            return True
+        return False
+
     def _show_update_section(self, stable_ver, beta_ver):
         if hasattr(self, "_update_group") and self._update_group:
             try:
@@ -170,12 +180,17 @@ class SetupPage(Gtk.Box):
             if self._is_newer(stable_ver, config.VERSION):
                 row.set_title(f"Стабильная  v{stable_ver}")
                 row.set_subtitle("Рекомендуемая версия")
-                btn = make_button("Установить")
+                btn = Gtk.Button(label="Установить")
                 btn.add_css_class("suggested-action")
+                btn.add_css_class("pill")
+                btn.set_valign(Gtk.Align.CENTER)
             elif is_on_beta:
                 row.set_title(f"Стабильная  v{stable_ver}")
                 row.set_subtitle("Последняя стабильная версия")
-                btn = make_button("Установить")
+                btn = Gtk.Button(label="Установить")
+                btn.add_css_class("suggested-action")
+                btn.add_css_class("pill")
+                btn.set_valign(Gtk.Align.CENTER)
             else:
                 row.set_title(f"Стабильная  v{stable_ver}  ✓")
                 row.set_subtitle("Установлена последняя версия")
@@ -198,7 +213,10 @@ class SetupPage(Gtk.Box):
             else:
                 row_b.set_subtitle("Тестовая версия с новыми функциями")
 
-            btn_b = make_button("Установить бета")
+            btn_b = Gtk.Button(label="Установить бета")
+            btn_b.add_css_class("suggested-action")
+            btn_b.add_css_class("pill")
+            btn_b.set_valign(Gtk.Align.CENTER)
             btn_b.connect("clicked", lambda b, v=beta_ver: self._do_update(b, v, "beta"))
             row_b.add_suffix(btn_b)
             self._update_group.add(row_b)
@@ -341,11 +359,10 @@ class SetupPage(Gtk.Box):
 
     def _on_epm(self, row):
         if not backend.is_epm_installed():
-            d = Adw.MessageDialog(
+            d = Adw.AlertDialog(
                 heading="EPM не установлен",
                 body="Для обновления системы необходим пакетный менеджер eepm.\nУстановить EPM и затем запустить обновление?",
             )
-            d.set_transient_for(self.get_root())
             d.add_response("cancel", "Отмена")
             d.add_response("install", "Установить и обновить")
             d.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
@@ -369,7 +386,7 @@ class SetupPage(Gtk.Box):
                     backend.run_privileged(["apt-get", "install", "-y", "eepm", "epmgpi", "eepm-play-gui"], self._log, _after_install)
 
             d.connect("response", _on_response)
-            d.present()
+            d.present(self.get_root())
             return
 
         row.set_working()
