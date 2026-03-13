@@ -1,4 +1,3 @@
-"""Строки виджетов: SettingRow, AppRow, TaskRow."""
 
 import os
 import subprocess
@@ -10,7 +9,6 @@ gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, GLib, Gtk
 
-# CSS для бейджика источника (в префиксе) и MenuButton выбора источника
 _badge_css = Gtk.CssProvider()
 _badge_css.load_from_data(b"""
     .ab-source-badge {
@@ -39,9 +37,7 @@ from widgets import (
 
 
 class SettingRow(Adw.ActionRow):
-    """Строка настройки с кнопкой и индикатором статуса."""
 
-    # ВАЖНО: Добавили аргумент done_label="Активировано" в конец
     def __init__(self, icon, title, subtitle, btn_label, on_activate, check_fn, state_key, done_label="Активировано", on_undo=None, undo_label="Отменить", undo_icon="edit-undo-symbolic", help_text=None):
         super().__init__()
         self.set_title(title)
@@ -51,7 +47,7 @@ class SettingRow(Adw.ActionRow):
         self._on_undo = on_undo
         self._state_key = state_key
         self._orig_label = btn_label
-        self._done_label = done_label  # Сохраняем кастомный текст для кнопки
+        self._done_label = done_label
         self._undo_label = undo_label
         self._undo_icon = undo_icon
         self._is_active = False
@@ -62,7 +58,6 @@ class SettingRow(Adw.ActionRow):
         self._btn.connect("clicked", self._on_btn_clicked)
         self._btn.set_sensitive(False)
 
-        # Собираем суффикс
         suffix_box = Gtk.Box(spacing=6)
         suffix_box.set_valign(Gtk.Align.CENTER)
 
@@ -82,12 +77,8 @@ class SettingRow(Adw.ActionRow):
         if config.state_get(state_key) is True:
             self._set_ui(True)
         elif check_fn is None:
-            # Нет функции проверки — состояние только из конфига.
-            # Если в конфиге не True, кнопка должна быть активна.
             self._set_ui(False)
         else:
-            # Есть функция проверки — запускаем фоновую проверку реального состояния,
-            # чтобы кэш не показывал устаревший статус (например, после внешнего изменения).
             if "kbd" not in state_key:
                 threading.Thread(target=self._refresh, daemon=True).start()
 
@@ -134,7 +125,7 @@ class SettingRow(Adw.ActionRow):
                     self._btn.add_css_class("success")
                 else:
                     self._btn.set_visible(True)
-                    self._btn.set_label(self._done_label)  # Используем наш кастомный текст
+                    self._btn.set_label(self._done_label)
                     self._btn.set_sensitive(False)
                     self._btn.remove_css_class("suggested-action")
                     self._btn.remove_css_class("circular")
@@ -171,17 +162,14 @@ class SettingRow(Adw.ActionRow):
             config.state_set(self._state_key, False)
             self._set_ui(False)
         else:
-            # Если ошибка, возвращаем состояние "Активно"
             self._set_ui(True)
 
 class AppRow(Adw.ActionRow):
-    """Строка приложения с установкой / удалением."""
 
     def __init__(self, app, log_fn, on_change_cb):
         super().__init__()
         self._app = app
         
-        # Нормализация источников: всегда работаем со списком
         if "sources" in app:
             self._sources = app["sources"]
         elif "source" in app:
@@ -199,14 +187,12 @@ class AppRow(Adw.ActionRow):
         self.set_title(app["label"])
         self.set_subtitle(app["desc"])
 
-        # ── Префикс (слева): чекбокс ИЛИ галочка статуса — в одной позиции ─
-        # Они взаимоисключающие: если установлено → галочка, иначе → чекбокс
         self._checkbox = Gtk.CheckButton()
         self._checkbox.set_valign(Gtk.Align.CENTER)
         self._checkbox.connect("toggled", self._on_checkbox_toggled)
 
         self._status = make_status_icon()
-        self._status.set_visible(False)  # скрыт до завершения проверки
+        self._status.set_visible(False)
 
         _prefix_box = Gtk.Box()
         _prefix_box.set_valign(Gtk.Align.CENTER)
@@ -214,7 +200,6 @@ class AppRow(Adw.ActionRow):
         _prefix_box.append(self._status)
         self.add_prefix(_prefix_box)
 
-        # ── Суффикс (справа): бейдж → прогресс → MenuButton → Установить → Корзина ──
         self._btn = make_button("Установить", width=120)
         self._btn.connect("clicked", self._on_install)
         self._btn.set_sensitive(False)
@@ -231,24 +216,21 @@ class AppRow(Adw.ActionRow):
         self._prog.set_valign(Gtk.Align.CENTER)
         self._prog.set_visible(False)
 
-        # Бейдж источника — ПЕРВЫМ в суффиксе, фиксированная ширина,
-        # чтобы кнопки всех строк стояли в одной колонке, а бейдж — прямо после заголовка
         self._source_label = Gtk.Label()
         self._source_label.add_css_class("ab-source-badge")
         self._source_label.set_valign(Gtk.Align.CENTER)
         self._source_label.set_halign(Gtk.Align.START)
         self._source_label.set_visible(False)
         _badge_wrapper = Gtk.Box()
-        _badge_wrapper.set_size_request(72, -1)  # фиксированная ширина держит колонку кнопок
+        _badge_wrapper.set_size_request(72, -1)
         _badge_wrapper.set_valign(Gtk.Align.CENTER)
         _badge_wrapper.append(self._source_label)
 
         suffix = Gtk.Box(spacing=8)
         suffix.set_valign(Gtk.Align.CENTER)
-        suffix.append(_badge_wrapper)            # ПЕРВЫМ — сразу правее заголовка
+        suffix.append(_badge_wrapper)
         suffix.append(self._prog)
 
-        # MenuButton выбора источника — только для приложений с несколькими источниками
         self._src_menu_btn = None
         if len(self._sources) > 1:
             self._src_menu_btn = self._build_source_menu()
@@ -270,7 +252,6 @@ class AppRow(Adw.ActionRow):
         return config.state_get(self._state_key) is True
 
     def _check(self):
-        # Проверяем все источники
         installed = False
         installed_idx = -1
         
@@ -285,22 +266,18 @@ class AppRow(Adw.ActionRow):
         GLib.idle_add(self._set_installed_ui, installed)
 
     def _on_checkbox_toggled(self, _):
-        """Чекбокс выбора приложения для пакетной установки."""
         if self._on_change:
             self._on_change()
 
     def is_selected(self):
-        """Выбрано ли приложение для пакетной установки."""
         return self._checkbox.get_active()
 
     def set_selected(self, value):
-        """Устанавливает чекбокс без вызова on_change."""
         self._checkbox.handler_block_by_func(self._on_checkbox_toggled)
         self._checkbox.set_active(value)
         self._checkbox.handler_unblock_by_func(self._on_checkbox_toggled)
 
     def _build_source_menu(self):
-        """Строит MenuButton с popover для выбора источника (только multi-source)."""
         popover_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         popover_box.set_margin_top(6)
         popover_box.set_margin_bottom(6)
@@ -350,7 +327,6 @@ class AppRow(Adw.ActionRow):
 
     @staticmethod
     def _source_tooltip(src: dict) -> str:
-        """Возвращает человекочитаемую подсказку для источника установки."""
         check = src.get("check", ())
         cmd = src.get("cmd", [])
         kind = check[0] if isinstance(check, (list, tuple)) and check else ""
@@ -361,9 +337,7 @@ class AppRow(Adw.ActionRow):
         return "Пакет из репозитория"
 
     def _update_source_label(self):
-        """Обновляет бейдж источника (первый элемент суффикса, сразу после заголовка)."""
         if self.is_installed():
-            # Установлено: зелёный бейдж с именем источника, MenuButton скрыт
             idx = self._installed_source_index
             text = self._sources[idx].get("label", "Установлено") if 0 <= idx < len(self._sources) else "Установлено"
             self._source_label.set_text(text)
@@ -375,11 +349,9 @@ class AppRow(Adw.ActionRow):
             if self._src_menu_btn:
                 self._src_menu_btn.set_visible(False)
         elif self._src_menu_btn:
-            # Не установлено, несколько источников: MenuButton показывает выбранный источник
             self._source_label.set_visible(False)
             self._src_menu_btn.set_visible(True)
         else:
-            # Не установлено, один источник: приглушённый бейдж
             idx = self._selected_source_index
             text = self._sources[idx].get("label", "") if 0 <= idx < len(self._sources) else ""
             self._source_label.set_text(text)
@@ -390,8 +362,6 @@ class AppRow(Adw.ActionRow):
     def _set_installed_ui(self, installed):
         self._update_source_label()
         if installed:
-            # Установлено — чекбокс скрываем, показываем галочку на его месте.
-            # Кнопку «Установить» и менюшку источника скрываем — галочка и бейдж говорят сами за себя.
             self._checkbox.set_visible(False)
             self.set_selected(False)
 
@@ -402,7 +372,6 @@ class AppRow(Adw.ActionRow):
             self._trash_btn.set_visible(True)
             self._trash_btn.set_sensitive(True)
         else:
-            # Не установлено — показываем чекбокс, галочку скрываем
             self._checkbox.set_visible(True)
             self._status.set_visible(False)
 
@@ -421,7 +390,6 @@ class AppRow(Adw.ActionRow):
         if self._installing or self.is_installed():
             return
 
-        # Определяем источник: выбранный в дропдауне
         idx = self._selected_source_index
         if idx < 0 or idx >= len(self._sources):
             idx = 0
@@ -432,7 +400,6 @@ class AppRow(Adw.ActionRow):
 
         src = self._sources[idx]
 
-        # Блокируем кнопку на время показа диалога предпросмотра
         self._btn.set_sensitive(False)
         self._btn.set_label("…")
         if self._src_menu_btn:
@@ -444,19 +411,15 @@ class AppRow(Adw.ActionRow):
         self._show_preview_then_install(src, cmd, is_epm)
 
     def _show_preview_then_install(self, src, cmd, is_epm):
-        """Показывает диалог предпросмотра, затем при подтверждении запускает установку."""
         def on_confirm():
             self._do_install(src, cmd, is_epm)
 
         def on_cancel():
-            # Восстанавливаем кнопку
             self._btn.set_sensitive(True)
             self._btn.set_label("Установить")
             if self._src_menu_btn:
                 self._src_menu_btn.set_sensitive(True)
 
-        # Выбираем runner в зависимости от источника:
-        # epm-команды идут через run_epm_sync, остальные — run_privileged_sync
         runner = backend.run_epm_sync if is_epm else backend.run_privileged_sync
 
         InstallPreviewDialog(
@@ -470,7 +433,6 @@ class AppRow(Adw.ActionRow):
         ).present()
 
     def _do_install(self, src, cmd, is_epm):
-        """Запускает реальную установку после подтверждения в диалоге предпросмотра."""
         self._installing = True
         self._btn.set_sensitive(False)
         if self._src_menu_btn:
@@ -484,12 +446,10 @@ class AppRow(Adw.ActionRow):
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress(f"Установка {self._app['label']}...")
 
-        # Добавляем -y для epm install/remove
         if is_epm:
             if len(cmd) > 1 and cmd[1] in ("install", "-i", "remove", "-e") and "-y" not in cmd:
                 cmd.insert(2, "-y")
 
-        # Логика повторной попытки при 404 (устаревшие индексы)
         self._install_needs_update = False
         def _log_wrapper(text):
             if ("404" in text and "Not Found" in text) or "Unable to fetch some archives" in text:
@@ -523,10 +483,8 @@ class AppRow(Adw.ActionRow):
         if self._installing:
             return
             
-        # Удаляем то, что установлено
         idx = self._installed_source_index
         if idx < 0:
-            # Если не знаем что установлено, берем текущий выбор
             idx = self._selected_source_index
         
         if idx < 0 or idx >= len(self._sources):
@@ -553,7 +511,6 @@ class AppRow(Adw.ActionRow):
                 pkg = pkg.strip().split()[0]
             cmd = ["epm", "-e", "-y", pkg]
         else:
-            # Fallback для кастомных скриптов
             if "monitor-control" in str(src):
                 cmd = [
                     "rm", "-rf",
@@ -589,7 +546,6 @@ class AppRow(Adw.ActionRow):
             self._log(f"✔  {self._app['label']} установлен!\n")
             if hasattr(win, "stop_progress"): win.stop_progress(ok)
             config.state_set(self._state_key, True)
-            # Обновляем индекс установленного источника
             self._installed_source_index = self._selected_source_index
             self._set_installed_ui(True)
         else:
@@ -617,7 +573,6 @@ class AppRow(Adw.ActionRow):
 
 
 class TaskRow(Adw.ActionRow):
-    """Строка задачи обслуживания с прогрессом."""
 
     def __init__(self, task, on_log, on_progress, btn_label="Запустить"):
         super().__init__()
@@ -660,7 +615,7 @@ class TaskRow(Adw.ActionRow):
     def _initial_check(self):
         check = self._task["check"]
         ok = False
-        can_verify = True  # False если не хватает прав и проверить невозможно
+        can_verify = True
 
         if check.get("type") == "path":
             path = os.path.expanduser(check["value"])
@@ -677,7 +632,8 @@ class TaskRow(Adw.ActionRow):
             path = os.path.expanduser(check["path"])
             needle = check["value"]
             try:
-                ok = needle in open(path, encoding="utf-8", errors="ignore").read()
+                with open(path, encoding="utf-8", errors="ignore") as f:
+                    ok = needle in f.read()
             except OSError:
                 pw = backend.get_sudo_password()
                 if pw:
@@ -698,7 +654,6 @@ class TaskRow(Adw.ActionRow):
                 config.state_set(self._state_key, True)
             GLib.idle_add(self._mark_done_init)
         elif can_verify and self._state_key:
-            # Проверка прошла и подтвердила: патч не применён
             config.state_set(self._state_key, False)
 
     def _mark_done_init(self):
@@ -745,7 +700,6 @@ class TaskRow(Adw.ActionRow):
 
     def _run_user(self, cmd):
         try:
-            # Запускаем команду от текущего пользователя
             res = subprocess.run(cmd, capture_output=True, text=True)
             if res.stdout:
                 GLib.idle_add(self._on_log, res.stdout)
@@ -786,3 +740,4 @@ class TaskRow(Adw.ActionRow):
         self._on_log(f"{'✔  Готово' if ok else '✘  Ошибка'}: {self._task['label']}\n")
         if hasattr(win, "stop_progress"): win.stop_progress(ok)
         self._on_progress()
+

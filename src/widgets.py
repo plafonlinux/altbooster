@@ -1,10 +1,3 @@
-"""
-widgets.py — общие фабрики виджетов GTK4 / Adwaita.
-
-Единственный источник для _make_icon, _make_button, _make_status_icon и т.д.
-Используется как в ui-модулях, так и в dynamic_page.
-"""
-
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -12,12 +5,6 @@ from gi.repository import Adw, Gio, Gtk
 
 
 def make_icon(name: str, size: int = 22, fallback: str = "application-x-executable-symbolic") -> Gtk.Image:
-    """Создаёт именованную иконку заданного размера в пикселях.
-
-    Использует Gio.ThemedIcon с цепочкой имён: если name отсутствует
-    в текущей теме (например Papirus не содержит cpu-symbolic) —
-    GTK автоматически берёт fallback вместо заглушки «image-missing».
-    """
     gicon = Gio.ThemedIcon.new_from_names([name, fallback])
     icon = Gtk.Image.new_from_gicon(gicon)
     icon.set_pixel_size(size)
@@ -25,7 +12,6 @@ def make_icon(name: str, size: int = 22, fallback: str = "application-x-executab
 
 
 def make_button(label: str, width: int = 130, style: str = "suggested-action") -> Gtk.Button:
-    """Создаёт кнопку-«пилюлю» с минимальной шириной и CSS-классом стиля."""
     btn = Gtk.Button(label=label)
     btn.set_size_request(width, -1)
     btn.add_css_class(style)
@@ -34,32 +20,27 @@ def make_button(label: str, width: int = 130, style: str = "suggested-action") -
 
 
 def make_status_icon() -> Gtk.Image:
-    """Создаёт пустую иконку статуса (18 px) для суффиксов строк настроек."""
     icon = Gtk.Image()
     icon.set_pixel_size(18)
     return icon
 
 
 def set_status_ok(icon: Gtk.Image) -> None:
-    """Показывает зелёную галочку в иконке статуса."""
     icon.set_from_icon_name("object-select-symbolic")
     icon.add_css_class("success")
 
 
 def set_status_error(icon: Gtk.Image) -> None:
-    """Показывает красный крест в иконке статуса."""
     icon.set_from_icon_name("dialog-error-symbolic")
     icon.remove_css_class("success")
 
 
 def clear_status(icon: Gtk.Image) -> None:
-    """Сбрасывает иконку статуса в пустое состояние."""
     icon.clear()
     icon.remove_css_class("success")
 
 
 def make_suffix_box(*widgets) -> Gtk.Box:
-    """Создаёт горизонтальный бокс (spacing=10, выровнен по центру) для суффикса Adw.ActionRow."""
     box = Gtk.Box(spacing=10)
     box.set_valign(Gtk.Align.CENTER)
     for w in widgets:
@@ -69,12 +50,6 @@ def make_suffix_box(*widgets) -> Gtk.Box:
 
 
 def make_scrolled_page() -> tuple[Gtk.ScrolledWindow, Gtk.Box]:
-    """Создаёт ScrolledWindow → Adw.Clamp → Box с полями 20px.
-
-    Adw.Clamp ограничивает ширину контента до 800px (GNOME HIG) и центрирует
-    его на широких экранах. Поля задаём на Box, а не на Clamp, чтобы они
-    работали корректно при узких окнах (< 800px).
-    """
     scroll = Gtk.ScrolledWindow()
     scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
     scroll.set_hexpand(True)

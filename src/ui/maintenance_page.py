@@ -1,4 +1,3 @@
-"""Вкладка «Обслуживание» — задачи из modules/maintenance.json."""
 
 import json
 import os
@@ -22,7 +21,6 @@ from ui.rows import TaskRow
 
 
 class CacheTaskRow(Adw.ExpanderRow):
-    """Специальная строка для очистки кэша с настройками."""
 
     def __init__(self, log_fn, on_progress):
         super().__init__()
@@ -35,10 +33,8 @@ class CacheTaskRow(Adw.ExpanderRow):
         self.set_subtitle("Настройте пути для очистки")
         self.add_prefix(make_icon("user-trash-symbolic"))
 
-        # Элементы управления внутри
         self._build_controls()
 
-        # Суффикс: Прогресс + Статус + Кнопка
         self._prog = Gtk.ProgressBar()
         self._prog.set_size_request(100, -1)
         self._prog.set_valign(Gtk.Align.CENTER)
@@ -89,12 +85,10 @@ class CacheTaskRow(Adw.ExpanderRow):
 
     def _refresh_custom_rows(self):
         paths = config.state_get("clean_custom_paths") or []
-        # Удаляем удаленные
         for p in list(self._custom_rows_map.keys()):
             if p not in paths:
                 self._custom_rows_map[p].unparent()
                 del self._custom_rows_map[p]
-        # Добавляем новые
         for p in paths:
             if p not in self._custom_rows_map:
                 row = Adw.ActionRow()
@@ -144,12 +138,9 @@ class CacheTaskRow(Adw.ExpanderRow):
         if self._sw_trash.get_active():
             targets.append(shlex.quote(os.path.expanduser("~/.local/share/Trash")) + "/*")
         if self._sw_flatpak.get_active():
-            # ~/.var/app/*/cache/* — здесь важно не экранировать звездочки
             base = os.path.expanduser("~/.var/app")
             targets.append(shlex.quote(base) + "/*/cache/*")
 
-        # Системные директории, удаление которых через rm -rf/* сломает систему.
-        # Проверяем resolved-путь, чтобы блокировать и "~" и symlink-варианты.
         _DANGEROUS_PREFIXES = (
             "/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/lib32",
             "/proc", "/run", "/sbin", "/sys", "/usr", "/var",
@@ -236,7 +227,7 @@ class MaintenancePage(Gtk.Box):
         fix_tasks = [t for t in all_tasks if t["id"] in fix_ids]
         other_tasks = [t for t in all_tasks if t["id"] not in flatpak_ids and t["id"] not in fix_ids]
 
-        self._build_header(body, len(other_tasks) + len(fix_tasks) + 1)  # +1 для CacheTaskRow
+        self._build_header(body, len(other_tasks) + len(fix_tasks) + 1)
         self._build_tasks(body, other_tasks)
         self._build_fixes_group(body, fix_tasks)
 
@@ -277,14 +268,12 @@ class MaintenancePage(Gtk.Box):
             group.add(row)
 
     def _build_tasks(self, body, tasks):
-        # Отдельная группа для очистки кэша
         cache_group = Adw.PreferencesGroup()
         body.append(cache_group)
         self._cache_row = CacheTaskRow(self._log, self._update_progress)
         self._rows.append(self._cache_row)
         cache_group.add(self._cache_row)
 
-        # Группа для остальных задач
         tasks_group = Adw.PreferencesGroup()
         tasks_group.set_title("Задачи обслуживания")
         body.append(tasks_group)
@@ -354,3 +343,4 @@ class MaintenancePage(Gtk.Box):
         total = len(self._rows)
         self._prog_bar.set_fraction(done / total if total else 0.0)
         self._prog_lbl.set_label(f"{done} / {total} задач")
+

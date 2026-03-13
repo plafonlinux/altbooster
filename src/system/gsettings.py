@@ -1,7 +1,3 @@
-"""
-gsettings.py — Обёртки для утилиты gsettings.
-"""
-
 from __future__ import annotations
 
 import subprocess
@@ -9,7 +5,6 @@ from typing import Sequence
 
 
 def run_gsettings(args: Sequence[str]) -> bool:
-    """Выполняет команду gsettings. Возвращает True при успехе."""
     try:
         result = subprocess.run(
             ["gsettings", *args],
@@ -21,7 +16,6 @@ def run_gsettings(args: Sequence[str]) -> bool:
 
 
 def gsettings_get(schema: str, key: str) -> str:
-    """Возвращает значение ключа gsettings или пустую строку при ошибке."""
     try:
         result = subprocess.run(
             ["gsettings", "get", schema, key],

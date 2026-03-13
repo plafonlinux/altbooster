@@ -1,15 +1,3 @@
-"""
-install_preview_dialog.py — диалог предпросмотра установки пакетов.
-
-Показывается перед реальной установкой: список пакетов, размеры,
-предупреждения/ошибки. Пользователь может отменить или продолжить.
-
-Архитектура:
-- InstallPreviewDialog(Adw.Window) — растягиваемое окно, не фиксированный диалог
-- Открывается в состоянии загрузки (спиннер)
-- В фоновом потоке запускает get_install_preview() из system.packages
-- GLib.idle_add() заполняет контент после завершения парсинга
-"""
 
 from __future__ import annotations
 
@@ -23,20 +11,10 @@ from gi.repository import Adw, GLib, Gtk
 
 from system.packages import InstallPreview, get_install_preview
 
-# Максимальное число пакетов в списке до обрезки (при 2 колонках = 10 строк)
 _MAX_PKG_ROWS = 20
 
 
 class InstallPreviewDialog(Adw.Window):
-    """Диалог предпросмотра списка изменений перед установкой пакета.
-
-    Что делает в реальности:
-    1. Открывается немедленно с анимированным спиннером
-    2. В фоне запускает apt-get -s install и парсит вывод
-    3. Когда данные готовы — заменяет спиннер списком пакетов/размеров
-    4. Кнопка «Продолжить» вызывает on_confirm(), «Отмена» — on_cancel()
-    5. Закрытие крестиком тоже вызывает on_cancel() (однократно)
-    """
 
     def __init__(
         self,
@@ -59,50 +37,39 @@ class InstallPreviewDialog(Adw.Window):
         self._app_name = app_name
         self._source_label = source_label
         self._cmd = list(cmd)
-        self._runner = runner   # backend.run_privileged_sync или run_epm_sync
+        self._runner = runner
         self._empty_message = empty_message
         self._on_confirm = on_confirm
         self._on_cancel = on_cancel
-        self._confirmed = False  # защита от двойного вызова
+        self._confirmed = False
 
-        # Кнопка «Продолжить» — нужна снаружи _build_bottom_bar для блокировки
         self._confirm_btn = Gtk.Button(label="Продолжить установку")
         self._confirm_btn.add_css_class("suggested-action")
         self._confirm_btn.add_css_class("pill")
-        self._confirm_btn.set_sensitive(False)  # активируется после загрузки
+        self._confirm_btn.set_sensitive(False)
         self._confirm_btn.connect("clicked", self._on_confirm_clicked)
 
-        # Корневой layout
         root_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.set_content(root_box)
 
-        # Заголовочная панель
         header = Adw.HeaderBar()
         header.set_show_end_title_buttons(True)
         root_box.append(header)
 
-        # Область прокрутки с контентом
         self._scroll = Gtk.ScrolledWindow()
         self._scroll.set_vexpand(True)
         self._scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         root_box.append(self._scroll)
 
-        # Нижняя панель с кнопками
         root_box.append(self._build_bottom_bar())
 
-        # Показываем спиннер и запускаем фоновый поток
         self._show_spinner()
         threading.Thread(target=self._run_preview_thread, daemon=True).start()
 
-        # Закрытие крестиком → on_cancel
         self.connect("close-request", self._on_close_request)
 
-    # ------------------------------------------------------------------ #
-    #  Внутренние методы                                                   #
-    # ------------------------------------------------------------------ #
 
     def _build_bottom_bar(self) -> Gtk.Box:
-        """Строит нижнюю панель с кнопками Отмена / Продолжить."""
         bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         bar.set_margin_top(8)
         bar.set_margin_bottom(12)
@@ -123,7 +90,6 @@ class InstallPreviewDialog(Adw.Window):
         return bar
 
     def _show_spinner(self):
-        """Показывает состояние загрузки (спиннер + текст)."""
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         box.set_valign(Gtk.Align.CENTER)
         box.set_halign(Gtk.Align.CENTER)
@@ -143,16 +109,13 @@ class InstallPreviewDialog(Adw.Window):
         self._scroll.set_child(box)
 
     def _run_preview_thread(self):
-        """Фоновый поток: запускает get_install_preview и возвращает результат в UI."""
         preview = get_install_preview(self._cmd, runner=self._runner)
         GLib.idle_add(self._on_preview_ready, preview)
 
     def _on_preview_ready(self, preview: InstallPreview):
-        """Вызывается из UI-потока, когда preview готов. Заменяет спиннер контентом."""
         self._build_content(preview)
         self._confirm_btn.set_sensitive(True)
 
-        # Если нечего обновлять — кнопка «Закрыть» вместо «Продолжить»
         no_active = not any([
             preview.new_packages, preview.upgraded_packages,
             preview.removed_packages, preview.flatpak_updates,
@@ -162,15 +125,13 @@ class InstallPreviewDialog(Adw.Window):
             self._confirm_btn.set_label("Закрыть")
             self._confirm_btn.remove_css_class("suggested-action")
             self._confirm_btn.add_css_class("flat")
-            # Закрыть = отмена (ничего не запускаем)
             self._no_active_changes = True
         else:
             self._no_active_changes = False
 
-        return False  # не повторять в GLib.idle_add
+        return False
 
     def _build_content(self, preview: InstallPreview):
-        """Строит основной контент диалога по данным InstallPreview."""
         content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         content_box.set_margin_top(16)
         content_box.set_margin_bottom(16)
@@ -182,7 +143,6 @@ class InstallPreviewDialog(Adw.Window):
         elif preview.source_type == "epm_play":
             content_box.append(self._build_epm_play_view(preview))
         else:
-            # apt и flatpak — единый путь, данные уже в стандартных полях
             if preview.dry_run_failed:
                 content_box.append(self._build_warning_banner(
                     "Не удалось получить список пакетов. "
@@ -218,8 +178,6 @@ class InstallPreviewDialog(Adw.Window):
                     "user-trash-symbolic",
                 ))
 
-            # Сообщение "всё обновлено" показываем когда нет активных изменений,
-            # даже если есть замороженные пакеты — они идут следом
             no_active_changes = not any([
                 preview.new_packages, preview.upgraded_packages,
                 preview.removed_packages, preview.dry_run_failed,
@@ -250,14 +208,12 @@ class InstallPreviewDialog(Adw.Window):
                     "Ошибки", preview.errors, "error"
                 ))
 
-            # Замороженные пакеты — свёрнутый спойлер в самом низу
             if preview.kept_packages:
                 content_box.append(self._build_kept_expander(preview.kept_packages))
 
         self._scroll.set_child(content_box)
 
     def _build_epm_play_view(self, preview: InstallPreview) -> Gtk.Widget:
-        """Вид для epm play: имя, источник, URL если есть."""
         group = Adw.PreferencesGroup()
         group.set_title("Установка через epm play")
 
@@ -297,7 +253,6 @@ class InstallPreviewDialog(Adw.Window):
         return box
 
     def _build_script_view(self) -> Gtk.Widget:
-        """Вид для bash-скриптов."""
         group = Adw.PreferencesGroup()
         group.set_title("Выполнение скрипта установки")
 
@@ -325,10 +280,8 @@ class InstallPreviewDialog(Adw.Window):
     def _build_package_group(
         self, title: str, packages: list[str], icon_name: str
     ) -> Gtk.Box:
-        """Строит группу с заголовком и списком пакетов в 2 колонки."""
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
 
-        # Заголовок в стиле Adwaita PreferencesGroup
         title_lbl = Gtk.Label(label=title)
         title_lbl.add_css_class("heading")
         title_lbl.set_halign(Gtk.Align.START)
@@ -338,7 +291,6 @@ class InstallPreviewDialog(Adw.Window):
         visible = packages[:_MAX_PKG_ROWS]
         hidden = len(packages) - len(visible)
 
-        # Карточка с FlowBox (2 колонки)
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         card.add_css_class("card")
 
@@ -372,7 +324,7 @@ class InstallPreviewDialog(Adw.Window):
             lbl = Gtk.Label(label=pkg)
             lbl.set_halign(Gtk.Align.START)
             lbl.set_hexpand(True)
-            lbl.set_ellipsize(3)  # Pango.EllipsizeMode.END = 3
+            lbl.set_ellipsize(3)
             item.append(lbl)
 
             flow.append(item)
@@ -391,7 +343,6 @@ class InstallPreviewDialog(Adw.Window):
         return outer
 
     def _build_kept_expander(self, packages: list[str]) -> Adw.PreferencesGroup:
-        """Строит свёрнутый спойлер для замороженных пакетов (2 колонки внутри)."""
         group = Adw.PreferencesGroup()
 
         expander = Adw.ExpanderRow()
@@ -401,7 +352,6 @@ class InstallPreviewDialog(Adw.Window):
         visible = packages[:_MAX_PKG_ROWS]
         hidden = len(packages) - len(visible)
 
-        # FlowBox в 2 колонки как единый дочерний виджет ExpanderRow
         flow_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
         flow = Gtk.FlowBox()
@@ -432,7 +382,7 @@ class InstallPreviewDialog(Adw.Window):
             lbl = Gtk.Label(label=pkg)
             lbl.set_halign(Gtk.Align.START)
             lbl.set_hexpand(True)
-            lbl.set_ellipsize(3)  # Pango.EllipsizeMode.END
+            lbl.set_ellipsize(3)
             item.append(lbl)
 
             flow.append(item)
@@ -451,7 +401,6 @@ class InstallPreviewDialog(Adw.Window):
         return group
 
     def _build_sizes_group(self, preview: InstallPreview) -> Adw.PreferencesGroup:
-        """Строит группу с информацией о размерах (загрузка + диск)."""
         group = Adw.PreferencesGroup()
         group.set_title("Использование ресурсов")
 
@@ -480,13 +429,11 @@ class InstallPreviewDialog(Adw.Window):
     def _build_text_section(
         self, title: str, lines: list[str], style: str
     ) -> Gtk.Box:
-        """Строит блок с текстовыми сообщениями (предупреждения/ошибки)."""
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
 
         title_lbl = Gtk.Label(label=title)
         title_lbl.set_halign(Gtk.Align.START)
         attrs = title_lbl.get_attributes() or None
-        # Делаем заголовок жирным через CSS
         title_lbl.add_css_class("heading")
         if style == "error":
             title_lbl.add_css_class("error")
@@ -505,7 +452,6 @@ class InstallPreviewDialog(Adw.Window):
         return box
 
     def _build_warning_banner(self, text: str) -> Gtk.Box:
-        """Строит жёлтый блок-предупреждение."""
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         box.add_css_class("card")
 
@@ -528,30 +474,24 @@ class InstallPreviewDialog(Adw.Window):
 
         return box
 
-    # ------------------------------------------------------------------ #
-    #  Обработчики кнопок                                                  #
-    # ------------------------------------------------------------------ #
 
     def _on_confirm_clicked(self, _):
-        """Пользователь нажал «Продолжить установку» или «Закрыть»."""
         if self._confirmed:
             return
         self._confirmed = True
         self.close()
-        # Если нечего обновлять — кнопка работает как «Закрыть» (не запускаем)
         if getattr(self, "_no_active_changes", False):
             self._on_cancel()
         else:
             self._on_confirm()
 
     def _on_cancel_clicked(self, _):
-        """Пользователь нажал «Отмена»."""
         self.close()
         if not self._confirmed:
             self._on_cancel()
 
     def _on_close_request(self, _) -> bool:
-        """Обработка закрытия крестиком — вызывает on_cancel."""
         if not self._confirmed:
             self._on_cancel()
-        return False  # разрешить стандартное закрытие окна
+        return False
+

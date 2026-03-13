@@ -4,14 +4,11 @@ import sys
 import os
 import traceback
 
-# Добавляем директорию скрипта в путь поиска модулей
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# ── Debug-режим: разбираем --debug до инициализации GTK ───────────────────────
 _DEBUG = "--debug" in sys.argv
 if _DEBUG:
     sys.argv.remove("--debug")
-    # Все GLib/GTK предупреждения выводятся в терминал
     os.environ.setdefault("G_MESSAGES_DEBUG", "all")
 
     def _excepthook(exc_type, exc_value, exc_tb):
@@ -20,7 +17,6 @@ if _DEBUG:
 
     sys.excepthook = _excepthook
     print(f"[DEBUG] ALT Booster запущен в режиме отладки. Python {sys.version}")
-# ──────────────────────────────────────────────────────────────────────────────
 
 import gi
 gi.require_version("Gio", "2.0")
@@ -42,7 +38,6 @@ class AltBoosterApp(Adw.Application):
 
     def _on_activate(self, app):
         config.load_state()
-        # Регистрируем app.quit (GNOME HIG: Ctrl+Q для выхода)
         quit_action = Gio.SimpleAction.new("quit", None)
         quit_action.connect("activate", lambda *_: self.quit())
         self.add_action(quit_action)

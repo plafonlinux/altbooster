@@ -1,4 +1,3 @@
-"""Встроенные функции для вкладки «Терминал»."""
 
 from __future__ import annotations
 
@@ -36,35 +35,28 @@ _FASTFETCH_CONFIG = """{
 }"""
 
 _ZSH_ALIASES = """
-# Timeshift
 alias tm="sudo timeshift"
 alias tmc="sudo timeshift --create"
 alias tmd="sudo timeshift --delete"
 alias tmda="sudo timeshift --delete-all"
 alias tml="sudo timeshift --list"
-# Fastfetch
 alias n="fastfetch -c ~/.config/fastfetch/plafonfetch.jsonc"
 alias k="uname -rs"
 alias g="gnome-shell --version"
 alias f="lsb_release -sd"
 alias c="clear"
 alias find="epmqa"
-# Upgrade
 alias up="epm update && epm full-upgrade"
 alias cc="sudo apt-get clean && flatpak uninstall --unused -y && sudo journalctl --vacuum-time=1weeks"
-# PC
 alias son="sudo systemctl suspend"
 alias reboot="systemctl reboot"
 alias ls="ls --color"
-# Flatpak
 alias fli="flatpak install --noninteractive -y flathub"
 alias flr="flatpak remove --noninteractive -y"
 alias fr="flatpak repair"
 alias fl="flatpak list"
-# GRUB
 alias upgrub="sudo update-grub"
 alias grubup="sudo update-grub"
-# Other
 alias sn="sudo nautilus"
 alias vmax="sudo sysctl -w vm.max_map_count=2147483642"
 """
@@ -234,3 +226,4 @@ def add_zsh_aliases(page, _arg: Any) -> bool:
         if page:
             page.log(f"\n✘  Ошибка: {e}\n")
         return False
+

@@ -1,4 +1,3 @@
-"""Вкладка «Приложения» — modules/apps.json + CRUD."""
 
 import json
 import os
@@ -28,13 +27,12 @@ from ui.rows import AppRow
 
 
 class AppsPage(Gtk.Box):
-    """Вкладка «Приложения» — modules/apps.json + CRUD."""
 
     def __init__(self, log_fn):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._log = log_fn
         self._rows = []
-        self._group_checkboxes = []  # [(Gtk.CheckButton, [AppRow, ...])]
+        self._group_checkboxes = []
         self._busy = False
         self._system_json_path = _MODULES_DIR / "apps.json"
         self._json_path = config.CONFIG_DIR / "apps.json"
@@ -86,7 +84,6 @@ class AppsPage(Gtk.Box):
         self._btn_reset.connect("clicked", self._on_factory_reset)
         self._btns_box.append(self._btn_reset)
 
-        # CSS для плавающего баннера (один раз для всего приложения)
         _banner_css = Gtk.CssProvider()
         _banner_css.load_from_data(b"""
             .ab-float-banner {
@@ -104,7 +101,6 @@ class AppsPage(Gtk.Box):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
-        # Внешний контейнер: центрирует баннер и задаёт прозрачность
         self._banner_dismissed = False
         banner_outer = Gtk.Box()
         banner_outer.set_halign(Gtk.Align.CENTER)
@@ -150,7 +146,6 @@ class AppsPage(Gtk.Box):
         GLib.idle_add(self._refresh_btn_all)
 
     def _update_reset_button_ui(self, is_default):
-        """Обновляет кнопку сброса и баннер в зависимости от того, стандартный ли список."""
         if is_default:
             self._btn_reset.set_label("✓ Список по умолчанию")
             self._btn_reset.set_tooltip_text("Список приложений соответствует стандартному")
@@ -158,7 +153,7 @@ class AppsPage(Gtk.Box):
             self._btn_reset.add_css_class("success")
             self._btn_reset.set_sensitive(False)
             self._banner_revealer.set_reveal_child(False)
-            self._banner_dismissed = False  # сброс: при следующем изменении покажем снова
+            self._banner_dismissed = False
         else:
             self._btn_reset.set_label("Вернуть стандартный список")
             self._btn_reset.set_tooltip_text("Сбросить список к стандартному (обновить)")
@@ -378,8 +373,6 @@ class AppsPage(Gtk.Box):
         clear_status(self._search_status)
 
     def _is_in_list(self, install_id):
-        """Проверяет, есть ли пакет с таким install_id уже в apps.json."""
-        # Проверяем по ID приложения или по команде установки
         for g in self._data.get("groups", []):
             for item in g.get("items", []):
                 if item.get("id") == install_id.replace(".", "_").replace("-", "_").replace(" ", "_").lower():
@@ -387,28 +380,24 @@ class AppsPage(Gtk.Box):
                 for src in item.get("sources", []):
                     if install_id in src.get("cmd", []):
                         return True
-                # старый формат source (не sources)
                 src = item.get("source")
                 if src and install_id in src.get("cmd", []):
                     return True
         return False
 
     def _add_pkg_to_list(self, pkg, btn_add):
-        """Добавляет пакет из поиска в apps.json без установки."""
         display_name = pkg["display_name"]
         install_id = pkg["install_id"]
         install_type = pkg["install_type"]
         branch = pkg.get("branch")
         summary = pkg.get("summary", "")[:100]
 
-        # Хаки для конкретных пакетов (переопределение типа установки)
         lid = install_id.lower()
         if lid in ("furmark", "occt", "yandex-browser", "chrome", "google-chrome-stable"):
             install_type = "epm_play"
             branch = "epm_play"
         elif lid in ("firefox", "yandex-browser-stable"):
             install_type = "epm"
-            # Если вдруг ветка не определена (или пришла не из p11/sisyphus), ставим p11 для метки
             if branch not in ("p11", "Sisyphus"):
                 branch = "p11"
 
@@ -426,7 +415,6 @@ class AppsPage(Gtk.Box):
                 "check": [check_type, install_id],
             }
         else:
-            # Для epm install используем название ветки
             label = branch if branch in ["p11", "Sisyphus"] else "EPM"
             source = {
                 "label": label,
@@ -438,14 +426,12 @@ class AppsPage(Gtk.Box):
 
         gs = self._data.setdefault("groups", [])
 
-        # Находим или создаём группу «Пользовательские приложения» в начале списка
         USER_GID = "user_apps"
         user_group = next((g for g in gs if g.get("id") == USER_GID), None)
         if user_group is None:
             user_group = {"id": USER_GID, "title": "Пользовательские приложения", "items": []}
             gs.insert(0, user_group)
 
-        # Ищем, существует ли уже такое приложение (во всех группах)
         target_item = None
         target_group = None
         for g in gs:
@@ -458,24 +444,21 @@ class AppsPage(Gtk.Box):
                 break
 
         if target_item:
-            # Если есть — добавляем источник к нему
             if "sources" not in target_item:
                 target_item["sources"] = [target_item["source"]] if "source" in target_item else []
                 if "source" in target_item: del target_item["source"]
 
-            # Проверяем дубликаты источников
             exists = any(s.get("label") == source["label"] and s.get("cmd") == source["cmd"] for s in target_item["sources"])
             if not exists:
                 target_item["sources"].append(source)
                 self._log(f"✔ Источник «{source['label']}» добавлен к «{target_item['label']}»\n")
                 self._write_json()
-                GLib.idle_add(self._load_and_build) # Перезагружаем UI, чтобы обновить бейджики
+                GLib.idle_add(self._load_and_build)
             else:
                 self._log(f"ℹ Источник уже существует у «{target_item['label']}»\n")
 
             btn_add.set_label("Обновлено")
         else:
-            # Если нет — создаём новое и кладём в пользовательскую группу
             item = {"id": item_id, "label": display_name, "desc": summary, "sources": [source]}
             user_group.setdefault("items", []).append(item)
             self._write_json()
@@ -517,7 +500,6 @@ class AppsPage(Gtk.Box):
         if hasattr(win, "stop_progress"): win.stop_progress(ok)
 
     def _clear_body(self):
-        """Очищает все виджеты со страницы, кроме панели кнопок."""
         child = self._body.get_first_child()
         while child:
             nxt = child.get_next_sibling()
@@ -532,7 +514,6 @@ class AppsPage(Gtk.Box):
         self._clear_body()
         is_default = False
         try:
-            # Если пользовательского файла нет, копируем системный
             if not self._json_path.exists():
                 if self._system_json_path.exists():
                     os.makedirs(self._json_path.parent, exist_ok=True)
@@ -545,7 +526,6 @@ class AppsPage(Gtk.Box):
                     self._build()
                     return
 
-            # Загружаем оба файла для сравнения и работы
             user_data = {}
             system_data = {}
             with open(self._json_path, encoding="utf-8") as f:
@@ -560,7 +540,6 @@ class AppsPage(Gtk.Box):
 
             if not isinstance(self._data, dict):
                 raise ValueError("JSON должен быть объектом (dict)")
-            # Создаём бэкап при первой успешной загрузке
             backup_path = self._json_path.with_suffix(".json.bak")
             if not backup_path.exists():
                 shutil.copy(self._json_path, backup_path)
@@ -577,8 +556,6 @@ class AppsPage(Gtk.Box):
             self._update_reset_button_ui(False)
 
     def _build(self):
-        # Отрисовываем группу пользовательских приложений первой (до заголовка),
-        # но только если в ней есть хотя бы один элемент.
         USER_GID = "user_apps"
         groups_all = self._data.get("groups", [])
         user_gdata = next((g for g in groups_all if g.get("id") == USER_GID), None)
@@ -599,11 +576,10 @@ class AppsPage(Gtk.Box):
 
         for gdata in self._data.get("groups", []):
             if gdata.get("id") == USER_GID:
-                continue  # уже отрисована выше
+                continue
             self._build_group(gdata)
 
     def _build_group(self, gdata):
-        """Рисует одну группу приложений (PreferencesGroup + ExpanderRow) и добавляет в body."""
         pg = Adw.PreferencesGroup()
         self._body.append(pg)
 
@@ -615,7 +591,6 @@ class AppsPage(Gtk.Box):
 
         gid = gdata.get("id", "")
 
-        # Чекбокс группового выбора
         group_rows = []
         grp_cb = Gtk.CheckButton()
         grp_cb.set_valign(Gtk.Align.CENTER)
@@ -635,7 +610,6 @@ class AppsPage(Gtk.Box):
 
         grp_cb.connect("toggled", _on_grp_cb_toggled)
 
-        # Галочка «все установлены» — в одной колонке с чекбоксом
         grp_status = make_status_icon()
         grp_status.set_visible(False)
 
@@ -655,14 +629,12 @@ class AppsPage(Gtk.Box):
         exp.add_suffix(add_btn)
 
         for app in gdata.get("items", []):
-            # Нормализация для AppRow
             sources = []
             if "sources" in app:
                 sources = app["sources"]
             elif "source" in app:
                 sources = [app["source"]]
 
-            # Валидация источников (tuple check)
             for s in sources:
                 chk = s.get("check", [])
                 s["check"] = tuple(chk) if isinstance(chk, list) else chk
@@ -692,7 +664,6 @@ class AppsPage(Gtk.Box):
             row.add_suffix(del_btn)
 
     def _add_error_widgets(self):
-        """Добавляет виджеты с сообщением об ошибке и кнопкой сброса."""
         group = Adw.PreferencesGroup()
         group.set_title("Ошибка конфигурации")
 
@@ -710,7 +681,6 @@ class AppsPage(Gtk.Box):
         self._log("⚠ Список групп приложений пуст или не загружен.\n")
 
     def _on_reset_apps_json(self, _):
-        """Обработчик сброса apps.json из бэкапа."""
         backup_path = self._json_path.with_suffix(".json.bak")
         source_path = None
 
@@ -740,7 +710,6 @@ class AppsPage(Gtk.Box):
         dialog.present(self.get_root())
 
     def _on_factory_reset(self, _):
-        """Сброс к системному apps.json (обновление списка)."""
         dialog = Adw.AlertDialog(
             heading="Обновить список приложений?",
             body="Текущий список будет заменён на стандартный из новой версии программы. Ваши ручные изменения в списке будут потеряны.",
@@ -760,7 +729,6 @@ class AppsPage(Gtk.Box):
         dialog.connect("response", on_response)
         dialog.present(self.get_root())
 
-    # ── CRUD ─────────────────────────────────────────────────────────────────
 
     def _group_ids(self):
         return [g.get("id", "") for g in self._data.get("groups", [])]
@@ -825,7 +793,6 @@ class AppsPage(Gtk.Box):
             if g.get("id") == group_id:
                 g["items"] = [it for it in g.get("items", []) if it.get("id") != item.get("id")]
                 break
-        # Удаляем пустую группу пользовательских приложений из JSON
         self._data["groups"] = [
             g for g in groups
             if not (g.get("id") == "user_apps" and not g.get("items"))
@@ -835,8 +802,6 @@ class AppsPage(Gtk.Box):
 
     def _write_json(self):
         try:
-            # Атомарная запись: пишем во временный файл -> переименовываем
-            # Это предотвращает повреждение файла (обнуление) при сбое во время записи
             fd, tmp_path = tempfile.mkstemp(dir=self._json_path.parent, suffix=".tmp", text=True)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(self._data, f, ensure_ascii=False, indent=2)
@@ -849,7 +814,6 @@ class AppsPage(Gtk.Box):
                 except OSError:
                     pass
 
-    # ── Массовая установка ───────────────────────────────────────────────────
 
     def _on_install_all_clicked(self, btn):
         n = sum(1 for r in self._rows if r.is_selected())
@@ -874,16 +838,13 @@ class AppsPage(Gtk.Box):
         dialog.present(self.get_root())
 
     def _refresh_btn_all(self):
-        # Охранник от рекурсии (toggled → _refresh_btn_all → set_active → toggled → ...)
         if getattr(self, "_refreshing_btn", False):
             return
         self._refreshing_btn = True
         try:
-            # Синхронизируем состояние групповых чекбоксов
             for grp_cb, grp_status, rows in self._group_checkboxes:
                 uninstalled = [r for r in rows if not r.is_installed()]
                 if not uninstalled:
-                    # Все установлены — чекбокс → зелёная галочка
                     grp_cb.set_visible(False)
                     set_status_ok(grp_status)
                     grp_status.set_visible(True)
@@ -973,13 +934,11 @@ class AppsPage(Gtk.Box):
         for row in to_install:
             if self._cancel_install:
                 break
-            # Ждем, пока предыдущая установка (если была) сбросит флаг
             while row._installing:
                 time.sleep(0.5)
 
             GLib.idle_add(row._on_install)
 
-            # Даем время на запуск установки в основном потоке
             time.sleep(1.0)
             while row._installing:
                 time.sleep(0.5)
@@ -999,3 +958,4 @@ class AppsPage(Gtk.Box):
         if hasattr(win, "stop_progress"):
             ok = not getattr(self, "_cancel_install", False)
             win.stop_progress(ok)
+

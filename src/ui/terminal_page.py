@@ -1,4 +1,3 @@
-"""Вкладка «Терминал» — Ptyxis, ZSH, Fastfetch."""
 
 import os
 import shutil
@@ -17,21 +16,13 @@ import config
 from widgets import make_scrolled_page
 from ui.rows import SettingRow
 
-# ── Константы ────────────────────────────────────────────────────────────────
 
 _ALIASES_BLOCK = r"""
-# --- ALT Booster Aliases ---
-#
-# Timeshift
-#
 alias tm="sudo timeshift"
 alias tmc="sudo timeshift --create"
 alias tmd="sudo timeshift --delete"
 alias tmda="sudo timeshift --delete-all"
 alias tml="sudo timeshift --list"
-#
-# Neofetch
-#
 alias n="fastfetch"
 alias k="uname -rs"
 alias g="gnome-shell --version"
@@ -44,9 +35,6 @@ alias cpuc="lscpu"
 alias w="wine --version"
 alias pc="inxi -Ixxx"
 alias net="inxi -Nxxx"
-#
-# EPM
-#    
 alias ep="eepm-help"
 alias epm-help="eepm-help"
 alias eph="eepm-help"
@@ -55,29 +43,17 @@ alias poisk="epms"
 alias up="epm update && epm full-upgrade && flatpak update --noninteractive -y"
 alias cc="sudo apt-get clean && sudo apt-get autoclean && sudo apt-get check && sudo remove-old-kernels -a && flatpak uninstall --unused -y && sudo journalctl --vacuum-time=1weeks"
 alias c="clear"
-#
-# PC
-#
 alias son="sudo systemctl suspend"
 alias reboot="systemctl reboot"
 alias r="systemctl reboot"
 alias ls="ls --color"
 alias l="lsd --date '+%d.%m.%Y %H:%M' -lah"
-#
-# Flatpak
-#
 alias fli="flatpak install --noninteractive -y flathub"
 alias flr="flatpak remove --noninteractive -y"
 alias fr="flatpak repair"
 alias fl="flatpak list"
-#
-# Gnome Text Editor
-#
 alias gte="gnome-text-editor"
 alias sgte="sudo gnome-text-editor"
-#
-# System folders
-#
 alias fstab="sudo vim /etc/fstab"
 alias bashrc="vim ~/.bashrc"
 alias zshrc="vim ~/.zshrc"
@@ -90,9 +66,6 @@ alias sn="sudo nautilus"
 alias v4="sudo modprobe v4l2loopback"
 alias modeprobe="sudo modprobe v4l2loopback"
 alias vmax="sudo sysctl -w vm.max_map_count=2147483642"
-#
-#
-# ---------------------------
 """
 
 _FASTFETCH_CONFIG = r"""{
@@ -228,14 +201,12 @@ class TerminalPage(Gtk.Box):
         self._build_fastfetch_group(body)
         self._build_aliases_group(body)
 
-    # ── Ptyxis ───────────────────────────────────────────────────────────────
 
     def _build_ptyxis_group(self, body):
         group = Adw.PreferencesGroup()
         group.set_title("Ptyxis")
         group.set_description("Современный терминал GNOME, заменяет gnome-terminal")
         
-        # Кнопка "Применить всё" в заголовке группы
         btn_all = Gtk.Button(label="Применить всё")
         btn_all.set_valign(Gtk.Align.CENTER)
         btn_all.add_css_class("suggested-action")
@@ -244,7 +215,6 @@ class TerminalPage(Gtk.Box):
         
         body.append(group)
 
-        # 1. Установить Ptyxis
         self._row_ptyxis_install = SettingRow(
             "utilities-terminal-symbolic", "Установить Ptyxis",
             "epmi ptyxis + удалить gnome-terminal", "Установить",
@@ -255,7 +225,6 @@ class TerminalPage(Gtk.Box):
         )
         group.add(self._row_ptyxis_install)
 
-        # 2. Ptyxis по умолчанию
         self._row_ptyxis_default = SettingRow(
             "starred-symbolic", "Ptyxis по умолчанию",
             "xdg-mime default org.gnome.Ptyxis.desktop", "Применить",
@@ -271,7 +240,6 @@ class TerminalPage(Gtk.Box):
         self._log("\n▶  Установка Ptyxis...\n")
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress("Установка Ptyxis...")
-        # Удаляем gnome-terminal (игнорируя ошибки, если его нет) и ставим ptyxis
         cmd = ["bash", "-c", "apt-get remove -y gnome-terminal 2>/dev/null || true && apt-get install -y ptyxis"]
         def _done(ok):
             row.set_done(ok)
@@ -321,7 +289,6 @@ class TerminalPage(Gtk.Box):
             if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()
 
-    # ── Горячие клавиши ──────────────────────────────────────────────────────
 
     def _build_shortcuts_group(self, body):
         group = Adw.PreferencesGroup()
@@ -329,7 +296,6 @@ class TerminalPage(Gtk.Box):
         group.set_description("Шорткаты для открытия терминала")
         body.append(group)
 
-        # 1. Terminal 1
         self._row_shortcut_1 = SettingRow(
             "input-keyboard-symbolic", "Terminal 1",
             "Ctrl + Alt + T", "Назначить",
@@ -340,7 +306,6 @@ class TerminalPage(Gtk.Box):
         )
         group.add(self._row_shortcut_1)
 
-        # 2. Terminal 2
         self._row_shortcut_2 = SettingRow(
             "input-keyboard-symbolic", "Terminal 2",
             "Super + Enter", "Назначить",
@@ -355,19 +320,14 @@ class TerminalPage(Gtk.Box):
         val = backend.gsettings_get("org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings")
         if not val or val == "@as []":
             return []
-        # Парсим строку вида "['/path/1', '/path/2']" более надежно
-        # Удаляем скобки
         val = val.strip("[]")
         if not val:
             return []
-        # Разбиваем по запятой и чистим каждый элемент
         return [x.strip(" '\"") for x in val.split(",") if x.strip(" '\"")]
 
     def _check_shortcut(self, uid, binding):
-        # Проверяем все кастомные биндинги, а не только конкретный UID
         current_paths = self._get_custom_bindings()
         for path in current_paths:
-            # Убедимся, что путь заканчивается на /
             if not path.endswith("/"):
                 path += "/"
             val = backend.gsettings_get("org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:" + path, "binding")
@@ -384,16 +344,13 @@ class TerminalPage(Gtk.Box):
             path = f"/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/{uid}/"
             schema = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:" + path
             
-            # 1. Настраиваем сам шорткат
             backend.run_gsettings(["set", schema, "name", f"'{name}'"])
             backend.run_gsettings(["set", schema, "command", f"'{cmd}'"])
             backend.run_gsettings(["set", schema, "binding", f"'{binding}'"])
             
-            # 2. Добавляем путь в список custom-keybindings, если нет
             current = self._get_custom_bindings()
             if path not in current:
                 current.append(path)
-                # Формируем строку массива для gsettings: "['path1', 'path2']"
                 array_str = "[" + ", ".join(f"'{p}'" for p in current) + "]"
                 backend.run_gsettings(["set", "org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings", array_str])
             
@@ -415,7 +372,6 @@ class TerminalPage(Gtk.Box):
                 array_str = "[" + ", ".join(f"'{p}'" for p in current) + "]"
                 backend.run_gsettings(["set", "org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings", array_str])
             
-            # Очищаем настройки (опционально)
             schema = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:" + path
             backend.run_gsettings(["reset", schema, "name"])
             backend.run_gsettings(["reset", schema, "command"])
@@ -426,7 +382,6 @@ class TerminalPage(Gtk.Box):
             if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()
 
-    # ── ZSH ──────────────────────────────────────────────────────────────────
 
     def _build_zsh_group(self, body):
         group = Adw.PreferencesGroup()
@@ -434,7 +389,6 @@ class TerminalPage(Gtk.Box):
         group.set_description("Устанавливает zsh + git + zplug, делает ZSH shell по умолчанию")
         body.append(group)
 
-        # 1. Установить git и zsh
         self._row_zsh_install = SettingRow(
             "utilities-terminal-symbolic", "Установить git и zsh",
             "apt-get install -y git zsh", "Установить",
@@ -445,7 +399,6 @@ class TerminalPage(Gtk.Box):
         )
         group.add(self._row_zsh_install)
 
-        # 2. Установить zplug
         self._row_zplug_install = SettingRow(
             "utilities-terminal-symbolic", "Установить zplug",
             "git clone https://github.com/zplug/zplug ~/.zplug", "Установить",
@@ -456,7 +409,6 @@ class TerminalPage(Gtk.Box):
         )
         group.add(self._row_zplug_install)
 
-        # 3. ZSH по умолчанию
         self._row_zsh_default = SettingRow(
             "system-run-symbolic", "ZSH по умолчанию",
             "chsh -s /bin/zsh", "Применить",
@@ -529,7 +481,6 @@ class TerminalPage(Gtk.Box):
         backend.run_privileged(["chsh", "-s", "/bin/bash", user], self._log, 
             lambda ok: (row.set_undo_done(ok), win.stop_progress(ok) if hasattr(win, "stop_progress") else None))
 
-    # ── Fastfetch ────────────────────────────────────────────────────────────
 
     def _build_fastfetch_group(self, body):
         group = Adw.PreferencesGroup()
@@ -537,7 +488,6 @@ class TerminalPage(Gtk.Box):
         group.set_description("Системная информация с иконками Nerd Fonts")
         body.append(group)
 
-        # 1. Установить Fastfetch
         self._row_fastfetch_install = SettingRow(
             "dialog-information-symbolic", "Установить Fastfetch",
             "epmi fastfetch", "Установить",
@@ -548,7 +498,6 @@ class TerminalPage(Gtk.Box):
         )
         group.add(self._row_fastfetch_install)
 
-        # 2. Шрифт FiraCode Nerd Font
         self._row_font_install = SettingRow(
             "font-x-generic-symbolic", "Шрифт FiraCode Nerd Font",
             "epmi fonts-ttf-fira-code-nerd", "Установить",
@@ -559,7 +508,6 @@ class TerminalPage(Gtk.Box):
         )
         group.add(self._row_font_install)
 
-        # 3. Применить шрифт в Ptyxis
         self._row_font_apply = SettingRow(
             "font-x-generic-symbolic", "Применить шрифт в Ptyxis",
             "FiraCode Nerd Font Regular 14", "Применить",
@@ -570,7 +518,6 @@ class TerminalPage(Gtk.Box):
         )
         group.add(self._row_font_apply)
 
-        # 4. Конфиг plafonfetch.jsonc
         self._row_ff_config = SettingRow(
             "document-save-symbolic", "Конфиг Fastfetch (Default)",
             "Сохраняет в ~/.config/fastfetch/config.jsonc", "Установить",
@@ -672,7 +619,6 @@ class TerminalPage(Gtk.Box):
             if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()
 
-    # ── Алиасы ───────────────────────────────────────────────────────────────
 
     def _build_aliases_group(self, body):
         group = Adw.PreferencesGroup()
@@ -700,19 +646,16 @@ class TerminalPage(Gtk.Box):
             return False
 
     def _on_add_aliases(self, row):
-        # Создаем временный файл
         fd, tmp_path = tempfile.mkstemp(suffix=".sh", text=True)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(_ALIASES_BLOCK.strip())
         
-        # Выбираем редактор
         editor_cmd = []
         if shutil.which("gnome-text-editor"):
             editor_cmd = ["gnome-text-editor", tmp_path]
         elif shutil.which("gedit"):
             editor_cmd = ["gedit", tmp_path]
         elif shutil.which("nano"):
-            # Пытаемся найти терминал для запуска nano
             term = shutil.which("ptyxis") or shutil.which("gnome-terminal") or shutil.which("kgx")
             if term:
                 editor_cmd = [term, "--", "nano", tmp_path]
@@ -759,7 +702,6 @@ class TerminalPage(Gtk.Box):
             p = Path(os.path.expanduser("~/.zshrc"))
             content = p.read_text(encoding="utf-8") if p.exists() else ""
             
-            # Восстанавливаем маркеры, если пользователь их удалил
             final_text = text
             if "# --- ALT Booster Aliases ---" not in final_text:
                 final_text = "# --- ALT Booster Aliases ---\n" + final_text
@@ -809,7 +751,6 @@ class TerminalPage(Gtk.Box):
             if hasattr(win, "stop_progress"): win.stop_progress(True)
         threading.Thread(target=_do, daemon=True).start()
 
-    # ── Массовое применение ──────────────────────────────────────────────────
 
     def _on_apply_all(self, btn):
         btn.set_sensitive(False)
@@ -820,7 +761,6 @@ class TerminalPage(Gtk.Box):
 
     def _do_apply_all(self, btn):
         def run_step(row, action_name, sync_fn):
-            # Если уже активно/установлено — пропускаем
             try:
                 if row._check_fn and row._check_fn():
                     GLib.idle_add(row.set_done, True)
@@ -841,14 +781,12 @@ class TerminalPage(Gtk.Box):
             GLib.idle_add(self._log, f"{'✔' if ok else '✘'}  {action_name}\n")
             return ok
 
-        # 1. Ptyxis
         run_step(self._row_ptyxis_install, "Установка Ptyxis", 
             lambda: backend.run_privileged_sync(["bash", "-c", "apt-get remove -y gnome-terminal 2>/dev/null || true && apt-get install -y ptyxis"], self._log))
         
         run_step(self._row_ptyxis_default, "Ptyxis по умолчанию",
             lambda: subprocess.run(["xdg-mime", "default", "org.gnome.Ptyxis.desktop", "x-scheme-handler/terminal"]).returncode == 0)
 
-        # 2. Шорткаты
         def _sync_shortcut(uid, name, cmd, binding):
             path = f"/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/{uid}/"
             schema = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:" + path
@@ -868,7 +806,6 @@ class TerminalPage(Gtk.Box):
         run_step(self._row_shortcut_2, "Шорткат Terminal 2",
             lambda: _sync_shortcut("custom1", "Terminal Super", "ptyxis --new-window", "<Super>Return"))
 
-        # 3. ZSH
         run_step(self._row_zsh_install, "Установка ZSH",
             lambda: backend.run_privileged_sync(["apt-get", "install", "-y", "git", "zsh"], self._log))
         
@@ -878,7 +815,6 @@ class TerminalPage(Gtk.Box):
         run_step(self._row_zsh_default, "ZSH по умолчанию",
             lambda: backend.run_privileged_sync(["chsh", "-s", "/bin/zsh", os.environ.get("USER")], self._log))
 
-        # 4. Fastfetch
         run_step(self._row_fastfetch_install, "Установка Fastfetch",
             lambda: backend.run_epm_sync(["epm", "-i", "fastfetch"], self._log))
         
@@ -895,7 +831,6 @@ class TerminalPage(Gtk.Box):
             return True
         run_step(self._row_ff_config, "Конфиг Fastfetch", _sync_ff_config)
 
-        # 5. Алиасы
         def _sync_aliases():
             p = Path(os.path.expanduser("~/.zshrc"))
             content = p.read_text(encoding="utf-8") if p.exists() else ""

@@ -1,4 +1,3 @@
-"""Вкладка «Расширения» — GNOME Shell Extensions."""
 
 from __future__ import annotations
 
@@ -26,7 +25,6 @@ from widgets import (
     make_status_icon, set_status_ok, set_status_error, clear_status, make_suffix_box,
 )
 
-# ── Рекомендуемые расширения: (uuid, название, описание) ─────────────────────
 
 RECOMMENDED = [
     (
@@ -113,10 +111,7 @@ _USER_EXT_DIR   = Path.home() / ".local" / "share" / "gnome-shell" / "extensions
 _SYSTEM_EXT_DIR = Path("/usr/share/gnome-shell/extensions")
 
 
-# ── Вспомогательные функции ───────────────────────────────────────────────────
-
 def _gext_path() -> str | None:
-    """Возвращает путь к gext или None. Проверяет PATH и ~/.local/bin (после pip install --user)."""
     if cmd := shutil.which("gext"):
         return cmd
     local_bin = Path.home() / ".local" / "bin" / "gext"
@@ -126,26 +121,9 @@ def _gext_path() -> str | None:
 
 
 def _fix_float_versions_in_metadata(log_fn: Callable[[str], None] | None = None) -> tuple[list[str], list[str]]:
-    """Исправляет float-версии в metadata.json установленных расширений.
-
-    gnome-extensions-cli использует pydantic для парсинга metadata.json.
-    Если поле "version" содержит float (например 7.6), pydantic v2 падает
-    с ValidationError — он ожидает str | int, но float не подходит ни под один тип.
-    Это ломает даже list_installed_extensions(), то есть gext крашится до установки.
-
-    Фикс: преобразуем float → str ("7.6"). GNOME Shell сам хранит версии
-    как строки, так что это безопасно.
-
-    Для системных расширений пробуем исправить через sudo -n tee (без промпта).
-    Если нет кэшированных прав — добавляем в broken_system, что сигнализирует
-    вызывающему коду пропустить gext и использовать нативный метод установки.
-
-    Возвращает (исправленные_пользовательские, сломанные_системные).
-    """
     fixed = []
     broken_system = []
 
-    # Системные расширения: пробуем исправить через sudo -n (non-interactive)
     for meta_path in _SYSTEM_EXT_DIR.glob("*/metadata.json"):
         try:
             data = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -170,7 +148,6 @@ def _fix_float_versions_in_metadata(log_fn: Callable[[str], None] | None = None)
         except Exception:
             pass
 
-    # Пользовательские расширения: исправляем напрямую
     for meta_path in _USER_EXT_DIR.glob("*/metadata.json"):
         try:
             text = meta_path.read_text(encoding="utf-8")
@@ -186,7 +163,6 @@ def _fix_float_versions_in_metadata(log_fn: Callable[[str], None] | None = None)
 
 
 def _is_ext_installed(uuid: str) -> bool:
-    """Проверяет установлено ли расширение (user или system)."""
     try:
         r = subprocess.run(["gnome-extensions", "list"], capture_output=True, text=True)
         return uuid in r.stdout
@@ -195,7 +171,6 @@ def _is_ext_installed(uuid: str) -> bool:
 
 
 def _read_extensions_from(ext_dir: Path) -> list[tuple[str, str, str]]:
-    """Читает [(uuid, name, description), ...] из metadata.json в директории расширений."""
     result = []
     for meta in sorted(ext_dir.glob("*/metadata.json")):
         try:
@@ -210,7 +185,6 @@ def _read_extensions_from(ext_dir: Path) -> list[tuple[str, str, str]]:
 
 
 def _get_enabled_uuids() -> set[str]:
-    """Возвращает множество UUID включённых расширений."""
     try:
         r = subprocess.run(
             ["gnome-extensions", "list", "--enabled"],
@@ -222,7 +196,6 @@ def _get_enabled_uuids() -> set[str]:
 
 
 def _make_info_button(desc: str) -> Gtk.Button:
-    """Создаёт кнопку-иконку с информацией о расширении."""
     info_btn = Gtk.Button()
     info_btn.set_icon_name("dialog-information-symbolic")
     info_btn.add_css_class("flat")
@@ -233,10 +206,7 @@ def _make_info_button(desc: str) -> Gtk.Button:
     return info_btn
 
 
-# ── Главный класс ─────────────────────────────────────────────────────────────
-
 class ExtensionsPage(Gtk.Box):
-    """Вкладка «Расширения»: менеджер, рекомендуемые, установка по ID, список."""
 
     def __init__(self, log_fn):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -250,27 +220,19 @@ class ExtensionsPage(Gtk.Box):
         self._installed_group = None
         self._build_installed_group()
 
-    # ── Секция: Поиск и установка ─────────────────────────────────────────────
 
     def _get_shell_version(self) -> str:
-        """Определяет версию GNOME Shell для запроса к API."""
         try:
             r = subprocess.run(["gnome-shell", "--version"], capture_output=True, text=True)
-            # "GNOME Shell 47.4" -> "47"
             m = re.search(r"(\d+)", r.stdout)
             return m.group(1) if m else "47"
         except Exception:
             return "47"
 
     def _install_native_fallback(self, target_id: str, uuid_hint: str = None) -> tuple[bool, str | None]:
-        """Нативный метод установки без использования gnome-extensions-cli.
-        
-        Использует API extensions.gnome.org и системную команду 'gnome-extensions install'.
-        """
         GLib.idle_add(self._log, "⚠  gext дал сбой. Пробую нативный метод установки...\n")
         try:
             shell_ver = self._get_shell_version()
-            # API принимает либо pk (числовой ID), либо uuid
             key = "pk" if target_id.isdigit() else "uuid"
             url = f"https://extensions.gnome.org/extension-info/?{key}={target_id}&shell_version={shell_ver}"
             
@@ -289,7 +251,6 @@ class ExtensionsPage(Gtk.Box):
                 urllib.request.urlretrieve(full_url, tmp.name)
                 zip_path = tmp.name
             
-            # Нативная установка (force перезаписывает если уже есть)
             subprocess.run(["gnome-extensions", "install", "--force", zip_path], check=True)
             os.unlink(zip_path)
             
@@ -323,7 +284,6 @@ class ExtensionsPage(Gtk.Box):
         box.append(self._id_status)
 
     def _on_search_text_changed(self, entry, _):
-        """Скрывает результаты поиска, если поле ввода очищено."""
         if not entry.get_text() and self._search_results_group:
             self._body.remove(self._search_results_group)
             self._search_results_group = None
@@ -340,14 +300,12 @@ class ExtensionsPage(Gtk.Box):
             self._search_extensions(text)
 
     def _ensure_gext(self) -> str | None:
-        """Убеждается, что gext установлен. Пробует установить через pip если нужно."""
         gext = _gext_path()
         if gext:
             return gext
 
         GLib.idle_add(self._log, "▶  gext не найден, устанавливаю...\n")
         
-        # Поиск pip
         pip_cmd = next((c for c in ("pip3", "pip") if shutil.which(c)), None)
         
         if not pip_cmd:
@@ -417,7 +375,6 @@ class ExtensionsPage(Gtk.Box):
         self._id_entry.set_sensitive(False)
         clear_status(self._id_status)
         
-        # Очищаем предыдущие результаты
         if self._search_results_group:
             self._body.remove(self._search_results_group)
             self._search_results_group = None
@@ -433,7 +390,6 @@ class ExtensionsPage(Gtk.Box):
                 
                 results = data.get("extensions", [])
                 
-                # Получаем список установленных UUID
                 installed_uuids = set()
                 try:
                     r = subprocess.run(["gnome-extensions", "list"], capture_output=True, text=True)
@@ -465,10 +421,7 @@ class ExtensionsPage(Gtk.Box):
         group = Adw.PreferencesGroup()
         group.set_title(f"Результаты поиска ({len(results)})")
         
-        # Вставляем группу сразу после группы поиска (индекс 1, т.к. 0 это группа поиска)
-        # Но так как мы используем append/remove, проще вставить перед installed_group
         if self._installed_group:
-            # Находим виджет перед installed_group
             prev = None
             child = self._body.get_first_child()
             while child:
@@ -494,7 +447,6 @@ class ExtensionsPage(Gtk.Box):
             )
             group.add(row)
 
-    # ── Секция: Установленные расширения ──────────────────────────────────────
 
     def _build_installed_group(self):
         self._installed_group = self._make_installed_group_widget()
@@ -515,7 +467,6 @@ class ExtensionsPage(Gtk.Box):
         return group
 
     def _load_installed(self):
-        # Небольшая задержка, чтобы файловая система успела обновиться после установки
         time.sleep(1.0)
 
         user_exts   = _read_extensions_from(_USER_EXT_DIR)
@@ -525,12 +476,10 @@ class ExtensionsPage(Gtk.Box):
         GLib.idle_add(self._populate_installed, user_exts, system_exts, enabled)
 
     def _populate_installed(self, user_exts, system_exts, enabled):
-        # Пересоздаём группу — Adw.PreferencesGroup не поддерживает remove строк
         self._body.remove(self._installed_group)
         self._installed_group = self._make_installed_group_widget()
         self._body.append(self._installed_group)
 
-        # Фильтруем системные расширения, которые перекрыты пользовательскими (дубликаты)
         user_uuids = {u[0] for u in user_exts}
         visible_system_exts = [e for e in system_exts if e[0] not in user_uuids]
 
@@ -544,7 +493,6 @@ class ExtensionsPage(Gtk.Box):
             self._installed_group.add(row)
             return
 
-        # Русские описания из RECOMMENDED для подстановки в установленные расширения
         rec_desc_by_uuid = {r[0]: r[2] for r in RECOMMENDED}
 
         if user_exts or missing_recs:
@@ -556,7 +504,6 @@ class ExtensionsPage(Gtk.Box):
             exp.set_subtitle(count_str)
             exp.set_expanded(True)
             for uuid, name, desc in user_exts:
-                # Предпочитаем русское описание из RECOMMENDED, иначе оригинальное из metadata.json
                 display_desc = rec_desc_by_uuid.get(uuid) or desc
                 exp.add_row(self._make_installed_row(uuid, name, display_desc, uuid in enabled, is_user=True))
             for r in missing_recs:
@@ -587,7 +534,7 @@ class ExtensionsPage(Gtk.Box):
 
         def on_state_set(sw, state, u=uuid):
             self._toggle_extension(u, state, sw)
-            return True  # Блокируем авто-смену; обновляем вручную после команды
+            return True
 
         switch.connect("state-set", on_state_set)
 
@@ -647,7 +594,6 @@ class ExtensionsPage(Gtk.Box):
         btn.set_sensitive(False)
         btn.set_label("…")
 
-        # Проверяем, нет ли уже системного расширения с таким UUID
         if (_SYSTEM_EXT_DIR / uuid).exists():
             self._log(
                 f"⚠  Расширение {uuid} уже установлено системно.\n"
@@ -658,7 +604,6 @@ class ExtensionsPage(Gtk.Box):
             btn.set_label("Уже системное")
             return
 
-        # Поддержка установки через EPM (для системных пакетов)
         if install_id and install_id.startswith("epm:"):
             pkg = install_id[4:]
             self._log(f"\n▶  Установка {pkg} (EPM)...\n")
@@ -715,7 +660,6 @@ class ExtensionsPage(Gtk.Box):
         threading.Thread(target=_do, daemon=True).start()
 
     def _toggle_extension(self, uuid: str, state: bool, switch: Gtk.Switch) -> None:
-        """Включает или выключает расширение через gnome-extensions."""
         cmd = ["gnome-extensions", "enable" if state else "disable", uuid]
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress(f"{'Включение' if state else 'Отключение'} расширения...")
@@ -734,7 +678,6 @@ class ExtensionsPage(Gtk.Box):
         threading.Thread(target=_do, daemon=True).start()
 
     def _on_delete_ext(self, uuid: str, is_user: bool = True) -> None:
-        """Диалог подтверждения перед удалением расширения."""
         if is_user:
             body = f"«{uuid}» будет удалён из\n~/.local/share/gnome-shell/extensions/"
         else:
@@ -762,12 +705,6 @@ class ExtensionsPage(Gtk.Box):
         dialog.present(self.get_root())
 
     def _do_delete_ext(self, uuid: str) -> None:
-        """Удаляет пользовательское расширение.
-
-        Сначала пробует gnome-extensions uninstall (канонический способ, корректно
-        обновляет состояние GNOME Shell). Если не удалось — fallback на shutil.rmtree
-        по директории расширения (ищет по UUID в metadata.json).
-        """
         self._log(f"\n▶  Удаление {uuid}...\n")
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress("Удаление расширения...")
@@ -775,7 +712,6 @@ class ExtensionsPage(Gtk.Box):
         def _do():
             ok = False
             try:
-                # Шаг 1: канонический способ — gnome-extensions uninstall
                 r = subprocess.run(
                     ["gnome-extensions", "uninstall", uuid],
                     capture_output=True, text=True,
@@ -783,7 +719,6 @@ class ExtensionsPage(Gtk.Box):
                 ok = r.returncode == 0
 
                 if not ok:
-                    # Шаг 2: fallback — ищем директорию расширения на диске
                     ext_path = _USER_EXT_DIR / uuid
                     if not ext_path.exists():
                         for meta in _USER_EXT_DIR.glob("*/metadata.json"):
@@ -815,14 +750,12 @@ class ExtensionsPage(Gtk.Box):
         threading.Thread(target=_do, daemon=True).start()
 
     def _do_delete_system_ext(self, uuid: str) -> None:
-        """Удаляет системное расширение с проверкой RPM-зависимостей."""
         ext_path = _SYSTEM_EXT_DIR / uuid
         self._log(f"\n▶  Проверка зависимостей для {uuid}...\n")
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress(f"Удаление системного расширения...")
 
         def _do():
-            # Определяем, принадлежит ли директория RPM-пакету
             r_own = subprocess.run(
                 ["rpm", "-qf", str(ext_path)],
                 capture_output=True, text=True,
@@ -832,7 +765,6 @@ class ExtensionsPage(Gtk.Box):
                 pkg_name = r_own.stdout.strip().splitlines()[0]
                 GLib.idle_add(self._log, f"▶  Пакет RPM: {pkg_name}\n")
 
-                # Проверяем что зависит от этого пакета
                 r_deps = subprocess.run(
                     ["rpm", "-q", "--whatrequires", pkg_name],
                     capture_output=True, text=True,
@@ -852,11 +784,9 @@ class ExtensionsPage(Gtk.Box):
                     if hasattr(win, "stop_progress"): win.stop_progress(False)
                     return
 
-                # Зависимостей нет — удаляем пакет через rpm -e
                 GLib.idle_add(self._log, f"▶  Удаляю пакет {pkg_name}...\n")
                 ok = backend.run_privileged_sync(["rpm", "-e", pkg_name], self._log)
             else:
-                # Директория не принадлежит RPM — удаляем напрямую через sudo rm -rf
                 GLib.idle_add(self._log, "▶  Директория не принадлежит RPM, удаляю rm -rf...\n")
                 ok = backend.run_privileged_sync(["rm", "-rf", str(ext_path)], self._log)
 
@@ -871,3 +801,4 @@ class ExtensionsPage(Gtk.Box):
 
     def _refresh_installed(self):
         threading.Thread(target=self._load_installed, daemon=True).start()
+

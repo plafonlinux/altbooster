@@ -1,4 +1,3 @@
-"""Вкладка «AMD Radeon» — разгон и настройка."""
 
 import os
 import subprocess
@@ -151,10 +150,8 @@ class AmdPage(DynamicPage):
             lambda ok2: self._log("✔  Конфиг применён!\n" if ok2 else "✘  Ошибка перезапуска lactd\n")
         )
 
-    # ── SCX (sched-ext) ──────────────────────────────────────────────────────
 
     def _is_sisyphus(self):
-        """Проверяет, является ли текущая система Sisyphus."""
         for path in ["/etc/altlinux-release", "/etc/os-release"]:
             if os.path.exists(path):
                 try:
@@ -174,7 +171,6 @@ class AmdPage(DynamicPage):
             desc += "\n⚠️ Пакет scx-scheds доступен только в репозитории Sisyphus."
         group.set_description(desc)
         
-        # Ищем контейнер для правильного выравнивания (внутри ScrolledWindow)
         target = getattr(self, "_body", None)
         if not target:
             child = self.get_first_child()
@@ -190,7 +186,6 @@ class AmdPage(DynamicPage):
 
         (target if target else self).append(group)
 
-        # 1. LAVD Performance
         self._row_lavd_std = SettingRow(
             "utilities-terminal-symbolic", "LAVD (Performance)",
             "Оптимизация для игр и десктопа", "Включить",
@@ -205,7 +200,6 @@ class AmdPage(DynamicPage):
             self._row_lavd_std.set_sensitive(False)
             self._row_lavd_std.set_tooltip_text("Требуется репозиторий Sisyphus")
 
-        # 2. LAVD Autopower
         self._row_lavd_auto = SettingRow(
             "battery-symbolic", "LAVD (Autopower)",
             "Режим для ноутбуков и мини-ПК", "Включить",
@@ -224,10 +218,8 @@ class AmdPage(DynamicPage):
         return backend.check_app_installed({"check": ["rpm", "scx-scheds"]})
 
     def _check_lavd_active(self, autopower):
-        # Проверяем статус сервиса
         if subprocess.run(["systemctl", "is-active", "scx_lavd"], capture_output=True).returncode != 0:
             return False
-        # Проверяем наличие флага --autopower в файле сервиса
         try:
             with open("/etc/systemd/system/scx_lavd.service", "r") as f:
                 content = f.read()
@@ -245,7 +237,6 @@ class AmdPage(DynamicPage):
             win.start_progress(f"Включение LAVD ({mode_str})...")
 
         def _thread_worker():
-            # 1. Проверка и установка пакета (теперь в фоне)
             if not self._check_scx_installed():
                 GLib.idle_add(self._log, "▶  Установка пакета scx-scheds...\n")
                 ok_inst = backend.run_privileged_sync(["apt-get", "install", "-y", "scx-scheds"], self._log)
@@ -255,7 +246,6 @@ class AmdPage(DynamicPage):
                     if win and hasattr(win, "stop_progress"): GLib.idle_add(win.stop_progress, False)
                     return
 
-            # 2. Подготовка файла сервиса
             exec_start = "/usr/bin/scx_lavd --autopower" if autopower else "/usr/bin/scx_lavd"
             service_content = f"""[Unit]
 Description=SCX LAVD CPU Scheduler
@@ -282,7 +272,6 @@ WantedBy=multi-user.target
                 if win and hasattr(win, "stop_progress"): GLib.idle_add(win.stop_progress, False)
                 return
 
-            # 3. Применение настроек
             cmd = [
                 "bash", "-c",
                 f"mv {shlex.quote(tmp_path)} /etc/systemd/system/scx_lavd.service && "
@@ -294,7 +283,6 @@ WantedBy=multi-user.target
 
             ok_service = backend.run_privileged_sync(cmd, self._log)
 
-            # 4. Обновление интерфейса
             def _finish_ui():
                 row.set_done(ok_service)
                 other_row = self._row_lavd_std if autopower else self._row_lavd_auto

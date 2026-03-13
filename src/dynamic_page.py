@@ -1,36 +1,3 @@
-"""
-dynamic_page.py — универсальный движок Data-Driven UI для ALT Booster.
-
-Архитектура:
-  run_check(check)      — проверка статуса по JSON-описанию
-  ActionDispatcher      — выполнение action из JSON в фоновом потоке
-  RowFactory            — фабрика виджетов Adw из JSON-описания строки
-  DynamicPage           — Gtk.Box, строит интерфейс из JSON-словаря
-
-Поддерживаемые типы строк (row.type):
-  command_row  — кнопка выполнения команды с индикатором статуса
-  dropdown_row — выпадающий список + кнопка применения
-  file_row     — выбор файла + кнопка применения
-
-Поддерживаемые типы action:
-  privileged   — sudo через backend.run_privileged
-  epm          — epm через backend.run_epm
-  shell        — subprocess без root
-  gsettings    — backend.run_gsettings
-  open_url     — Gio.AppInfo.launch_default_for_uri
-  builtin      — вызов функции из BUILTIN_REGISTRY
-
-Поддерживаемые типы check:
-  rpm              — rpm -q <value>
-  flatpak          — flatpak list | grep <value>
-  which            — which <value>
-  path             — os.path.exists(~/<value>)
-  systemd          — systemctl is-enabled <value>
-  gsettings        — gsettings get schema key == expected
-  gsettings_contains — gsettings get schema key contains value
-  builtin          — вызов check-функции из BUILTIN_REGISTRY
-"""
-
 from __future__ import annotations
 
 import shutil
@@ -53,12 +20,7 @@ from widgets import (
 )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# run_check — проверка статуса строки
-# ─────────────────────────────────────────────────────────────────────────────
-
 def run_check(check: dict | None) -> bool:
-    """Выполняет проверку статуса из JSON-описания check."""
     if not check:
         return False
     kind = check.get("type")
@@ -110,18 +72,7 @@ def run_check(check: dict | None) -> bool:
     return False
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# _SafePage — обёртка page для вызовов из фоновых потоков
-# ─────────────────────────────────────────────────────────────────────────────
-
 class _SafePage:
-    """Делает log() потокобезопасным через GLib.idle_add.
-
-    Builtin-функции вызываются из фонового потока ActionDispatcher._run.
-    Прямые вызовы page.log() из них нарушали бы GTK-thread-safety.
-    Все остальные атрибуты делегируются реальному объекту page.
-    """
-
     def __init__(self, real_page: "DynamicPage") -> None:
         self._page = real_page
 
@@ -132,13 +83,7 @@ class _SafePage:
         return getattr(self._page, name)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ActionDispatcher — выполнение action из JSON
-# ─────────────────────────────────────────────────────────────────────────────
-
 class ActionDispatcher:
-    """Выполняет action из JSON в фоновом потоке."""
-
     def __init__(self, page: DynamicPage) -> None:
         self._page = page
 
@@ -148,7 +93,6 @@ class ActionDispatcher:
         on_done: Callable[[bool], None] | None = None,
         arg: Any = None,
     ) -> None:
-        """Запускает action в фоновом потоке, on_done(ok) вызывается в главном."""
         threading.Thread(
             target=self._run,
             args=(action, on_done, arg),
@@ -196,14 +140,9 @@ class ActionDispatcher:
         if on_done:
             GLib.idle_add(on_done, ok)
 
-        # Обновляем всю страницу, если действие прошло успешно
         if ok:
             page.refresh()
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# RowFactory — строит Adw.ActionRow из JSON-описания
-# ─────────────────────────────────────────────────────────────────────────────
 
 class RowFactory:
     def __init__(self, page: DynamicPage) -> None:
@@ -218,12 +157,9 @@ class RowFactory:
             return self._dropdown_row(rd)
         if row_type == "file_row":
             return self._file_row(rd)
-        # fallback
         row = Adw.ActionRow()
         row.set_title(rd.get("title", "?"))
         return row
-
-    # ── command_row ───────────────────────────────────────────────────────────
 
     def _command_row(self, rd: dict) -> Adw.ActionRow:
         row = Adw.ActionRow()
@@ -275,8 +211,6 @@ class RowFactory:
         row.add_suffix(make_suffix_box(status, btn))
         return row
 
-    # ── dropdown_row ──────────────────────────────────────────────────────────
-
     def _dropdown_row(self, rd: dict) -> Adw.ActionRow:
         row = Adw.ActionRow()
         row.set_title(rd.get("title", ""))
@@ -323,8 +257,6 @@ class RowFactory:
 
         row.add_suffix(make_suffix_box(dropdown, status, btn))
         return row
-
-    # ── file_row ──────────────────────────────────────────────────────────────
 
     def _file_row(self, rd: dict) -> Adw.ActionRow:
         row = Adw.ActionRow()
@@ -405,25 +337,12 @@ class RowFactory:
         return row
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DynamicPage — главный класс
-# ─────────────────────────────────────────────────────────────────────────────
-
 class DynamicPage(Gtk.Box):
-    """
-    Универсальная вкладка, строящая интерфейс из JSON-словаря.
-
-    Параметры:
-        page_data : dict — распарсенный JSON (из modules/*.json)
-        log_fn    : Callable[[str], None] — функция вывода в лог
-    """
-
     def __init__(self, page_data: dict, log_fn: Callable[[str], None]) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.log = log_fn
         self._page_data = page_data
         self._rows_with_checks: list[Adw.ActionRow] = []
-        # SizeGroup выравнивает все кнопки по ширине самой широкой — галочки выстраиваются в столбик
         self._btn_size_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         self._factory = RowFactory(self)
 
@@ -447,13 +366,10 @@ class DynamicPage(Gtk.Box):
 
         self._build(self._body)
 
-        # Одноразовый фоновый поллинг статусов
         threading.Thread(target=self._poll_checks, daemon=True).start()
 
     def _build(self, body: Gtk.Box) -> None:
         for group_data in self._page_data.get("groups", []):
-            # shutil.which вместо subprocess.run(["which"...]) — не создаёт процесс,
-            # не блокирует GTK-поток при сборке интерфейса
             if "requires" in group_data and shutil.which(group_data["requires"]) is None:
                 continue
 
@@ -472,7 +388,6 @@ class DynamicPage(Gtk.Box):
                     self._rows_with_checks.append(row)
 
     def _poll_checks(self) -> None:
-        """Проверяет статус каждой строки и обновляет UI через GLib.idle_add."""
         for row in self._rows_with_checks:
             check = getattr(row, "_dp_check", None)
             ok = run_check(check)
@@ -506,7 +421,6 @@ class DynamicPage(Gtk.Box):
                 btn.add_css_class("suggested-action")
 
     def refresh(self) -> None:
-        """Запускает фоновую перепроверку всех статусов на странице."""
         threading.Thread(target=self._poll_checks, daemon=True).start()
 
     def _show_reboot_dialog(self) -> None:
