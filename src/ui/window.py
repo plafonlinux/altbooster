@@ -18,7 +18,6 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
 import config
 import backend
-from ui.dialogs import clear_saved_password
 from system import profile as profile_module
 from ui.profile_dialog import show_preset_save_dialog, show_preset_import_dialog
 from ui.setup_page import SetupPage
@@ -192,7 +191,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         menu.append_section(None, section_diag)
 
         section_reset = Gio.Menu()
-        section_reset.append("Сбросить сохраненный пароль", "win.reset_password")
         section_reset.append("Сброс настроек приложения", "win.reset_config")
         menu.append_section(None, section_reset)
 
@@ -224,7 +222,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             ("about",          self._show_about),
             ("clear_log",      self._clear_log),
             ("reset_state",    self._reset_state),
-            ("reset_password", self._reset_password),
             ("reset_config",   self._reset_config),
             ("open_log",       self._open_log_file),
         ]
@@ -300,6 +297,15 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         return self._sidebar_widget
 
     def _build_sidebar_bottom(self) -> Gtk.Widget:
+        container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+
+        self._version_label_sidebar = Gtk.Label(label=f"v{config.VERSION}")
+        self._version_label_sidebar.add_css_class("caption")
+        self._version_label_sidebar.add_css_class("dim-label")
+        self._version_label_sidebar.set_margin_top(6)
+        self._version_label_sidebar.set_margin_bottom(2)
+        container.append(self._version_label_sidebar)
+
         bottom_list = Gtk.ListBox()
         bottom_list.add_css_class("navigation-sidebar")
         bottom_list.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -367,7 +373,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._bottom_labels.append(mb_lbl)
 
         bottom_list.connect("row-activated", self._on_bottom_row_activated)
-        return bottom_list
+        container.append(bottom_list)
+        return container
 
     def _on_bottom_row_activated(self, _, row):
         name = row.get_name()
@@ -396,6 +403,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         ):
             img.set_pixel_size(icon_size)
             lbl.set_visible(show)
+
+        self._version_label_sidebar.set_visible(show)
 
         if show:
             self._sidebar_widget.set_size_request(90, -1)
@@ -1279,6 +1288,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
 
     def _check_for_updates(self, *_):
+        if self._stack.get_visible_child_name() == "setup":
+            if self._setup.dismiss_update_section():
+                return
         self._stack.set_visible_child_name("setup")
         self._update_badge_dot.set_visible(False)
         self._setup.check_for_updates(manual=True, on_update_found=self._on_update_found_global)
@@ -1324,18 +1336,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         d.connect("response", _on_response)
         d.present(self)
-
-    def _reset_password(self, *_):
-        clear_saved_password()
-        backend.set_sudo_password(None)
-        backend.set_sudo_nopass(False)
-        backend.set_pkexec_mode(False)
-        self._log("🔑 Сохраненный пароль сброшен.\n")
-        self.add_toast(Adw.Toast(title="Пароль сброшен"))
-        def _invalidate_and_reauth():
-            subprocess.run(["sudo", "-k"], capture_output=True)
-            GLib.idle_add(self.ask_password)
-        threading.Thread(target=_invalidate_and_reauth, daemon=True).start()
 
     def _reset_config(self, *_):
         dialog = Adw.AlertDialog(

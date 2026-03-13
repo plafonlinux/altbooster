@@ -256,6 +256,9 @@ class FlatpakPage(Gtk.Box):
         if not _is_flatpak_available():
             GLib.idle_add(self._show_unavailable_state)
             return
+        if not backend.is_flathub_enabled():
+            GLib.idle_add(self._show_no_flathub_dialog)
+            return
         apps = _list_flatpak_apps()
         masked = _get_masked_ids()
         icons = _build_icon_index()
@@ -317,6 +320,54 @@ class FlatpakPage(Gtk.Box):
             self._refresh_btn.set_sensitive(True)
         if self._update_all_btn:
             self._update_all_btn.set_sensitive(False)
+
+    def _show_no_flathub_dialog(self):
+        self._clear_apps_group()
+        row = Adw.ActionRow()
+        row.set_title("Flathub не подключён")
+        row.set_subtitle("Добавьте репозиторий Flathub для установки и управления приложениями")
+        row.add_prefix(make_icon("dialog-information-symbolic"))
+        self._apps_group.add(row)
+        if self._refresh_btn:
+            self._refresh_btn.set_sensitive(True)
+        if self._update_all_btn:
+            self._update_all_btn.set_sensitive(False)
+
+        dialog = Adw.AlertDialog(
+            heading="Flathub не подключён",
+            body="Для управления Flatpak-приложениями необходимо подключить репозиторий Flathub.\n\nПодключить сейчас?",
+        )
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("setup", "Подключить Flathub")
+        dialog.set_response_appearance("setup", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("setup")
+        dialog.connect("response", self._on_no_flathub_response)
+        dialog.present(self.get_root())
+
+    def _on_no_flathub_response(self, _dialog, response):
+        if response != "setup":
+            return
+        self._log("\n▶  Установка Flatpak и Flathub...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress("Установка Flatpak...")
+
+        def _step2(ok):
+            if not ok:
+                if hasattr(win, "stop_progress"):
+                    GLib.idle_add(win.stop_progress, False)
+                return
+            backend.run_privileged(
+                ["apt-get", "install", "-y", "flatpak-repo-flathub"],
+                self._log,
+                lambda ok2: (
+                    GLib.idle_add(self._log, "✔  Flathub готов!\n" if ok2 else "✘  Ошибка\n"),
+                    GLib.idle_add(win.stop_progress, ok2) if hasattr(win, "stop_progress") else None,
+                    GLib.idle_add(self._refresh) if ok2 else None,
+                ),
+            )
+
+        backend.run_privileged(["apt-get", "install", "-y", "flatpak"], self._log, _step2)
 
 
     def _make_app_row(self, app: FlatpakApp) -> Adw.ActionRow:

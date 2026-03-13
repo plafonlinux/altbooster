@@ -56,7 +56,7 @@ class DaVinciPage(Gtk.Box):
         overlay.set_child(scroll)
 
         self._build_install_group(body)
-        self._build_setup_expander(body)
+        self._build_setup_group(body)
         self._build_cache_group(body)
 
         dr_btn = make_button("DaVinci Ready", style="suggested-action")
@@ -111,19 +111,11 @@ class DaVinciPage(Gtk.Box):
         ).start()
 
 
-    def _build_setup_expander(self, body):
-        group = Adw.PreferencesGroup()
-        body.append(group)
-        exp = Adw.ExpanderRow()
-        exp.set_title("Первичная настройка")
-        exp.set_subtitle("PostInstall, AMD Radeon, AAC кодек, Fairlight")
-        exp.set_expanded(False)
-        group.add(exp)
-
+    def _build_setup_group(self, body):
         pg = Adw.PreferencesGroup()
         pg.set_title("PostInstall")
         pg.set_description("Выполните после установки DaVinci Resolve")
-        exp.add_row(pg)
+        body.append(pg)
         r = Adw.ActionRow()
         r.set_title("Удалить конфликтующие библиотеки")
         r.set_subtitle("libglib/libgio/libgmodule из /opt/resolve/libs")
@@ -137,7 +129,7 @@ class DaVinciPage(Gtk.Box):
         ag = Adw.PreferencesGroup()
         ag.set_title("AMD Radeon")
         ag.set_description("Пакеты для работы с видеокартами AMD")
-        exp.add_row(ag)
+        body.append(ag)
         r2 = Adw.ActionRow()
         r2.set_title("Поддержка AMD ROCm")
         r2.set_subtitle("libGLU  ffmpeg  rocm-opencl-runtime  hip-runtime-amd  clinfo")
@@ -161,7 +153,7 @@ class DaVinciPage(Gtk.Box):
 
         acg = Adw.PreferencesGroup()
         acg.set_title("AAC Audio кодек")
-        exp.add_row(acg)
+        body.append(acg)
         r3 = Adw.ActionRow()
         r3.set_title("FFmpeg AAC Encoder Plugin")
         r3.set_subtitle("Плагин для экспорта AAC аудио")
@@ -179,7 +171,7 @@ class DaVinciPage(Gtk.Box):
 
         flg = Adw.PreferencesGroup()
         flg.set_title("Fairlight Audio")
-        exp.add_row(flg)
+        body.append(flg)
         r4 = Adw.ActionRow()
         r4.set_title("Включить Fairlight")
         r4.set_subtitle("alsa-plugins-pulse + /etc/asound.conf → pcm.!default pulse")

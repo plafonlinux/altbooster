@@ -159,7 +159,7 @@ def is_fairlight_installed() -> bool:
         if not os.path.exists(asound):
             return False
         with open(asound) as f:
-            return "pcm.!default pulse" in f.read()
+            return "type pulse" in f.read()
     except (subprocess.TimeoutExpired, OSError):
         return False
 
