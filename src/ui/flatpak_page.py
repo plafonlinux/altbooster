@@ -31,6 +31,27 @@ class FlatpakApp:
     icon_path: str | None = field(default=None)
 
 
+_FLATHUB_MIRRORS = [
+    ("Официальный",       "dl.flathub.org",       "https://dl.flathub.org/repo/"),
+    ("USTC — Китай",      "mirrors.ustc.edu.cn",  "https://mirrors.ustc.edu.cn/flathub"),
+    ("SJTU — Китай",      "mirror.sjtu.edu.cn",   "https://mirror.sjtu.edu.cn/flathub"),
+    ("Seoul — Ю. Корея",  "sel.flathub.org",      "https://sel.flathub.org/repo/"),
+]
+
+def _get_flathub_url() -> str | None:
+    try:
+        r = subprocess.run(
+            ["flatpak", "remotes", "--columns=name,url"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in r.stdout.splitlines():
+            parts = line.split()
+            if parts and parts[0].strip() == "flathub" and len(parts) > 1:
+                return parts[1].strip()
+    except Exception:
+        pass
+    return None
+
 def _is_flatpak_available() -> bool:
     return shutil.which("flatpak") is not None
 
@@ -1132,6 +1153,52 @@ class FlatpakPage(Gtk.Box):
         group = Adw.PreferencesGroup()
         self._body.append(group)
 
+        mirror_row = Adw.ComboRow()
+        mirror_row.set_title("Зеркало Flathub")
+        mirror_row.set_subtitle("Источник загрузки приложений")
+        mirror_row.set_model(Gtk.StringList.new([n for n, _, _ in _FLATHUB_MIRRORS]))
+
+        sel_factory = Gtk.SignalListItemFactory()
+        def _sel_setup(_f, item):
+            lbl = Gtk.Label()
+            lbl.set_halign(Gtk.Align.START)
+            item.set_child(lbl)
+        def _sel_bind(_f, item):
+            pos = item.get_position()
+            if pos < len(_FLATHUB_MIRRORS):
+                item.get_child().set_label(_FLATHUB_MIRRORS[pos][0])
+        sel_factory.connect("setup", _sel_setup)
+        sel_factory.connect("bind", _sel_bind)
+        mirror_row.set_factory(sel_factory)
+
+        list_factory = Gtk.SignalListItemFactory()
+        def _list_setup(_f, item):
+            lbl = Gtk.Label()
+            lbl.set_halign(Gtk.Align.START)
+            lbl.set_margin_start(6)
+            lbl.set_margin_end(12)
+            lbl.set_margin_top(6)
+            lbl.set_margin_bottom(6)
+            item.set_child(lbl)
+        def _list_bind(_f, item):
+            pos = item.get_position()
+            if pos < len(_FLATHUB_MIRRORS):
+                name, domain, _ = _FLATHUB_MIRRORS[pos]
+                item.get_child().set_label(f"{name}  ({domain})")
+        list_factory.connect("setup", _list_setup)
+        list_factory.connect("bind", _list_bind)
+        mirror_row.set_list_factory(list_factory)
+
+        current_url = (_get_flathub_url() or "").rstrip("/")
+        selected = 0
+        for i, (_, _, url) in enumerate(_FLATHUB_MIRRORS):
+            if current_url == url.rstrip("/"):
+                selected = i
+                break
+        mirror_row.set_selected(selected)
+        mirror_row.connect("notify::selected", self._on_mirror_selected)
+        group.add(mirror_row)
+
         expander = Adw.ExpanderRow()
         expander.set_title("Обслуживание Flatpak")
         expander.set_expanded(False)
@@ -1198,6 +1265,27 @@ class FlatpakPage(Gtk.Box):
             lambda ok: (
                 row.set_undo_done(ok),
                 self._log("✔  Flatpak удалён!\n" if ok else "✘  Ошибка\n"),
+                win.stop_progress(ok) if hasattr(win, "stop_progress") else None,
+            ),
+        )
+
+    def _on_mirror_selected(self, row, _):
+        idx = row.get_selected()
+        if idx == Gtk.INVALID_LIST_POSITION or idx >= len(_FLATHUB_MIRRORS):
+            return
+        name, _, url = _FLATHUB_MIRRORS[idx]
+        current = _get_flathub_url() or ""
+        if current.rstrip("/") == url.rstrip("/"):
+            return
+        win = self.get_root()
+        self._log(f"\n▶  Смена зеркала Flathub: {name}...\n")
+        if hasattr(win, "start_progress"):
+            win.start_progress("Смена зеркала Flathub...")
+        backend.run_privileged(
+            ["flatpak", "remote-modify", "--system", "flathub", f"--url={url}"],
+            self._log,
+            lambda ok: (
+                self._log("✔  Зеркало изменено!\n" if ok else "✘  Ошибка\n"),
                 win.stop_progress(ok) if hasattr(win, "stop_progress") else None,
             ),
         )
