@@ -30,7 +30,7 @@ class InstallPreviewDialog(Adw.Window):
         super().__init__()
         self.set_transient_for(parent)
         self.set_modal(True)
-        self.set_default_size(580, 520)
+        self.set_default_size(580, 750)
         self.set_resizable(True)
         self.set_title(f"Установка {app_name}")
 

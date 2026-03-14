@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -23,6 +24,8 @@ _sudo_nopass: bool = False
 
 _current_proc: subprocess.Popen | None = None
 _current_proc_lock = threading.Lock()
+
+_stdbuf: list[str] = ["stdbuf", "-oL"] if shutil.which("stdbuf") else []
 
 
 def set_sudo_password(pw: str) -> None:
@@ -236,7 +239,7 @@ def _wrap_epm_auto_install(cmd: Sequence[str]) -> Sequence[str]:
         "echo -e '▶ EPM не найден. Выполняется установка eepm...\\n'; "
         "export DEBIAN_FRONTEND=noninteractive; "
         "apt-get install -y eepm; "
-        "fi && \"$@\""
+        "fi && stdbuf -oL \"$@\""
     )
     return ["bash", "-c", script, "--", *cmd]
 
@@ -316,9 +319,10 @@ def run_privileged(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None
         if check_lock:
             _wait_for_apt_lock(on_line)
 
+        _cmd = [*_stdbuf, *cmd]
         if _sudo_nopass:
             proc = subprocess.Popen(
-                ["sudo", "-n", *cmd],
+                ["sudo", "-n", *_cmd],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -327,7 +331,7 @@ def run_privileged(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None
             )
         else:
             proc = subprocess.Popen(
-                ["sudo", "-S", *cmd],
+                ["sudo", "-S", *_cmd],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
