@@ -9,6 +9,7 @@ from system.privileges import (
     run_privileged_sync,
     run_epm,
     run_epm_sync,
+    cancel_current,
     OnLine,
     OnDone,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "run_privileged_sync",
     "run_epm",
     "run_epm_sync",
+    "cancel_current",
     "OnLine",
     "OnDone",
     "run_gsettings",

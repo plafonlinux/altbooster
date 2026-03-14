@@ -21,6 +21,9 @@ _sudo_password: str | None = None
 _sudo_lock = threading.Lock()
 _sudo_nopass: bool = False
 
+_current_proc: subprocess.Popen | None = None
+_current_proc_lock = threading.Lock()
+
 
 def set_sudo_password(pw: str) -> None:
     global _sudo_password
@@ -63,6 +66,25 @@ def _get_pkexec_shell() -> subprocess.Popen | None:
 def set_pkexec_mode(enabled: bool) -> None:
     global _use_pkexec
     _use_pkexec = enabled
+
+def cancel_current() -> None:
+    global _current_proc
+    if _use_pkexec:
+        with _pkexec_shell_lock:
+            proc = _pkexec_shell_proc
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        return
+    with _current_proc_lock:
+        proc = _current_proc
+    if proc and proc.poll() is None:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
 
 def start_pkexec_shell() -> tuple[bool, bool]:
     global _pkexec_shell_proc
@@ -281,6 +303,7 @@ def run_privileged(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None
     cmd = _wrap_epm_auto_install(cmd)
 
     def _worker() -> None:
+        global _current_proc
         password = get_sudo_password()
 
         check_lock = False
@@ -319,6 +342,9 @@ def run_privileged(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None
                     pass
                 proc.stdin.close()
 
+        with _current_proc_lock:
+            _current_proc = proc
+
         def _drain_stderr() -> None:
             if not proc.stderr:
                 return
@@ -337,6 +363,9 @@ def run_privileged(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None
 
         stderr_thread.join()
         proc.wait()
+        with _current_proc_lock:
+            if _current_proc is proc:
+                _current_proc = None
         GLib.idle_add(on_done, proc.returncode == 0)
 
     threading.Thread(target=_worker, daemon=True).start()
@@ -377,6 +406,7 @@ def run_epm(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
         return
 
     def _worker() -> None:
+        global _current_proc
         _wait_for_apt_lock(on_line)
 
         askpass_path: str | None = None
@@ -409,10 +439,15 @@ def run_epm(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
                     env=env,
                 )
 
+            with _current_proc_lock:
+                _current_proc = proc
             if proc.stdout:
                 for line in proc.stdout:
                     GLib.idle_add(on_line, line)
             proc.wait()
+            with _current_proc_lock:
+                if _current_proc is proc:
+                    _current_proc = None
             GLib.idle_add(on_done, proc.returncode == 0)
         finally:
             if askpass_path:

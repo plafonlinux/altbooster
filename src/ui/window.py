@@ -1399,20 +1399,20 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
 
     def start_progress(self, message: str, on_cancel=None):
-        if on_cancel is not None:
-            self._on_cancel_cb = on_cancel
+        _cb = on_cancel if on_cancel is not None else backend.cancel_current
 
         def _do():
             if on_cancel is not None:
                 self._progress_nesting = 1
             else:
                 self._progress_nesting += 1
+            self._on_cancel_cb = _cb
             self._progress_message = message
             self._progress_start_time = time.monotonic()
             self._status_label.set_label(message)
             self._progressbar.set_fraction(0.0)
-            self._stop_btn.set_sensitive(bool(self._on_cancel_cb))
-            self._stop_btn.set_visible(bool(self._on_cancel_cb))
+            self._stop_btn.set_sensitive(True)
+            self._stop_btn.set_visible(True)
             if self._pulse_timer_id:
                 GLib.source_remove(self._pulse_timer_id)
             self._pulse_timer_id = GLib.timeout_add(100, self._pulse_progress)
