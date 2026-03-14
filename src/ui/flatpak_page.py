@@ -153,7 +153,7 @@ def _make_app_icon(icon_path: str | None) -> Gtk.Widget:
     return make_icon("package-x-generic-symbolic")
 
 
-def _backup_flatpak(backup_dir: Path, what: dict, log_fn, done_fn, password: str | None = None) -> None:
+def _backup_flatpak(backup_dir: Path, what: dict, log_fn, done_fn, password: str | None = None, selected_apps: list | None = None) -> None:
     def _worker():
         ok = True
         tmp_meta = None
@@ -219,8 +219,14 @@ def _backup_flatpak(backup_dir: Path, what: dict, log_fn, done_fn, password: str
                     "-C", str(tmp_meta.parent), tmp_meta.name,
                 ]
                 if what.get("data") and var_app.exists():
-                    GLib.idle_add(log_fn, "   Включение ~/.var/app/ (полный бэкап)...\n")
-                    tar_args += ["-C", str(var_app.parent), "app"]
+                    if selected_apps is None:
+                        GLib.idle_add(log_fn, "   Включение ~/.var/app/ (все папки)...\n")
+                        tar_args += ["-C", str(var_app.parent), "app"]
+                    else:
+                        GLib.idle_add(log_fn, f"   Включение {len(selected_apps)} папок из ~/.var/app/...\n")
+                        for app_id in selected_apps:
+                            if (var_app / app_id).exists():
+                                tar_args += ["-C", str(var_app), app_id]
 
                 r_fd, w_fd = os.pipe()
                 os.write(w_fd, password.encode())
@@ -250,17 +256,24 @@ def _backup_flatpak(backup_dir: Path, what: dict, log_fn, done_fn, password: str
                 if var_app.exists():
                     dest_dir = backup_dir / "var-app"
                     dest_dir.mkdir(parents=True, exist_ok=True)
-                    r = subprocess.run(
-                        ["rsync", "-a", "--delete",
-                         "--exclude=cache/", "--exclude=Cache/", "--exclude=.cache/",
-                         str(var_app) + "/", str(dest_dir) + "/"],
-                        capture_output=True, text=True, encoding="utf-8",
-                    )
-                    if r.returncode == 0:
-                        GLib.idle_add(log_fn, "   Сохранено: var-app/\n")
-                    else:
-                        GLib.idle_add(log_fn, f"   ⚠  Ошибка rsync: {r.stderr[:200]}\n")
-                        ok = False
+                    apps_to_sync = selected_apps if selected_apps is not None else [d.name for d in var_app.iterdir() if d.is_dir()]
+                    for app_id in apps_to_sync:
+                        src = var_app / app_id
+                        if not src.exists():
+                            continue
+                        dst = dest_dir / app_id
+                        dst.mkdir(parents=True, exist_ok=True)
+                        r = subprocess.run(
+                            ["rsync", "-a", "--delete", "--no-owner", "--no-group",
+                             "--exclude=cache/", "--exclude=Cache/", "--exclude=.cache/",
+                             str(src) + "/", str(dst) + "/"],
+                            capture_output=True, text=True, encoding="utf-8",
+                        )
+                        if r.returncode != 0:
+                            GLib.idle_add(log_fn, f"   ⚠  Ошибка rsync {app_id}: {r.stderr[:100]}\n")
+                            ok = False
+                    if ok:
+                        GLib.idle_add(log_fn, f"   Сохранено: var-app/ ({len(apps_to_sync)} папок)\n")
                 else:
                     GLib.idle_add(log_fn, "   ~/.var/app/ не найден, пропуск\n")
 
@@ -353,7 +366,7 @@ def _restore_flatpak(backup_dir: Path, log_fn, done_fn) -> None:
                 var_app_dest = Path.home() / ".var" / "app"
                 var_app_dest.mkdir(parents=True, exist_ok=True)
                 r = subprocess.run(
-                    ["rsync", "-a",
+                    ["rsync", "-a", "--no-owner", "--no-group",
                      str(data_src) + "/", str(var_app_dest) + "/"],
                     capture_output=True, text=True, encoding="utf-8",
                 )
@@ -756,6 +769,75 @@ class FlatpakPage(Gtk.Box):
             backend.run_privileged(cmd, self._log, _done)
 
 
+    def _open_var_app_picker(self, current_selection: list | None, on_apply):
+        var_app = Path.home() / ".var" / "app"
+        if not var_app.exists():
+            on_apply(None)
+            return
+        all_apps = sorted([d.name for d in var_app.iterdir() if d.is_dir()])
+        if not all_apps:
+            on_apply(None)
+            return
+
+        dialog = Adw.AlertDialog(
+            heading="Данные приложений",
+            body="Выберите папки из ~/.var/app/ для включения в бэкап:",
+        )
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_min_content_width(560)
+        scroll.set_min_content_height(260)
+        scroll.set_max_content_height(900)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        grid = Gtk.Grid()
+        grid.set_column_spacing(12)
+        grid.set_row_spacing(2)
+        grid.set_margin_top(4)
+        grid.set_margin_bottom(4)
+        grid.set_margin_start(4)
+        grid.set_margin_end(4)
+
+        checkboxes: dict[str, Gtk.CheckButton] = {}
+        for i, app_id in enumerate(all_apps):
+            cb = Gtk.CheckButton(label=app_id)
+            cb.set_active(current_selection is None or app_id in current_selection)
+            cb.set_hexpand(True)
+            grid.attach(cb, i % 2, i // 2, 1, 1)
+            checkboxes[app_id] = cb
+
+        scroll.set_child(grid)
+
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_row.set_margin_bottom(6)
+        btn_all = Gtk.Button(label="Выбрать все")
+        btn_all.add_css_class("flat")
+        btn_all.connect("clicked", lambda _: [cb.set_active(True) for cb in checkboxes.values()])
+        btn_none = Gtk.Button(label="Снять все")
+        btn_none.add_css_class("flat")
+        btn_none.connect("clicked", lambda _: [cb.set_active(False) for cb in checkboxes.values()])
+        btn_row.append(btn_all)
+        btn_row.append(btn_none)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        outer.set_margin_top(8)
+        outer.append(btn_row)
+        outer.append(scroll)
+
+        dialog.set_extra_child(outer)
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("apply", "Применить")
+        dialog.set_response_appearance("apply", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("apply")
+
+        def _on_response(d, r):
+            if r == "apply":
+                selected = [app_id for app_id, cb in checkboxes.items() if cb.get_active()]
+                on_apply(None if len(selected) == len(all_apps) else selected)
+
+        dialog.connect("response", _on_response)
+        dialog.present(self.get_root())
+
     def _on_export_clicked(self, _btn):
         dialog = Adw.AlertDialog(
             heading="Экспорт данных Flatpak",
@@ -772,8 +854,20 @@ class FlatpakPage(Gtk.Box):
         cb_remotes.set_active(True)
         cb_overrides = Gtk.CheckButton(label="Переопределения прав (overrides)")
         cb_overrides.set_active(True)
+        selected_apps = [None]  # None = все, list = конкретные папки
+
         cb_data = Gtk.CheckButton(label="Данные приложений (~/.var/app/, без cache)")
         cb_data.set_active(True)
+        cb_data.set_hexpand(True)
+
+        pick_apps_btn = Gtk.Button(label="Выбрать...")
+        pick_apps_btn.add_css_class("suggested-action")
+        pick_apps_btn.add_css_class("pill")
+        pick_apps_btn.set_valign(Gtk.Align.CENTER)
+
+        data_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        data_row.append(cb_data)
+        data_row.append(pick_apps_btn)
 
         data_warn = Gtk.Label(label="⚠ Может занять несколько минут в зависимости от объёма данных")
         data_warn.add_css_class("dim-label")
@@ -781,10 +875,29 @@ class FlatpakPage(Gtk.Box):
         data_warn.set_margin_start(24)
         data_warn.set_halign(Gtk.Align.START)
         data_warn.set_wrap(True)
-        cb_data.connect("toggled", lambda btn: data_warn.set_visible(btn.get_active()))
 
-        for cb in (cb_apps, cb_remotes, cb_overrides, cb_data):
+        def _update_pick_btn_label():
+            sel = selected_apps[0]
+            if sel is None:
+                pick_apps_btn.set_label("Выбрать...")
+            else:
+                pick_apps_btn.set_label(f"Выбрать... ({len(sel)} папок)")
+
+        def _on_pick_apps(_btn):
+            self._open_var_app_picker(selected_apps[0], lambda s: (
+                selected_apps.__setitem__(0, s),
+                _update_pick_btn_label(),
+            ))
+
+        cb_data.connect("toggled", lambda btn: (
+            data_warn.set_visible(btn.get_active()),
+            pick_apps_btn.set_sensitive(btn.get_active()),
+        ))
+        pick_apps_btn.connect("clicked", _on_pick_apps)
+
+        for cb in (cb_apps, cb_remotes, cb_overrides):
             vbox.append(cb)
+        vbox.append(data_row)
         vbox.append(data_warn)
 
         sep = Gtk.Separator()
@@ -842,12 +955,12 @@ class FlatpakPage(Gtk.Box):
                     err.present(self.get_root())
                     return
                 password = pw
-            self._pick_export_folder(what, password)
+            self._pick_export_folder(what, password, selected_apps[0] if what.get("data") else None)
 
         dialog.connect("response", _on_response)
         dialog.present(self.get_root())
 
-    def _pick_export_folder(self, what: dict, password: str | None = None):
+    def _pick_export_folder(self, what: dict, password: str | None = None, selected_apps: list | None = None):
         fc = Gtk.FileChooserNative(
             title="Выберите папку для бэкапа",
             action=Gtk.FileChooserAction.SELECT_FOLDER,
@@ -859,13 +972,13 @@ class FlatpakPage(Gtk.Box):
         def _on_response(d, r):
             if r == Gtk.ResponseType.ACCEPT:
                 folder = Path(d.get_file().get_path())
-                self._do_export(folder, what, password)
+                self._do_export(folder, what, password, selected_apps)
             d.unref()
 
         fc.connect("response", _on_response)
         fc.show()
 
-    def _do_export(self, folder: Path, what: dict, password: str | None = None):
+    def _do_export(self, folder: Path, what: dict, password: str | None = None, selected_apps: list | None = None):
         win = self.get_root()
         self._log(f"\n▶  Экспорт в {folder}...\n")
         if hasattr(win, "start_progress"):
@@ -877,7 +990,7 @@ class FlatpakPage(Gtk.Box):
             if hasattr(win, "stop_progress"):
                 GLib.idle_add(win.stop_progress, ok)
 
-        _backup_flatpak(folder, what, self._log, _done, password)
+        _backup_flatpak(folder, what, self._log, _done, password, selected_apps)
 
     def _on_restore_clicked(self, _btn):
         fc = Gtk.FileChooserNative(
