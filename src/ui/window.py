@@ -73,6 +73,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         self._pulse_timer_id = None
         self._reset_status_timer_id = None
+        self._elapsed_timer_id = None
+        self._progress_start_time = 0.0
+        self._progress_message = ""
         self._log_queue = queue.SimpleQueue()
         self._log_widget = self._build_log_panel()
 
@@ -1404,6 +1407,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 self._progress_nesting = 1
             else:
                 self._progress_nesting += 1
+            self._progress_message = message
+            self._progress_start_time = time.monotonic()
             self._status_label.set_label(message)
             self._progressbar.set_fraction(0.0)
             self._stop_btn.set_sensitive(bool(self._on_cancel_cb))
@@ -1414,6 +1419,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             if self._reset_status_timer_id:
                 GLib.source_remove(self._reset_status_timer_id)
                 self._reset_status_timer_id = None
+            if self._elapsed_timer_id:
+                GLib.source_remove(self._elapsed_timer_id)
+            self._elapsed_timer_id = GLib.timeout_add(1000, self._update_elapsed_label)
 
         GLib.idle_add(_do)
 
@@ -1444,8 +1452,21 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._progressbar.pulse()
         return True
 
+    def _update_elapsed_label(self):
+        elapsed = int(time.monotonic() - self._progress_start_time)
+        if elapsed < 60:
+            suffix = f"{elapsed} с"
+        else:
+            m, s = divmod(elapsed, 60)
+            suffix = f"{m}:{s:02d}"
+        self._status_label.set_label(f"{self._progress_message} — {suffix}")
+        return True
+
     def stop_progress(self, success: bool = True):
         def _do():
+            if self._elapsed_timer_id:
+                GLib.source_remove(self._elapsed_timer_id)
+                self._elapsed_timer_id = None
             if self._pulse_timer_id:
                 GLib.source_remove(self._pulse_timer_id)
                 self._pulse_timer_id = None
