@@ -63,6 +63,21 @@ from system.borg import (
     get_timer_next_run,
     DEFAULT_EXCLUDES,
 )
+from system.btrfs import (
+    is_home_on_btrfs,
+    get_btrfs_mount_for_home,
+    get_snapshots_dir,
+    btrfs_snapshot_create,
+    btrfs_snapshot_list,
+    btrfs_snapshot_delete,
+    btrfs_snapshot_restore,
+    btrfs_snapshot_size,
+    write_btrfs_systemd_units,
+    enable_btrfs_timer,
+    disable_btrfs_timer,
+    is_btrfs_timer_active,
+    get_btrfs_timer_next_run,
+)
 
 __all__ = [
     "set_sudo_password",
@@ -123,4 +138,17 @@ __all__ = [
     "is_timer_active",
     "get_timer_next_run",
     "DEFAULT_EXCLUDES",
+    "is_home_on_btrfs",
+    "get_btrfs_mount_for_home",
+    "get_snapshots_dir",
+    "btrfs_snapshot_create",
+    "btrfs_snapshot_list",
+    "btrfs_snapshot_delete",
+    "btrfs_snapshot_restore",
+    "btrfs_snapshot_size",
+    "write_btrfs_systemd_units",
+    "enable_btrfs_timer",
+    "disable_btrfs_timer",
+    "is_btrfs_timer_active",
+    "get_btrfs_timer_next_run",
 ]

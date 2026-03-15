@@ -26,6 +26,119 @@ _INTERVALS = [
     (168, "Раз в неделю"),
 ]
 
+_BTRFS_INTERVALS = [
+    (1, "Каждый час"),
+    (6, "Каждые 6 часов"),
+    (24, "Ежедневно"),
+]
+
+
+class BtrfsRestoreDialog(Adw.AlertDialog):
+    def __init__(self, parent, snapshot: dict, log_fn):
+        super().__init__(
+            heading="Восстановить снимок",
+            body="Файлы из снимка будут извлечены в выбранную папку.\nСуществующие файлы в папке назначения будут перезаписаны.",
+        )
+        self._snapshot = snapshot
+        self._log = log_fn
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_top(8)
+
+        info_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        icon = make_icon("camera-photo-symbolic", 16)
+        lbl = Gtk.Label(label=snapshot.get("date_str", snapshot.get("name")))
+        lbl.add_css_class("dim-label")
+        info_row.append(icon)
+        info_row.append(lbl)
+        box.append(info_row)
+
+        sep = Gtk.Separator()
+        sep.set_margin_top(4)
+        box.append(sep)
+
+        target_label = Gtk.Label(label="Папка для восстановления:")
+        target_label.set_halign(Gtk.Align.START)
+        box.append(target_label)
+
+        path_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._target_entry = Gtk.Entry()
+        self._target_entry.set_text(str(Path.home()))
+        self._target_entry.set_hexpand(True)
+        pick_btn = Gtk.Button(label="Выбрать…")
+        pick_btn.add_css_class("flat")
+        pick_btn.connect("clicked", self._on_pick_folder)
+        path_row.append(self._target_entry)
+        path_row.append(pick_btn)
+        box.append(path_row)
+        
+        warn = Gtk.Label(label="⚠ Восстановление перезапишет файлы в папке назначения, которые есть в снимке, и удалит те, которых в снимке нет (rsync --delete).")
+        warn.get_style_context().add_class("warning")
+        warn.set_halign(Gtk.Align.START)
+        warn.set_wrap(True)
+        box.append(warn)
+
+        self.set_extra_child(box)
+        self.add_response("cancel", "Отмена")
+        self.add_response("restore", "Восстановить")
+        self.set_response_appearance("restore", Adw.ResponseAppearance.DESTRUCTIVE)
+        self.set_default_response("cancel")
+        self.connect("response", self._on_response)
+        self.set_transient_for(parent)
+
+    def _on_pick_folder(self, _btn):
+        # Folder picking logic from BorgRestoreDialog
+        try:
+            fd = Gtk.FileDialog()
+            fd.set_title("Выберите папку для восстановления")
+            fd.select_folder(self.get_root(), None, self._on_folder_selected, None)
+        except AttributeError:
+            fc = Gtk.FileChooserNative(
+                title="Выберите папку для восстановления",
+                action=Gtk.FileChooserAction.SELECT_FOLDER,
+                transient_for=self.get_root(),
+                accept_label="Выбрать",
+                cancel_label="Отмена",
+            )
+            def _resp(d, r):
+                if r == Gtk.ResponseType.ACCEPT:
+                    self._target_entry.set_text(d.get_file().get_path())
+                d.unref()
+            fc.connect("response", _resp)
+            fc.show()
+
+    def _on_folder_selected(self, dialog, result, _):
+        try:
+            folder = dialog.select_folder_finish(result)
+            if folder:
+                self._target_entry.set_text(folder.get_path())
+        except GLib.Error:
+            pass
+
+    def _on_response(self, _d, response):
+        if response != "restore":
+            return
+        target_dir = self._target_entry.get_text().strip()
+        if not target_dir:
+            return
+            
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress("Восстановление снимка...")
+        
+        self._log(f"\n▶  Восстановление снимка {self._snapshot['name']} в {target_dir}...\n")
+
+        def on_done(ok):
+            GLib.idle_add(self._finish, ok, win)
+
+        backend.btrfs_snapshot_restore(self._snapshot["path"], target_dir, self._log, on_done)
+
+    def _finish(self, ok, win):
+        msg = "✔  Восстановление завершено!\n" if ok else "✘  Ошибка при восстановлении\n"
+        self._log(msg)
+        if hasattr(win, "stop_progress"):
+            win.stop_progress(ok)
+
 
 class BorgArchiveBrowserDialog(Adw.Window):
 
@@ -403,6 +516,8 @@ class BorgRestoreDialog(Adw.AlertDialog):
 
 
 def _fmt_size(size: int) -> str:
+    if not isinstance(size, (int, float)) or size < 0:
+        return ""
     for unit in ("Б", "КБ", "МБ", "ГБ", "ТБ"):
         if size < 1024:
             return f"{size:.0f} {unit}"
@@ -1260,6 +1375,10 @@ class BorgPage(Gtk.Box):
         self._build_info_page()
         self._build_settings_page()
         self._build_schedule_page()
+        
+        if backend.is_home_on_btrfs():
+            btrfs_tab, self._btrfs_body = self._build_btrfs_tab()
+            self._stack.add_titled_with_icon(btrfs_tab, "btrfs", "Снимки", "camera-photo-symbolic")
 
         self._update_sections_visibility()
         threading.Thread(target=self._refresh_status_thread, daemon=True).start()
@@ -1270,12 +1389,12 @@ class BorgPage(Gtk.Box):
         self._build_repo_group()
         self._build_archives_group()
         self._build_actions_group()
-        self._stack.add_titled_with_icon(scroll, "info", "Хранилище", "drive-harddisk-symbolic")
+        self._stack.add_titled_with_icon(scroll, "info", "Borg", "drive-harddisk-symbolic")
 
     def _build_settings_page(self):
         scroll, self._body = make_scrolled_page()
         self._build_sources_group()
-        self._stack.add_titled_with_icon(scroll, "settings", "Настройки", "preferences-system-symbolic")
+        self._stack.add_titled_with_icon(scroll, "settings", "Источники", "preferences-system-symbolic")
 
     def _build_schedule_page(self):
         scroll, self._body = make_scrolled_page()
@@ -1817,6 +1936,60 @@ class BorgPage(Gtk.Box):
         if initialized:
             self._update_sections_visibility()
             threading.Thread(target=self._load_archives_thread, daemon=True).start()
+    
+    def _btrfs_refresh_list(self):
+        self._btrfs_snapshots_placeholder.set_visible(True)
+        backend.btrfs_snapshot_list(self._btrfs_populate_snapshots)
+
+    def _btrfs_populate_snapshots(self, snapshots: list[dict]):
+        self._btrfs_snapshots_placeholder.set_visible(False)
+        for row in self._btrfs_snapshot_rows:
+            self._btrfs_snapshots_group.remove(row)
+        self._btrfs_snapshot_rows.clear()
+
+        if not snapshots:
+            placeholder = Adw.ActionRow(title="Снимков не найдено")
+            self._btrfs_snapshots_group.add(placeholder)
+            self._btrfs_snapshot_rows.append(placeholder)
+            return
+
+        for snap in snapshots:
+            row = self._btrfs_build_snapshot_row(snap)
+            self._btrfs_snapshots_group.add(row)
+            self._btrfs_snapshot_rows.append(row)
+            
+    def _btrfs_build_snapshot_row(self, snap: dict) -> Adw.ActionRow:
+        row = Adw.ActionRow(title=snap["date_str"], subtitle=snap["name"])
+        
+        size_label = Gtk.Label(label="...")
+        size_label.add_css_class("dim-label")
+        size_label.set_valign(Gtk.Align.CENTER)
+        
+        def on_size_done(size: int | None):
+            if size is not None:
+                size_label.set_text(_fmt_size(size))
+            else:
+                size_label.set_text("")
+        
+        backend.btrfs_snapshot_size(snap["path"], on_size_done)
+
+        btn_restore = Gtk.Button(icon_name="media-seek-backward-symbolic")
+        btn_restore.set_tooltip_text("Восстановить")
+        btn_restore.add_css_class("flat")
+        btn_restore.set_valign(Gtk.Align.CENTER)
+        btn_restore.connect("clicked", lambda _, s=snap: self._btrfs_on_restore(s))
+        
+        btn_delete = Gtk.Button(icon_name="user-trash-symbolic")
+        btn_delete.set_tooltip_text("Удалить")
+        btn_delete.add_css_class("flat")
+        btn_delete.add_css_class("destructive-action")
+        btn_delete.set_valign(Gtk.Align.CENTER)
+        btn_delete.connect("clicked", lambda _, s=snap: self._btrfs_on_delete(s))
+        
+        row.add_suffix(size_label)
+        row.add_suffix(btn_restore)
+        row.add_suffix(btn_delete)
+        return row
 
     def _refresh_archives(self):
         self._archives_placeholder.set_title("Загрузка архивов...")
@@ -1998,461 +2171,502 @@ class BorgPage(Gtk.Box):
         backend.run_epm(
             ["epm", "install", "-y", "borg"],
             self._log,
-            self._on_install_done,
+            lambda ok: (
+                self._log("✔ Borg установлен\n" if ok else "✘ Ошибка установки\n"),
+                self._btn_install.set_sensitive(True),
+                hasattr(win, "stop_progress") and win.stop_progress(ok),
+                self._refresh_status_thread(),
+            )
         )
 
-    def _on_install_done(self, ok):
-        win = self.get_root()
-        if ok:
-            self._log("✔  borg установлен\n")
-        else:
-            self._log("✘  Ошибка установки\n")
-            self._btn_install.set_sensitive(True)
-        if hasattr(win, "stop_progress"):
-            GLib.idle_add(win.stop_progress, ok)
-        threading.Thread(target=self._refresh_status_thread, daemon=True).start()
-
-    def _on_init_repo(self, _btn):
-        self._save_repo_settings()
-        repo_path = config.state_get("borg_repo_path", "") or ""
+    def _on_init_repo(self, _):
+        repo_path = self._row_repo_path.get_text().strip()
         if not repo_path:
             return
-        if backend.is_repo_initialized(repo_path):
-            self._log(f"\nℹ  Хранилище уже существует: {repo_path}\n")
-            self._update_sections_visibility()
-            threading.Thread(target=self._refresh_status_thread, daemon=True).start()
-            return
+        self._save_repo_settings()
         win = self.get_root()
         if hasattr(win, "start_progress"):
             win.start_progress("Инициализация хранилища...")
-        self._log(f"\n▶  Инициализация хранилища: {repo_path}...\n")
-        self._btn_init_repo.set_sensitive(False)
-        backend.borg_init(repo_path, self._log, self._on_init_done)
-
-    def _on_init_done(self, ok):
-        win = self.get_root()
-        self._btn_init_repo.set_sensitive(True)
-        if ok:
-            self._log("✔  Хранилище инициализировано!\n")
-            self._log("⚠  Сохраните пароль шифрования в надёжном месте — без него восстановление невозможно.\n")
-            self._update_sections_visibility()
-        else:
-            self._log("✘  Ошибка инициализации\n")
-        if hasattr(win, "stop_progress"):
-            GLib.idle_add(win.stop_progress, ok)
-        threading.Thread(target=self._refresh_status_thread, daemon=True).start()
-
-    def _on_add_custom_path(self, entry):
-        path = entry.get_text().strip()
-        if not path:
-            return
-        paths = list(config.state_get("borg_custom_paths", []))
-        if path not in paths:
-            paths.append(path)
-            config.state_set("borg_custom_paths", paths)
-            self._add_custom_path_row(path)
-        entry.set_text("")
-
-    def _on_pick_custom_path(self, _btn):
-        dialog = Gtk.FileDialog()
-        dialog.set_title("Выбрать папку")
-        dialog.set_modal(True)
-        dialog.select_folder(self.get_root(), None, self._on_custom_path_picked)
-
-    def _on_custom_path_picked(self, dialog, result):
-        try:
-            folder = dialog.select_folder_finish(result)
-            if folder:
-                path = folder.get_path()
-                self._add_entry_row.set_text(path)
-                paths = list(config.state_get("borg_custom_paths", []))
-                if path not in paths:
-                    paths.append(path)
-                    config.state_set("borg_custom_paths", paths)
-                    self._add_custom_path_row(path)
-                self._add_entry_row.set_text("")
-        except Exception:
-            pass
-
-    def _add_custom_path_row(self, path: str):
-        row = Adw.ActionRow()
-        row.set_title(path)
-        del_btn = Gtk.Button()
-        del_btn.set_icon_name("user-trash-symbolic")
-        del_btn.add_css_class("destructive-action")
-        del_btn.add_css_class("flat")
-        del_btn.set_valign(Gtk.Align.CENTER)
-        del_btn.connect("clicked", lambda _, p=path, r=row: self._remove_custom_path(p, r))
-        row.add_suffix(del_btn)
-        self._grp_custom.add(row)
-
-    def _remove_custom_path(self, path: str, row):
-        paths = [p for p in config.state_get("borg_custom_paths", []) if p != path]
-        config.state_set("borg_custom_paths", paths)
-        self._grp_custom.remove(row)
-
-    def _update_config_subtitle(self):
-        dirs = config.state_get("borg_src_config_dirs", None)
-        if not dirs:
-            self._row_config.set_subtitle("~/.config — вся папка")
-        else:
-            shown = ", ".join(f"~/.config/{d}" for d in dirs[:3])
-            rest = len(dirs) - 3
-            subtitle = shown + (f" (+{rest} ещё)" if rest > 0 else "")
-            self._row_config.set_subtitle(subtitle)
-
-    def _on_pick_config_dirs(self, _btn):
-        config_path = Path.home() / ".config"
-        try:
-            all_dirs = sorted(d.name for d in config_path.iterdir() if d.is_dir())
-        except Exception:
-            all_dirs = []
-        selected = config.state_get("borg_src_config_dirs", None) or []
-        win = self.get_root()
-        FolderPickerDialog(win, "Папки конфигурации", all_dirs, selected, self._apply_config_dirs).present()
-
-    def _apply_config_dirs(self, selected: list[str]):
-        config.state_set("borg_src_config_dirs", selected)
-        self._update_config_subtitle()
-
-    def _update_flatpak_data_subtitle(self):
-        if not self._sw_flatpak_data.get_active():
-            self._row_flatpak_data.set_subtitle("выключено")
-            return
-        dirs = config.state_get("borg_src_flatpak_data_dirs", None)
-        if dirs is None:
-            self._row_flatpak_data.set_subtitle("Все приложения")
-        elif not dirs:
-            self._row_flatpak_data.set_subtitle("нет выбранных приложений")
-        else:
-            shown = ", ".join(d.rsplit(".", 1)[-1] for d in dirs[:4])
-            rest = len(dirs) - 4
-            self._row_flatpak_data.set_subtitle(shown + (f" (+{rest} ещё)" if rest > 0 else ""))
-
-    def _on_flatpak_data_toggled(self, sw, _):
-        active = sw.get_active()
-        config.state_set("borg_src_flatpak_data", active)
-        self._update_flatpak_data_subtitle()
-
-    def _on_pick_flatpak_data_dirs(self, _btn):
-        var_app = Path.home() / ".var" / "app"
-        try:
-            all_dirs = sorted(d.name for d in var_app.iterdir() if d.is_dir()) if var_app.exists() else []
-        except Exception:
-            all_dirs = []
-        saved = config.state_get("borg_src_flatpak_data_dirs", None)
-        selected = all_dirs if saved is None else saved
-        icons = _build_icon_index()
-        FlatpakDataPickerDialog(self.get_root(), all_dirs, selected, self._apply_flatpak_data_dirs, icons).present()
-
-    def _apply_flatpak_data_dirs(self, selected: list[str]):
-        config.state_set("borg_src_flatpak_data_dirs", selected)
-        self._update_flatpak_data_subtitle()
-
-    def _update_home_subtitle(self):
-        if not self._switch_home.get_active():
-            self._row_home.set_subtitle("выключено")
-            return
-        dirs = config.state_get("borg_src_home_dirs", [])
-        if not dirs:
-            self._row_home.set_subtitle("нет выбранных папок")
-        else:
-            shown = ", ".join(dirs[:3])
-            rest = len(dirs) - 3
-            self._row_home.set_subtitle(shown + (f" (+{rest} ещё)" if rest > 0 else ""))
-
-    def _on_home_toggled(self, sw, _):
-        active = sw.get_active()
-        config.state_set("borg_src_home", active)
-        if active:
-            dirs = config.state_get("borg_src_home_dirs", None)
-            if not dirs:
-                self._on_pick_home_dirs(None)
-                return
-        self._update_home_subtitle()
-
-    def _on_pick_home_dirs(self, _btn):
-        home = Path.home()
-        try:
-            all_dirs = sorted(d.name for d in home.iterdir() if d.is_dir() and not d.name.startswith("."))
-        except Exception:
-            all_dirs = []
-        saved = config.state_get("borg_src_home_dirs", None)
-        if saved is None:
-            selected = [d for d in _XDG_HOME_DEFAULTS if (home / d).exists()]
-        else:
-            selected = saved
-        win = self.get_root()
-        HomeDirPickerDialog(win, all_dirs, selected, self._apply_home_dirs).present()
-
-    def _apply_home_dirs(self, selected: list[str]):
-        config.state_set("borg_src_home_dirs", selected)
-        self._update_home_subtitle()
-
-    def _get_backup_paths(self) -> list[str]:
-        home = Path.home()
-        paths = [str(config.CONFIG_DIR)]
-        if self._sw_flatpak_data.get_active():
-            var_app = home / ".var" / "app"
-            if var_app.exists():
-                selected_dirs = config.state_get("borg_src_flatpak_data_dirs", None)
-                if selected_dirs is None:
-                    paths.append(str(var_app))
-                else:
-                    for d in selected_dirs:
-                        p = var_app / d
-                        if p.exists() and str(p) not in paths:
-                            paths.append(str(p))
-        config_dirs = config.state_get("borg_src_config_dirs", None)
-        if config_dirs:
-            for d in config_dirs:
-                p = home / ".config" / d
-                if p.exists() and str(p) not in paths:
-                    paths.append(str(p))
-        else:
-            p = str(home / ".config")
-            if p not in paths:
-                paths.append(p)
-        if self._switch_home.get_active():
-            for d in config.state_get("borg_src_home_dirs", []):
-                p = home / d
-                if p.exists() and str(p) not in paths:
-                    paths.append(str(p))
-        for p in config.state_get("borg_custom_paths", []):
-            if p not in paths:
-                paths.append(p)
-        return paths
-
-    def _get_backup_excludes(self) -> list[str]:
-        return list(backend.DEFAULT_EXCLUDES)
-
-    def _on_create_archive(self, _btn):
-        self._save_repo_settings()
-        repo_path = config.state_get("borg_repo_path", "") or ""
-        if not repo_path:
-            return
-
-        opts = {
-            "flatpak_apps":       self._sw_flatpak_apps.get_active(),
-            "flatpak_apps_source": self._dd_flatpak_apps_src.get_selected(),
-            "flatpak_remotes":    self._sw_flatpak_remotes.get_active(),
-            "flatpak_data":       self._sw_flatpak_data.get_active(),
-            "flatpak_data_filter": config.state_get("borg_src_flatpak_data_dirs", None) if self._sw_flatpak_data.get_active() else None,
-            "extensions":         self._sw_extensions.get_active(),
-            "home_dirs":          config.state_get("borg_src_home_dirs", []) if self._switch_home.get_active() else [],
-            "custom_paths":       config.state_get("borg_custom_paths", []),
-            "paths":              self._get_backup_paths(),
-        }
-
-        def _do_backup():
-            self._btn_create.set_sensitive(False)
-            win = self.get_root()
-            if hasattr(win, "start_progress"):
-                win.start_progress("Создание резервной копии...")
-            self._log("\n▶  Создание резервной копии...\n")
-
-            excludes = self._get_backup_excludes()
-
-            def _worker():
-                meta_dir = Path("/tmp/altbooster-backup-meta")
-                need_meta = False
-                apps_enabled = self._sw_flatpak_apps.get_active()
-                apps_source = self._dd_flatpak_apps_src.get_selected() if apps_enabled else None
-                if apps_enabled or self._sw_flatpak_remotes.get_active():
-                    backend.generate_flatpak_meta(meta_dir, source_mode=apps_source)
-                    need_meta = True
-                if self._sw_extensions.get_active():
-                    backend.generate_extensions_meta(meta_dir)
-                    need_meta = True
-
-                import datetime
-                hostname = socket.gethostname()
-                archive_name = f"{hostname}-{datetime.datetime.now().strftime('%Y-%m-%dT%H-%M')}"
-                paths = self._get_backup_paths()
-                if need_meta:
-                    if str(meta_dir) not in paths:
-                        paths.append(str(meta_dir))
-                GLib.idle_add(self._start_borg_create, repo_path, archive_name, paths, excludes)
-
-            threading.Thread(target=_worker, daemon=True).start()
-
-        dlg = BorgBackupSummaryDialog(self.get_root(), repo_path, opts, _do_backup)
-        dlg.present()
-
-    def _start_borg_create(self, repo_path, archive_name, paths, excludes=None):
-        backend.borg_create(
-            repo_path, archive_name, paths,
-            excludes if excludes is not None else backend.DEFAULT_EXCLUDES,
-            self._log,
-            self._on_create_done,
+        self._log(f"\n▶  Инициализация хранилища в {repo_path}...\n")
+        backend.borg_init(
+            repo_path, self._log,
+            lambda ok: (
+                self._log("✔ Готово\n" if ok else "✘ Ошибка\n"),
+                hasattr(win, "stop_progress") and win.stop_progress(ok),
+                self._refresh_status_thread() if ok else None,
+            )
         )
 
-    def _on_create_done(self, ok):
-        import datetime
-        self._btn_create.set_sensitive(True)
-        win = self.get_root()
-        if ok:
-            ts = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
-            config.state_set("borg_last_backup", ts)
-            self._log(f"✔  Резервная копия создана: {ts}\n")
-            self._row_last.set_subtitle(ts)
-            self._refresh_archives()
-        else:
-            self._log("✘  Ошибка при создании резервной копии\n")
-        if hasattr(win, "stop_progress"):
-            GLib.idle_add(win.stop_progress, ok)
+    def _get_backup_opts(self) -> dict:
+        opts = {}
+        paths = []
+        if config.state_get("borg_src_altbooster", True):
+            paths.append(str(config.CONFIG_DIR))
+        if config.state_get("borg_src_home", False):
+            opts["home_dirs"] = config.state_get("borg_home_dirs", [])
+        if config.state_get("borg_src_extensions", True):
+            opts["extensions"] = True
+        if config.state_get("borg_src_flatpak_apps", True):
+            opts["flatpak_apps"] = True
+            opts["flatpak_apps_source"] = config.state_get("borg_src_flatpak_apps_source", 0)
+        if config.state_get("borg_src_flatpak_remotes", True):
+            opts["flatpak_remotes"] = True
+        if config.state_get("borg_src_flatpak_data", True):
+            opts["flatpak_data"] = True
+            opts["flatpak_data_filter"] = config.state_get("borg_flatpak_data_filter", None)
+        opts["custom_paths"] = config.state_get("borg_custom_paths", [])
+        opts["paths"] = paths
+        return opts
 
-    def _on_check(self, _btn):
-        repo_path = config.state_get("borg_repo_path", "") or ""
-        if not repo_path:
+    def _on_create_archive(self, _):
+        repo_path = config.state_get("borg_repo_path", "")
+        if not repo_path: return
+        opts = self._get_backup_opts()
+        dialog = BorgBackupSummaryDialog(self.get_root(), repo_path, opts, self._do_create_archive)
+        dialog.present()
+
+    def _do_create_archive(self):
+        repo_path = config.state_get("borg_repo_path", "")
+        if not repo_path: return
+
+        opts = self._get_backup_opts()
+        paths: list[str] = list(opts.get("paths", []))
+        home = Path.home()
+        if opts.get("home_dirs"):
+            paths.extend(str(home / d) for d in opts["home_dirs"])
+        if opts.get("custom_paths"):
+            paths.extend(opts["custom_paths"])
+
+        meta_dir = Path("/tmp/altbooster-backup-meta")
+        if opts.get("flatpak_apps") or opts.get("flatpak_remotes"):
+            backend.generate_flatpak_meta(meta_dir, opts.get("flatpak_apps_source"))
+        if opts.get("extensions"):
+            backend.generate_extensions_meta(meta_dir)
+        if meta_dir.exists():
+            paths.append(str(meta_dir))
+
+        if not paths:
+            self._log("\n⚠ Нечего сохранять. Выберите источники на вкладке 'Настройки'.\n")
             return
+
+        archive_name = socket.gethostname() + "-" + GLib.DateTime.new_now_local().format("%Y-%m-%dT%H-%M")
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress(f"Создание архива {archive_name}...")
+        self._log(f"\n▶  Создание архива {archive_name}...\n")
+
+        def _done(ok):
+            if hasattr(win, "stop_progress"):
+                win.stop_progress(ok)
+            self._log(f"{'✔  Архив создан' if ok else '✘  Ошибка при создании архива'}\n")
+            if ok:
+                config.state_set("borg_last_backup", GLib.DateTime.new_now_local().format("%d.%m.%Y %H:%M"))
+                self._refresh_status_thread()
+
+        backend.borg_create(repo_path, archive_name, paths, backend.DEFAULT_EXCLUDES, self._log, _done)
+
+
+    def _on_check(self, _):
+        repo_path = config.state_get("borg_repo_path", "")
+        if not repo_path: return
         win = self.get_root()
         if hasattr(win, "start_progress"):
             win.start_progress("Проверка хранилища...")
         self._log("\n▶  Проверка целостности хранилища...\n")
-        backend.borg_check(repo_path, self._log, self._on_check_done)
+        backend.borg_check(
+            repo_path, self._log,
+            lambda ok: (
+                self._log("✔ Проверка завершена\n" if ok else "✘ Ошибка при проверке\n"),
+                hasattr(win, "stop_progress") and win.stop_progress(ok),
+            )
+        )
 
-    def _on_prune(self, _btn):
-        repo_path = config.state_get("borg_repo_path", "") or ""
-        if not repo_path:
-            return
+    def _on_prune(self, _):
+        repo_path = config.state_get("borg_repo_path", "")
+        if not repo_path: return
         win = self.get_root()
         if hasattr(win, "start_progress"):
-            win.start_progress("Очистка устаревших архивов...")
-        self._log("\n▶  Очистка устаревших архивов...\n")
+            win.start_progress("Удаление старых архивов...")
+        self._log("\n▶  Удаление старых архивов...\n")
         backend.borg_prune(
             repo_path,
             config.state_get("borg_keep_daily", 7),
             config.state_get("borg_keep_weekly", 4),
             config.state_get("borg_keep_monthly", 6),
             self._log,
-            self._on_maintenance_done,
+            lambda ok: (
+                self._log("✔ Очистка завершена\n" if ok else "✘ Ошибка при очистке\n"),
+                hasattr(win, "stop_progress") and win.stop_progress(ok),
+                self._refresh_archives() if ok else None,
+            )
         )
 
-    def _on_compact(self, _btn):
-        repo_path = config.state_get("borg_repo_path", "") or ""
-        if not repo_path:
-            return
+    def _on_compact(self, _):
+        repo_path = config.state_get("borg_repo_path", "")
+        if not repo_path: return
         win = self.get_root()
         if hasattr(win, "start_progress"):
-            win.start_progress("Компактирование хранилища...")
-        self._log("\n▶  Компактирование хранилища...\n")
-        backend.borg_compact(repo_path, self._log, self._on_compact_done)
+            win.start_progress("Сжатие хранилища...")
+        self._log("\n▶  Сжатие хранилища...\n")
+        backend.borg_compact(
+            repo_path, self._log,
+            lambda ok: (
+                self._log("✔ Сжатие завершено\n" if ok else "✘ Ошибка при сжатии\n"),
+                hasattr(win, "stop_progress") and win.stop_progress(ok),
+            )
+        )
 
-    def _on_compact_done(self, ok):
-        win = self.get_root()
+    def _on_gen_key(self, btn):
+        btn.set_sensitive(False)
+        ok = backend.borg_generate_ssh_key()
         if ok:
-            self._log("✔  Компактирование завершено: место освобождено\n")
-        else:
-            self._log("✘  Ошибка при компактировании\n")
-        if hasattr(win, "stop_progress"):
-            GLib.idle_add(win.stop_progress, ok)
+            pubkey = backend.borg_get_pubkey()
+            if pubkey:
+                self._row_pubkey.set_subtitle(pubkey[:64] + "…")
+                self._btn_copy_key.set_sensitive(True)
+                self._btn_gen_key.set_label("Пересоздать ключ")
+        btn.set_sensitive(True)
 
-    def _on_check_done(self, ok):
-        win = self.get_root()
-        if ok:
-            self._log("✔  Проверка завершена: хранилище в порядке\n")
-        else:
-            self._log("✘  Проверка выявила ошибки — хранилище может быть повреждено\n")
-        if hasattr(win, "stop_progress"):
-            GLib.idle_add(win.stop_progress, ok)
-
-    def _on_maintenance_done(self, ok):
-        win = self.get_root()
-        msg = "✔  Готово\n" if ok else "✘  Завершено с ошибками\n"
-        self._log(msg)
-        if hasattr(win, "stop_progress"):
-            GLib.idle_add(win.stop_progress, ok)
-        if ok:
-            self._refresh_archives()
-
-    def _on_schedule_toggled(self, row, _):
-        active = row.get_active()
-        config.state_set("borg_schedule_enabled", active)
-        if active:
-            self._save_repo_settings()
-            repo_path = config.state_get("borg_repo_path", "") or ""
-            if not repo_path:
-                row.set_active(False)
-                return
-            calendar_expr = self._build_calendar_expr()
-            paths = self._get_backup_paths()
-
-            def _enable():
-                ok = backend.write_systemd_units(repo_path, paths, calendar_expr)
-                if ok:
-                    ok = backend.enable_systemd_timer()
-                next_run = backend.get_timer_next_run() if ok else None
-                GLib.idle_add(self._on_schedule_enabled, ok, next_run)
-
-            threading.Thread(target=_enable, daemon=True).start()
-        else:
-            def _disable():
-                backend.disable_systemd_timer()
-                GLib.idle_add(self._row_next.set_subtitle, "расписание не задано")
-
-            threading.Thread(target=_disable, daemon=True).start()
-
-    def _on_schedule_enabled(self, ok, next_run):
-        if ok:
-            self._log("✔  Расписание задано\n")
-            self._row_next.set_subtitle(next_run or "—")
-        else:
-            self._log("✘  Ошибка при создании расписания\n")
-            self._sw_schedule.set_active(False)
-
-    def _on_gen_key(self, _btn):
-        self._btn_gen_key.set_sensitive(False)
-        self._btn_gen_key.set_label("…")
-
-        def _worker():
-            ok = backend.borg_generate_ssh_key()
-            pubkey = backend.borg_get_pubkey() if ok else None
-            GLib.idle_add(self._on_key_ready, ok, pubkey)
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _on_key_ready(self, ok, pubkey):
-        self._btn_gen_key.set_sensitive(True)
-        if ok and pubkey:
-            self._row_pubkey.set_subtitle(pubkey[:64] + "…")
-            self._btn_copy_key.set_sensitive(True)
-            self._btn_gen_key.set_label("Пересоздать ключ")
-        else:
-            self._btn_gen_key.set_label("Создать SSH-ключ")
-
-    def _on_copy_pubkey(self, _btn):
+    def _on_copy_pubkey(self, _):
         pubkey = backend.borg_get_pubkey()
         if pubkey:
-            clipboard = Gdk.Display.get_default().get_clipboard()
-            clipboard.set(pubkey.strip())
-            self._log("✔  Публичный ключ скопирован в буфер обмена\n")
+            Gdk.Display.get_default().get_clipboard().set_text(pubkey)
 
-    def _on_detect_gd(self, _btn):
-        self._btn_detect_gd.set_sensitive(False)
-        self._btn_detect_gd.set_label("…")
-
-        def _worker():
-            path = backend.find_gvfs_google_drive()
-            GLib.idle_add(self._on_gd_detected, path)
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _on_gd_detected(self, path: str | None):
-        self._btn_detect_gd.set_sensitive(True)
-        self._btn_detect_gd.set_label("Определить")
+    def _on_detect_gd(self, btn):
+        btn.set_sensitive(False)
+        path = backend.find_gvfs_google_drive()
         if path:
-            self._row_repo_path.set_text(path)
-            self._log(f"✔  Google Drive найден: {path}\n")
-        else:
-            self._log("⚠  Google Drive не найден. Убедитесь, что аккаунт добавлен в GNOME Online Accounts\n")
+            self._row_repo_path.set_text(path + "/ALTBoosterBackup")
+        btn.set_sensitive(True)
 
     def _open_goa(self):
-        import subprocess
         try:
             subprocess.Popen(["gnome-control-center", "online-accounts"])
+        except Exception as e:
+            self._log(f"✘ Ошибка открытия настроек: {e}\n")
+
+    def _on_home_toggled(self, sw, _):
+        config.state_set("borg_src_home", sw.get_active())
+        self._update_home_subtitle()
+
+    def _update_home_subtitle(self):
+        active = config.state_get("borg_src_home", False)
+        if not active:
+            self._row_home.set_subtitle("")
+            return
+        dirs = config.state_get("borg_home_dirs", [])
+        if not dirs:
+            self._row_home.set_subtitle("Ничего не выбрано")
+        else:
+            self._row_home.set_subtitle(", ".join(dirs))
+
+    def _on_pick_home_dirs(self, _):
+        home = Path.home()
+        try:
+            all_dirs = [d.name for d in home.iterdir() if d.is_dir() and not d.name.startswith(".")]
         except Exception:
-            try:
-                subprocess.Popen(["gio", "open", "settings://"])
-            except Exception:
-                pass
+            all_dirs = _XDG_HOME_DEFAULTS
+        selected = config.state_get("borg_home_dirs", [])
+        dialog = HomeDirPickerDialog(self.get_root(), all_dirs, selected, self._on_home_dirs_picked)
+        dialog.present()
+
+    def _on_home_dirs_picked(self, dirs):
+        config.state_set("borg_home_dirs", dirs)
+        self._update_home_subtitle()
+
+    def _on_pick_config_dirs(self, _):
+        home = Path.home()
+        config_dir = home / ".config"
+        try:
+            all_dirs = [d.name for d in config_dir.iterdir() if d.is_dir()]
+        except Exception:
+            all_dirs = []
+        selected = config.state_get("borg_config_dirs", [])
+        dialog = FolderPickerDialog(self.get_root(), "Папки в ~/.config", all_dirs, selected, self._on_config_dirs_picked)
+        dialog.present()
+
+    def _update_config_subtitle(self):
+        dirs = config.state_get("borg_config_dirs", [])
+        self._row_config.set_subtitle(f"Выбрано {len(dirs)} папок" if dirs else "Выбрать для бэкапа")
+
+    def _on_config_dirs_picked(self, dirs):
+        config.state_set("borg_config_dirs", dirs)
+        self._update_config_subtitle()
+    
+    def _on_flatpak_data_toggled(self, sw, _):
+        config.state_set("borg_src_flatpak_data", sw.get_active())
+        self._update_flatpak_data_subtitle()
+
+    def _update_flatpak_data_subtitle(self):
+        active = config.state_get("borg_src_flatpak_data", False)
+        if not active:
+            self._row_flatpak_data.set_subtitle("Данные приложений не будут сохранены")
+            return
+        flt = config.state_get("borg_flatpak_data_filter", None)
+        if flt is None:
+            self._row_flatpak_data.set_subtitle("Все данные")
+        else:
+            self._row_flatpak_data.set_subtitle(f"Выбрано {len(flt)} приложений")
+
+    def _on_pick_flatpak_data_dirs(self, _):
+        var_app = Path.home() / ".var" / "app"
+        try:
+            all_dirs = [p.name for p in var_app.iterdir() if p.is_dir()] if var_app.exists() else []
+        except Exception:
+            all_dirs = []
+        selected = config.state_get("borg_flatpak_data_filter", all_dirs)
+        
+        icons_thread = threading.Thread(target=self._load_flatpak_icons, args=(all_dirs, selected), daemon=True)
+        icons_thread.start()
+
+    def _load_flatpak_icons(self, all_dirs, selected):
+        icons = _build_icon_index()
+        GLib.idle_add(self._show_flatpak_data_dialog, all_dirs, selected, icons)
+
+    def _show_flatpak_data_dialog(self, all_dirs, selected, icons):
+        dialog = FlatpakDataPickerDialog(self.get_root(), all_dirs, selected, self._on_flatpak_data_picked, icons)
+        dialog.present()
+
+    def _on_flatpak_data_picked(self, dirs):
+        var_app = Path.home() / ".var" / "app"
+        try:
+            all_dirs = [p.name for p in var_app.iterdir() if p.is_dir()] if var_app.exists() else []
+        except Exception:
+            all_dirs = []
+        
+        if sorted(dirs) == sorted(all_dirs):
+            config.state_set("borg_flatpak_data_filter", None)
+        else:
+            config.state_set("borg_flatpak_data_filter", dirs)
+        self._update_flatpak_data_subtitle()
+
+    def _on_add_custom_path(self, row):
+        path = row.get_text().strip()
+        if not path:
+            return
+        row.set_text("")
+        current = config.state_get("borg_custom_paths", [])
+        if path not in current:
+            current.append(path)
+            config.state_set("borg_custom_paths", current)
+            self._add_custom_path_row(path)
+    
+    def _on_pick_custom_path(self, _btn):
+        try:
+            fd = Gtk.FileDialog()
+            fd.set_title("Выберите папку или файл")
+            fd.open(self.get_root(), None, self._on_custom_path_selected, None)
+        except AttributeError:
+            fc = Gtk.FileChooserNative(
+                title="Выберите папку или файл",
+                action=Gtk.FileChooserAction.OPEN,
+                transient_for=self.get_root(),
+                accept_label="Выбрать",
+                cancel_label="Отмена",
+            )
+            def _resp(d, r):
+                if r == Gtk.ResponseType.ACCEPT:
+                    self._add_entry_row.set_text(d.get_file().get_path())
+                d.unref()
+            fc.connect("response", _resp)
+            fc.show()
+
+    def _on_custom_path_selected(self, dialog, result, _):
+        try:
+            f = dialog.open_finish(result)
+            if f:
+                self._add_entry_row.set_text(f.get_path())
+        except GLib.Error:
+            pass
+
+    def _add_custom_path_row(self, path: str):
+        row = Adw.ActionRow(title=path)
+        del_btn = Gtk.Button(icon_name="user-trash-symbolic")
+        del_btn.add_css_class("flat")
+        del_btn.add_css_class("destructive-action")
+        del_btn.set_valign(Gtk.Align.CENTER)
+        del_btn.connect("clicked", self._on_del_custom_path, path, row)
+        row.add_suffix(del_btn)
+        self._grp_custom.add(row)
+
+    def _on_del_custom_path(self, _, path: str, row: Adw.ActionRow):
+        current = config.state_get("borg_custom_paths", [])
+        if path in current:
+            current.remove(path)
+            config.state_set("borg_custom_paths", current)
+        self._grp_custom.remove(row)
+
+    def _on_schedule_toggled(self, sw, _):
+        active = sw.get_active()
+        self._log(f"\n▶  {'Включение' if active else 'Отключение'} расписания...\n")
+        if active:
+            expr = self._build_calendar_expr()
+            backend.write_systemd_units(
+                config.state_get("borg_repo_path", ""),
+                self._get_backup_opts().get("paths", []),
+                expr,
+            )
+            ok = backend.enable_systemd_timer()
+        else:
+            ok = backend.disable_systemd_timer()
+        sw.set_active(ok if active else not ok)
+        self._log(f"✔  Готово\n" if ok else "✘  Ошибка\n")
+        self._refresh_status_thread()
+        
+    def _build_btrfs_tab(self):
+        scroll, body = make_scrolled_page()
+        
+        # Status Group
+        status_group = Adw.PreferencesGroup(title="Статус")
+        body.append(status_group)
+        
+        row_btrfs_ok = Adw.ActionRow(title="$HOME находится на Btrfs", subtitle=backend.get_btrfs_mount_for_home())
+        row_btrfs_ok.add_prefix(make_icon("emblem-ok-symbolic"))
+        status_group.add(row_btrfs_ok)
+        
+        self._btrfs_snapshots_dir_row = Adw.ActionRow(title="Папка для снимков", subtitle=str(backend.get_snapshots_dir()))
+        self._btrfs_snapshots_dir_row.add_prefix(make_icon("folder-symbolic"))
+        status_group.add(self._btrfs_snapshots_dir_row)
+        
+        # Snapshots Group
+        self._btrfs_snapshots_group = Adw.PreferencesGroup(title="Снимки")
+        body.append(self._btrfs_snapshots_group)
+        
+        self._btrfs_snapshot_rows = []
+        self._btrfs_snapshots_placeholder = Adw.ActionRow(title="Загрузка списка снимков...")
+        spinner = Gtk.Spinner(spinning=True, valign=Gtk.Align.CENTER)
+        self._btrfs_snapshots_placeholder.add_suffix(spinner)
+        self._btrfs_snapshots_group.add(self._btrfs_snapshots_placeholder)
+
+        create_btn = make_button("Создать снимок сейчас")
+        create_btn.set_halign(Gtk.Align.CENTER)
+        create_btn.set_margin_top(12)
+        create_btn.connect("clicked", self._btrfs_on_create)
+        body.append(create_btn)
+
+        # Schedule Group
+        schedule_group = Adw.PreferencesGroup(title="Расписание")
+        body.append(schedule_group)
+        
+        self._btrfs_sw_auto = Adw.SwitchRow(title="Автоматические снимки")
+        self._btrfs_sw_auto.set_active(config.state_get("btrfs_auto_enabled", False))
+        self._btrfs_sw_auto.connect("notify::active", self._btrfs_on_auto_toggled)
+        schedule_group.add(self._btrfs_sw_auto)
+        
+        interval_model = Gtk.StringList.new([label for _, label in _BTRFS_INTERVALS])
+        self._btrfs_interval_row = Adw.ComboRow(title="Интервал", model=interval_model)
+        saved_interval = config.state_get("btrfs_auto_interval_hours", 1)
+        try:
+            idx = [val for val, _ in _BTRFS_INTERVALS].index(saved_interval)
+            self._btrfs_interval_row.set_selected(idx)
+        except ValueError:
+            self._btrfs_interval_row.set_selected(0)
+        self._btrfs_interval_row.connect("notify::selected", self._btrfs_on_interval_changed)
+        schedule_group.add(self._btrfs_interval_row)
+        
+        self._btrfs_keep_row = Adw.SpinRow.new_with_range(1, 1000, 1)
+        self._btrfs_keep_row.set_title("Хранить снимков")
+        self._btrfs_keep_row.set_value(config.state_get("btrfs_keep_count", 24))
+        self._btrfs_keep_row.connect("notify::value", self._btrfs_on_keep_count_changed)
+        schedule_group.add(self._btrfs_keep_row)
+        
+        self._btrfs_update_schedule_ui(self._btrfs_sw_auto.get_active())
+        self._btrfs_refresh_list()
+        
+        return scroll, body
+        
+    def _btrfs_update_schedule_ui(self, active: bool):
+        self._btrfs_interval_row.set_sensitive(active)
+        self._btrfs_keep_row.set_sensitive(active)
+        
+    def _btrfs_on_create(self, _btn):
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress("Создание Btrfs снимка...")
+        self._log("\n▶  Создание Btrfs снимка...\n")
+        
+        def on_done(ok):
+            if hasattr(win, "stop_progress"):
+                win.stop_progress(ok)
+            self._log("✔  Снимок создан\n" if ok else "✘  Ошибка при создании снимка\n")
+            if ok:
+                self._btrfs_prune_old()
+                self._btrfs_refresh_list()
+                
+        backend.btrfs_snapshot_create(self._log, on_done)
+        
+    def _btrfs_on_delete(self, snapshot: dict):
+        dialog = Adw.AlertDialog(
+            heading="Удалить снимок?",
+            body=f"Снимок «{snapshot['date_str']}» будет удалён безвозвратно.",
+            transient_for=self.get_root(),
+        )
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("delete", "Удалить")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.connect("response", self._btrfs_on_delete_confirmed, snapshot)
+        dialog.present()
+        
+    def _btrfs_on_delete_confirmed(self, _dialog, response: str, snapshot: dict):
+        if response != "delete": return
+        
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress(f"Удаление снимка {snapshot['name']}...")
+        self._log(f"\n▶  Удаление снимка {snapshot['name']}...\n")
+            
+        def on_done(ok):
+            if hasattr(win, "stop_progress"):
+                win.stop_progress(ok)
+            self._log("✔  Снимок удалён\n" if ok else "✘  Ошибка при удалении\n")
+            if ok:
+                self._btrfs_refresh_list()
+        
+        backend.btrfs_snapshot_delete(snapshot['path'], self._log, on_done)
+
+    def _btrfs_on_restore(self, snapshot: dict):
+        dialog = BtrfsRestoreDialog(self.get_root(), snapshot, self._log)
+        dialog.present()
+        
+    def _btrfs_on_auto_toggled(self, sw, _):
+        active = sw.get_active()
+        config.state_set("btrfs_auto_enabled", active)
+        self._btrfs_update_schedule_ui(active)
+        self._btrfs_apply_schedule_changes()
+
+    def _btrfs_on_interval_changed(self, row, _):
+        idx = row.get_selected()
+        interval = _BTRFS_INTERVALS[idx][0]
+        config.state_set("btrfs_auto_interval_hours", interval)
+        self._btrfs_apply_schedule_changes()
+        
+    def _btrfs_on_keep_count_changed(self, row, _):
+        config.state_set("btrfs_keep_count", row.get_value())
+        self._btrfs_apply_schedule_changes()
+        
+    def _btrfs_apply_schedule_changes(self):
+        active = config.state_get("btrfs_auto_enabled", False)
+        if active:
+            self._log("\n▶  Применение расписания для Btrfs снимков...\n")
+            interval = config.state_get("btrfs_auto_interval_hours", 1)
+            keep = config.state_get("btrfs_keep_count", 24)
+            backend.write_btrfs_systemd_units(interval, keep)
+            ok = backend.enable_btrfs_timer()
+            self._log("✔  Расписание включено\n" if ok else "✘  Ошибка включения расписания\n")
+        else:
+            self._log("\n▶  Отключение расписания для Btrfs снимков...\n")
+            ok = backend.disable_btrfs_timer()
+            self._log("✔  Расписание выключено\n" if ok else "✘  Ошибка выключения расписания\n")
+
+    def _btrfs_prune_old(self):
+        # This is a best-effort, fire-and-forget prune
+        def on_done(snapshots: list[dict]):
+            keep_count = config.state_get("btrfs_keep_count", 24)
+            if len(snapshots) > keep_count:
+                to_delete = snapshots[keep_count:]
+                self._log(f"\nℹ️  Удаление {len(to_delete)} старых снимков...\n")
+                for snap in to_delete:
+                    backend.btrfs_snapshot_delete(snap['path'], lambda l: None, lambda ok: None)
+
+        backend.btrfs_snapshot_list(on_done)
