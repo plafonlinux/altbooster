@@ -218,12 +218,12 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         )
 
         actions = [
-            ("check_update",   self._check_for_updates),
-            ("about",          self._show_about),
-            ("clear_log",      self._clear_log),
-            ("reset_state",    self._reset_state),
-            ("reset_config",   self._reset_config),
-            ("open_log",       self._open_log_file),
+            ("check_update",      self._check_for_updates),
+            ("about",             self._show_about),
+            ("clear_log",         self._clear_log),
+            ("reset_state",       self._reset_state),
+            ("reset_config",      self._reset_config),
+            ("open_log",          self._open_log_file),
         ]
         for name, cb in actions:
             a = Gio.SimpleAction.new(name, None)
