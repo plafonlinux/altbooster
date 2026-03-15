@@ -136,7 +136,11 @@ def btrfs_snapshot_restore(snapshot_path: str, target_dir: str, on_line, on_done
             GLib.idle_add(on_line, f"✘ Ошибка подготовки: {e}\n")
             GLib.idle_add(on_done, False)
             return
-        source = str(Path(snapshot_path)) + os.sep
+
+        import getpass
+        username = getpass.getuser()
+        user_dir = Path(snapshot_path) / username
+        source = str(user_dir if user_dir.exists() else Path(snapshot_path)) + os.sep
         target = str(Path(target_dir)) + os.sep
         privileges.run_privileged(["rsync", "-aAX", "--delete", source, target], on_line, on_done)
 
