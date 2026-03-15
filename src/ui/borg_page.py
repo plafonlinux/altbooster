@@ -1366,7 +1366,7 @@ class BorgPage(Gtk.Box):
         switcher.set_halign(Gtk.Align.CENTER)
 
         clamp = Adw.Clamp()
-        clamp.set_maximum_size(480)
+        clamp.set_maximum_size(640)
         clamp.set_child(switcher)
 
         self.append(clamp)
