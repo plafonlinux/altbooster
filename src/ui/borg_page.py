@@ -36,65 +36,67 @@ _BTRFS_INTERVALS = [
 class BtrfsRestoreDialog(Adw.AlertDialog):
     def __init__(self, parent, snapshot: dict, log_fn):
         super().__init__(
-            heading="Восстановить снимок",
-            body="Файлы из снимка будут извлечены в выбранную папку.\nСуществующие файлы в папке назначения будут перезаписаны.",
+            heading=f"Восстановить снимок",
+            body=f"Снимок: {snapshot.get('date_str', snapshot.get('name'))}",
         )
         self._snapshot = snapshot
         self._log = log_fn
+        self._target_dir = str(Path.home())
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        box.set_margin_top(8)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(4)
 
-        info_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        icon = make_icon("camera-photo-symbolic", 16)
-        lbl = Gtk.Label(label=snapshot.get("date_str", snapshot.get("name")))
-        lbl.add_css_class("dim-label")
-        info_row.append(icon)
-        info_row.append(lbl)
-        box.append(info_row)
+        for icon_name, text in [
+            ("emblem-ok-symbolic",    "Все файлы ~/"),
+            ("emblem-ok-symbolic",    "Настройки GNOME и расширений"),
+            ("emblem-ok-symbolic",    "Данные и бинарники Flatpak (user)"),
+            ("dialog-error-symbolic", "Системные пакеты RPM — не затрагиваются"),
+            ("dialog-error-symbolic", "System-wide Flatpak — не затрагивается"),
+        ]:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            row.append(make_icon(icon_name, 16))
+            lbl = Gtk.Label(label=text)
+            lbl.set_halign(Gtk.Align.START)
+            row.append(lbl)
+            box.append(row)
 
         sep = Gtk.Separator()
-        sep.set_margin_top(4)
+        sep.set_margin_top(6)
+        sep.set_margin_bottom(2)
         box.append(sep)
 
-        target_label = Gtk.Label(label="Папка для восстановления:")
-        target_label.set_halign(Gtk.Align.START)
-        box.append(target_label)
-
-        path_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self._target_entry = Gtk.Entry()
-        self._target_entry.set_text(str(Path.home()))
-        self._target_entry.set_hexpand(True)
-        pick_btn = Gtk.Button(label="Выбрать…")
-        pick_btn.add_css_class("flat")
-        pick_btn.connect("clicked", self._on_pick_folder)
-        path_row.append(self._target_entry)
-        path_row.append(pick_btn)
-        box.append(path_row)
-        
-        warn = Gtk.Label(label="⚠ Восстановление перезапишет файлы в папке назначения, которые есть в снимке, и удалит те, которых в снимке нет (rsync --delete).")
-        warn.get_style_context().add_class("warning")
+        warn = Gtk.Label(label="⚠ Файлы ~/  будут перезаписаны. После восстановления перезайдите в систему.")
+        warn.add_css_class("caption")
+        warn.add_css_class("dim-label")
         warn.set_halign(Gtk.Align.START)
         warn.set_wrap(True)
         box.append(warn)
 
         self.set_extra_child(box)
         self.add_response("cancel", "Отмена")
-        self.add_response("restore", "Восстановить")
+        self.add_response("extract", "Извлечь в папку…")
+        self.add_response("restore", "Восстановить ~/")
         self.set_response_appearance("restore", Adw.ResponseAppearance.DESTRUCTIVE)
         self.set_default_response("cancel")
         self.connect("response", self._on_response)
         self.set_transient_for(parent)
 
-    def _on_pick_folder(self, _btn):
-        # Folder picking logic from BorgRestoreDialog
+    def _on_response(self, _d, response):
+        if response == "cancel":
+            return
+        if response == "extract":
+            self._pick_folder_then_restore()
+            return
+        self._do_restore(str(Path.home()))
+
+    def _pick_folder_then_restore(self):
         try:
             fd = Gtk.FileDialog()
-            fd.set_title("Выберите папку для восстановления")
+            fd.set_title("Папка для извлечения")
             fd.select_folder(self.get_root(), None, self._on_folder_selected, None)
         except AttributeError:
             fc = Gtk.FileChooserNative(
-                title="Выберите папку для восстановления",
+                title="Папка для извлечения",
                 action=Gtk.FileChooserAction.SELECT_FOLDER,
                 transient_for=self.get_root(),
                 accept_label="Выбрать",
@@ -102,7 +104,7 @@ class BtrfsRestoreDialog(Adw.AlertDialog):
             )
             def _resp(d, r):
                 if r == Gtk.ResponseType.ACCEPT:
-                    self._target_entry.set_text(d.get_file().get_path())
+                    self._do_restore(d.get_file().get_path())
                 d.unref()
             fc.connect("response", _resp)
             fc.show()
@@ -111,31 +113,29 @@ class BtrfsRestoreDialog(Adw.AlertDialog):
         try:
             folder = dialog.select_folder_finish(result)
             if folder:
-                self._target_entry.set_text(folder.get_path())
+                self._do_restore(folder.get_path())
         except GLib.Error:
             pass
 
-    def _on_response(self, _d, response):
-        if response != "restore":
-            return
-        target_dir = self._target_entry.get_text().strip()
-        if not target_dir:
-            return
-            
+    def _do_restore(self, target_dir: str):
         win = self.get_root()
         if hasattr(win, "start_progress"):
             win.start_progress("Восстановление снимка...")
-        
-        self._log(f"\n▶  Восстановление снимка {self._snapshot['name']} в {target_dir}...\n")
+        self._log(f"\n▶  Восстановление снимка {self._snapshot['name']} → {target_dir}...\n")
 
         def on_done(ok):
-            GLib.idle_add(self._finish, ok, win)
+            GLib.idle_add(self._finish, ok, win, target_dir == str(Path.home()))
 
         backend.btrfs_snapshot_restore(self._snapshot["path"], target_dir, self._log, on_done)
 
-    def _finish(self, ok, win):
-        msg = "✔  Восстановление завершено!\n" if ok else "✘  Ошибка при восстановлении\n"
-        self._log(msg)
+    def _finish(self, ok, win, is_home: bool):
+        if ok:
+            msg = "✔  Восстановление завершено!"
+            if is_home:
+                msg += " Перезайдите в систему для применения настроек GNOME."
+            self._log(msg + "\n")
+        else:
+            self._log("✘  Ошибка при восстановлении\n")
         if hasattr(win, "stop_progress"):
             win.stop_progress(ok)
 
