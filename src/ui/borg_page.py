@@ -2643,8 +2643,8 @@ class BorgPage(Gtk.Box):
         schedule_group.add(self._btrfs_keep_row)
         
         self._btrfs_update_schedule_ui(self._btrfs_sw_auto.get_active())
-        self._btrfs_refresh_list()
-        
+        scroll.connect("map", lambda _: self._btrfs_refresh_list())
+
         return scroll, body
         
     def _btrfs_update_schedule_ui(self, active: bool):
