@@ -143,6 +143,17 @@ def btrfs_snapshot_restore(snapshot_path: str, target_dir: str, on_line, on_done
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def _parse_btrfs_size(s: str) -> int | None:
+    s = s.strip()
+    for unit, mult in (("TiB", 1 << 40), ("GiB", 1 << 30), ("MiB", 1 << 20), ("KiB", 1 << 10), ("B", 1)):
+        if s.endswith(unit):
+            try:
+                return int(float(s[: -len(unit)].strip()) * mult)
+            except ValueError:
+                return None
+    return None
+
+
 def btrfs_snapshot_size(snapshot_path: str, on_done) -> None:
     output_lines: list[str] = []
 
@@ -151,14 +162,20 @@ def btrfs_snapshot_size(snapshot_path: str, on_done) -> None:
 
     def _on_size_done(success: bool) -> None:
         size = None
-        if success and output_lines:
-            try:
-                size = int(output_lines[0].split()[0])
-            except (ValueError, IndexError):
-                pass
+        if success:
+            for line in output_lines:
+                parts = line.split()
+                if not parts or parts[0] == "Total":
+                    continue
+                if len(parts) >= 2:
+                    size = _parse_btrfs_size(parts[1])
+                    break
         GLib.idle_add(on_done, size)
 
-    privileges.run_privileged(["du", "-sb", snapshot_path], _on_line, _on_size_done)
+    privileges.run_privileged(
+        ["btrfs", "filesystem", "du", "--summarize", snapshot_path],
+        _on_line, _on_size_done,
+    )
 
 
 def write_btrfs_systemd_units(interval_hours: int, keep_count: int) -> bool:
