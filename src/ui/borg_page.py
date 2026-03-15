@@ -1938,58 +1938,101 @@ class BorgPage(Gtk.Box):
             threading.Thread(target=self._load_archives_thread, daemon=True).start()
     
     def _btrfs_refresh_list(self):
-        self._btrfs_snapshots_placeholder.set_visible(True)
+        self._btrfs_loading_spinner.set_spinning(True)
+        self._btrfs_loading_spinner.set_visible(True)
         backend.btrfs_snapshot_list(self._btrfs_populate_snapshots)
 
     def _btrfs_populate_snapshots(self, snapshots: list[dict]):
-        self._btrfs_snapshots_placeholder.set_visible(False)
-        for row in self._btrfs_snapshot_rows:
-            self._btrfs_snapshots_group.remove(row)
-        self._btrfs_snapshot_rows.clear()
+        self._btrfs_loading_spinner.set_spinning(False)
+        self._btrfs_loading_spinner.set_visible(False)
+
+        while self._btrfs_carousel.get_n_pages() > 0:
+            self._btrfs_carousel.remove(self._btrfs_carousel.get_nth_page(0))
 
         if not snapshots:
-            placeholder = Adw.ActionRow(title="Снимков не найдено")
-            self._btrfs_snapshots_group.add(placeholder)
-            self._btrfs_snapshot_rows.append(placeholder)
-            return
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            card.add_css_class("card")
+            card.set_margin_start(16)
+            card.set_margin_end(16)
+            card.set_margin_top(8)
+            card.set_margin_bottom(8)
+            card.set_hexpand(True)
+            lbl = Gtk.Label(label="Снимков нет")
+            lbl.add_css_class("dim-label")
+            lbl.set_margin_top(24)
+            lbl.set_margin_bottom(24)
+            card.append(lbl)
+            self._btrfs_carousel.append(card)
+        else:
+            for snap in snapshots:
+                self._btrfs_carousel.append(self._btrfs_build_snapshot_card(snap))
 
-        for snap in snapshots:
-            row = self._btrfs_build_snapshot_row(snap)
-            self._btrfs_snapshots_group.add(row)
-            self._btrfs_snapshot_rows.append(row)
-            
-    def _btrfs_build_snapshot_row(self, snap: dict) -> Adw.ActionRow:
-        row = Adw.ActionRow(title=snap["date_str"], subtitle=snap["name"])
-        
-        size_label = Gtk.Label(label="...")
-        size_label.add_css_class("dim-label")
-        size_label.set_valign(Gtk.Align.CENTER)
-        
-        def on_size_done(size: int | None):
-            if size is not None:
-                size_label.set_text(_fmt_size(size))
-            else:
-                size_label.set_text("")
-        
-        backend.btrfs_snapshot_size(snap["path"], on_size_done)
+        self._btrfs_update_nav_buttons()
 
-        btn_restore = Gtk.Button(icon_name="media-seek-backward-symbolic")
-        btn_restore.set_tooltip_text("Восстановить")
-        btn_restore.add_css_class("flat")
-        btn_restore.set_valign(Gtk.Align.CENTER)
+    def _btrfs_build_snapshot_card(self, snap: dict) -> Gtk.Box:
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        card.add_css_class("card")
+        card.set_margin_start(16)
+        card.set_margin_end(16)
+        card.set_margin_top(8)
+        card.set_margin_bottom(8)
+        card.set_hexpand(True)
+
+        icon = make_icon("camera-photo-symbolic", 32)
+        icon.set_halign(Gtk.Align.CENTER)
+        icon.set_margin_top(16)
+        card.append(icon)
+
+        date_lbl = Gtk.Label(label=snap["date_str"])
+        date_lbl.add_css_class("title-2")
+        date_lbl.set_halign(Gtk.Align.CENTER)
+        card.append(date_lbl)
+
+        size_lbl = Gtk.Label(label="…")
+        size_lbl.add_css_class("dim-label")
+        size_lbl.set_halign(Gtk.Align.CENTER)
+        card.append(size_lbl)
+
+        def _on_size(s):
+            size_lbl.set_text(_fmt_size(s) if s else "")
+        backend.btrfs_snapshot_size(snap["path"], _on_size)
+
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_box.set_halign(Gtk.Align.CENTER)
+        btn_box.set_margin_bottom(16)
+
+        btn_restore = Gtk.Button(label="Восстановить")
+        btn_restore.add_css_class("suggested-action")
+        btn_restore.add_css_class("pill")
         btn_restore.connect("clicked", lambda _, s=snap: self._btrfs_on_restore(s))
-        
-        btn_delete = Gtk.Button(icon_name="user-trash-symbolic")
-        btn_delete.set_tooltip_text("Удалить")
-        btn_delete.add_css_class("flat")
+
+        btn_delete = Gtk.Button(label="Удалить")
         btn_delete.add_css_class("destructive-action")
-        btn_delete.set_valign(Gtk.Align.CENTER)
+        btn_delete.add_css_class("flat")
+        btn_delete.add_css_class("pill")
         btn_delete.connect("clicked", lambda _, s=snap: self._btrfs_on_delete(s))
-        
-        row.add_suffix(size_label)
-        row.add_suffix(btn_restore)
-        row.add_suffix(btn_delete)
-        return row
+
+        btn_box.append(btn_restore)
+        btn_box.append(btn_delete)
+        card.append(btn_box)
+
+        return card
+
+    def _btrfs_carousel_prev(self, _btn):
+        idx = round(self._btrfs_carousel.get_position())
+        if idx > 0:
+            self._btrfs_carousel.scroll_to(self._btrfs_carousel.get_nth_page(idx - 1), True)
+
+    def _btrfs_carousel_next(self, _btn):
+        idx = round(self._btrfs_carousel.get_position())
+        n = self._btrfs_carousel.get_n_pages()
+        if idx < n - 1:
+            self._btrfs_carousel.scroll_to(self._btrfs_carousel.get_nth_page(idx + 1), True)
+
+    def _btrfs_update_nav_buttons(self):
+        n = self._btrfs_carousel.get_n_pages()
+        self._btrfs_btn_prev.set_sensitive(n > 1)
+        self._btrfs_btn_next.set_sensitive(n > 1)
 
     def _refresh_archives(self):
         self._archives_placeholder.set_title("Загрузка архивов...")
@@ -2515,37 +2558,66 @@ class BorgPage(Gtk.Box):
         
     def _build_btrfs_tab(self):
         scroll, body = make_scrolled_page()
-        
-        # Status Group
+
         status_group = Adw.PreferencesGroup(title="Статус")
         body.append(status_group)
-        
+
         row_btrfs_ok = Adw.ActionRow(title="$HOME находится на Btrfs", subtitle=backend.get_btrfs_mount_for_home())
         row_btrfs_ok.add_prefix(make_icon("emblem-ok-symbolic"))
         status_group.add(row_btrfs_ok)
-        
+
         self._btrfs_snapshots_dir_row = Adw.ActionRow(title="Папка для снимков", subtitle=str(backend.get_snapshots_dir()))
         self._btrfs_snapshots_dir_row.add_prefix(make_icon("folder-symbolic"))
         status_group.add(self._btrfs_snapshots_dir_row)
-        
-        # Snapshots Group
-        self._btrfs_snapshots_group = Adw.PreferencesGroup(title="Снимки")
-        body.append(self._btrfs_snapshots_group)
-        
-        self._btrfs_snapshot_rows = []
-        self._btrfs_snapshots_placeholder = Adw.ActionRow(title="Загрузка списка снимков...")
-        spinner = Gtk.Spinner(spinning=True, valign=Gtk.Align.CENTER)
-        self._btrfs_snapshots_placeholder.add_suffix(spinner)
-        self._btrfs_snapshots_group.add(self._btrfs_snapshots_placeholder)
+
+        snapshots_label = Gtk.Label(label="Снимки")
+        snapshots_label.add_css_class("heading")
+        snapshots_label.set_halign(Gtk.Align.START)
+        snapshots_label.set_margin_top(16)
+        snapshots_label.set_margin_start(4)
+        body.append(snapshots_label)
+
+        self._btrfs_loading_spinner = Gtk.Spinner()
+        self._btrfs_loading_spinner.set_halign(Gtk.Align.CENTER)
+        self._btrfs_loading_spinner.set_margin_top(8)
+        self._btrfs_loading_spinner.set_visible(False)
+        body.append(self._btrfs_loading_spinner)
+
+        self._btrfs_carousel = Adw.Carousel()
+        self._btrfs_carousel.set_hexpand(True)
+        self._btrfs_carousel.set_spacing(8)
+        self._btrfs_carousel.set_allow_scroll_wheel(True)
+        self._btrfs_carousel.connect("page-changed", lambda _c, _i: self._btrfs_update_nav_buttons())
+
+        dots = Adw.CarouselIndicatorDots()
+        dots.set_carousel(self._btrfs_carousel)
+        dots.set_halign(Gtk.Align.CENTER)
+
+        self._btrfs_btn_prev = Gtk.Button(icon_name="go-previous-symbolic")
+        self._btrfs_btn_prev.add_css_class("circular")
+        self._btrfs_btn_prev.set_valign(Gtk.Align.CENTER)
+        self._btrfs_btn_prev.connect("clicked", self._btrfs_carousel_prev)
+
+        self._btrfs_btn_next = Gtk.Button(icon_name="go-next-symbolic")
+        self._btrfs_btn_next.add_css_class("circular")
+        self._btrfs_btn_next.set_valign(Gtk.Align.CENTER)
+        self._btrfs_btn_next.connect("clicked", self._btrfs_carousel_next)
+
+        carousel_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        carousel_row.append(self._btrfs_btn_prev)
+        carousel_row.append(self._btrfs_carousel)
+        carousel_row.append(self._btrfs_btn_next)
+        body.append(carousel_row)
+        body.append(dots)
 
         create_btn = make_button("Создать снимок сейчас")
         create_btn.set_halign(Gtk.Align.CENTER)
-        create_btn.set_margin_top(12)
+        create_btn.set_margin_top(8)
         create_btn.connect("clicked", self._btrfs_on_create)
         body.append(create_btn)
 
-        # Schedule Group
         schedule_group = Adw.PreferencesGroup(title="Расписание")
+        schedule_group.set_margin_top(16)
         body.append(schedule_group)
         
         self._btrfs_sw_auto = Adw.SwitchRow(title="Автоматические снимки")
