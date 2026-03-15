@@ -1389,18 +1389,18 @@ class BorgPage(Gtk.Box):
         self._build_repo_group()
         self._build_archives_group()
         self._build_actions_group()
-        self._stack.add_titled_with_icon(scroll, "info", "Borg", "drive-harddisk-symbolic")
+        self._stack.add_titled_with_icon(scroll, "info", "Хранилище", "drive-harddisk-symbolic")
 
     def _build_settings_page(self):
         scroll, self._body = make_scrolled_page()
         self._build_sources_group()
-        self._stack.add_titled_with_icon(scroll, "settings", "Источники", "preferences-system-symbolic")
+        self._stack.add_titled_with_icon(scroll, "settings", "Настройки", "preferences-system-symbolic")
 
     def _build_schedule_page(self):
         scroll, self._body = make_scrolled_page()
         self._build_schedule_group()
         self._build_prune_group()
-        self._stack.add_titled_with_icon(scroll, "schedule", "Расписание", "alarm-symbolic")
+        self._stack.add_titled_with_icon(scroll, "schedule", "График", "alarm-symbolic")
 
     def _build_status_group(self):
         group = Adw.PreferencesGroup()
