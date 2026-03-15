@@ -1394,7 +1394,7 @@ class BorgPage(Gtk.Box):
     def _build_settings_page(self):
         scroll, self._body = make_scrolled_page()
         self._build_sources_group()
-        self._stack.add_titled_with_icon(scroll, "settings", "Настройки", "preferences-system-symbolic")
+        self._stack.add_titled_with_icon(scroll, "settings", "Источники", "preferences-system-symbolic")
 
     def _build_schedule_page(self):
         scroll, self._body = make_scrolled_page()
