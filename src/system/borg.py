@@ -16,10 +16,84 @@ import config
 
 
 DEFAULT_EXCLUDES = [
+    # системный кэш
+    "~/.cache",
     "~/.var/app/*/cache",
     "~/.var/app/*/.cache",
     "~/.var/app/*/Cache",
-    "~/.cache",
+    # браузеры — кэш и Service Worker
+    "~/.config/google-chrome/*/Cache",
+    "~/.config/google-chrome/*/Cache_Data",
+    "~/.config/google-chrome/*/CacheStorage",
+    "~/.config/google-chrome/*/GPUCache",
+    "~/.config/google-chrome/*/Service Worker/CacheStorage",
+    "~/.config/google-chrome/*/optimization_guide_model_store",
+    "~/.config/yandex-browser/*/Cache",
+    "~/.config/yandex-browser/*/Cache_Data",
+    "~/.config/yandex-browser/*/GPUCache",
+    "~/.config/yandex-browser/*/CacheStorage",
+    "~/.config/yandex-browser/*/Service Worker/CacheStorage",
+    "~/.config/yandex-browser/*/AsrSubtitles",
+    "~/.config/yandex-browser/*/Safe Browsing",
+    "~/.config/yandex-browser/*/component_crx_cache",
+    "~/.config/yandex-browser/*/extensions_crx_cache",
+    "~/.config/yandex-browser/*/Resources/extension/cache_*",
+    # Chrome Flatpak
+    "~/.var/app/com.google.Chrome/config/google-chrome/*/Cache",
+    "~/.var/app/com.google.Chrome/config/google-chrome/*/Cache_Data",
+    "~/.var/app/com.google.Chrome/config/google-chrome/*/GPUCache",
+    "~/.var/app/com.google.Chrome/config/google-chrome/*/CacheStorage",
+    "~/.var/app/com.google.Chrome/config/google-chrome/*/Service Worker/CacheStorage",
+    "~/.var/app/com.google.Chrome/config/google-chrome/*/ShaderCache",
+    "~/.var/app/com.google.Chrome/config/google-chrome/optimization_guide_model_store",
+    "~/.var/app/com.google.Chrome/config/google-chrome/OnDeviceHeadSuggestModel",
+    # VS Code — кэш и логи
+    "~/.config/Code/Cache",
+    "~/.config/Code/CachedData",
+    "~/.config/Code/CachedExtensionVSIXs",
+    "~/.config/Code/WebStorage",
+    "~/.config/Code/logs",
+    # контейнеры
+    "~/.local/share/containers",
+    # PortProton — дистрибутивы Wine/Proton и системные файлы префиксов
+    "~/.var/app/ru.linux_gaming.PortProton/data/tmp",
+    "~/.var/app/ru.linux_gaming.PortProton/data/dist",
+    "~/.var/app/ru.linux_gaming.PortProton/data/prefixes/*/drive_c/windows",
+    "~/.var/app/ru.linux_gaming.PortProton/data/prefixes/*/drive_c/Program Files",
+    "~/.var/app/ru.linux_gaming.PortProton/data/prefixes/*/drive_c/Program Files (x86)",
+    "~/.var/app/ru.linux_gaming.PortProton/data/prefixes/*/drive_c/users/*/AppData/Local/Temp",
+    "~/.var/app/ru.linux_gaming.PortProton/data/prefixes/*/drive_c/users/*/AppData/Local/Microsoft/Windows/INetCache",
+    # образы виртуальных машин
+    "~/.local/share/gnome-boxes/images",
+    "~/.var/app/org.gnome.Boxes/data/gnome-boxes/images",
+    "~/.local/share/libvirt/images",
+    "~/.config/VirtualBox/*.vdi",
+    "~/.config/VirtualBox/*.vmdk",
+    "~/.config/VirtualBox/*.vhd",
+    # ISO в папках загрузок
+    "~/Загрузки/*.iso",
+    "~/Downloads/*.iso",
+    # Steam — игры (сами игры, не настройки)
+    "~/.local/share/Steam/steamapps",
+    "~/.var/app/com.valvesoftware.Steam/data/Steam/steamapps",
+    # DaVinci Resolve — только кэш, не проекты
+    "~/.local/share/DaVinciResolve/DVIP/Cache",
+    "~/.local/share/DaVinciResolve/logs",
+    # OrcaSlicer — системные профили (скачиваются автоматически)
+    "~/.config/OrcaSlicer/system",
+    # миниатюры
+    "~/.local/share/thumbnails",
+    # Python виртуальные окружения
+    "**/venv",
+    "**/.venv",
+    # менеджеры пакетов — кэш
+    "~/.npm",
+    "~/.yarn/cache",
+    "~/.gradle/caches",
+    "~/.m2/repository",
+    "~/.cargo/registry",
+    # прочее
+    "~/.local/share/gvfs-metadata",
     "~/.local/share/Trash",
     "**/.git",
     "**/node_modules",
@@ -117,11 +191,48 @@ def borg_init(repo_path: str, on_line, on_done) -> None:
     _run_borg_async(cmd, on_line, on_done, env=env)
 
 
+_BORG_TRANSLATIONS = {
+    "Saving files cache":                  "Сохранение кэша файлов",
+    "Saving chunks cache":                 "Сохранение кэша блоков",
+    "Saving cache config":                 "Сохранение конфигурации кэша",
+    "Repository:":                         "Репозиторий:",
+    "Archive name:":                       "Имя архива:",
+    "Archive fingerprint:":                "Отпечаток архива:",
+    "Time (start):":                       "Начало:",
+    "Time (end):":                         "Конец:",
+    "Duration:":                           "Длительность:",
+    "Number of files:":                    "Количество файлов:",
+    "Utilization of max. archive size:":   "Использование макс. размера архива:",
+    "Original size":                       "Исходный размер",
+    "Compressed size":                     "Сжатый размер",
+    "Deduplicated size":                   "Дедуплицированный размер",
+    "This archive:":                       "Этот архив:",
+    "All archives:":                       "Все архивы:",
+    "Unique chunks":                       "Уникальных блоков",
+    "Total chunks":                        "Всего блоков",
+    "Chunk index:":                        "Индекс блоков:",
+    "minutes":                             "мин.",
+    "seconds":                             "сек.",
+    "minute":                              "мин.",
+    "second":                              "сек.",
+}
+
+
+def _translate_borg_line(line: str) -> str:
+    for en, ru in _BORG_TRANSLATIONS.items():
+        if en in line:
+            line = line.replace(en, ru)
+    return line
+
+
 def borg_create(repo_path: str, archive_name: str, paths: list[str], excludes: list[str], on_line, on_done) -> None:
+    def _on_line_ru(line: str):
+        on_line(_translate_borg_line(line))
+
     cmd = [_borg_exe(), "create", "--stats", "--progress", f"{repo_path}::{archive_name}"] + paths
     for e in excludes:
         cmd += ["--exclude", os.path.expanduser(e)]
-    _run_borg_async(cmd, on_line, on_done, env=_borg_env(repo_path))
+    _run_borg_async(cmd, _on_line_ru, on_done, env=_borg_env(repo_path))
 
 
 def borg_list(repo_path: str) -> list[dict]:
@@ -158,6 +269,27 @@ def borg_list_archive(repo_path: str, archive_name: str) -> list[dict]:
     except Exception:
         pass
     return []
+
+
+def borg_archive_info(repo_path: str, archive_name: str, on_done) -> None:
+    def _worker():
+        try:
+            r = subprocess.run(
+                [_borg_exe(), "info", "--json", f"{repo_path}::{archive_name}"],
+                capture_output=True, text=True, encoding="utf-8", timeout=30,
+                env=_borg_env(repo_path),
+            )
+            if r.returncode == 0:
+                data = json.loads(r.stdout)
+                archives = data.get("archives", [])
+                if archives:
+                    GLib.idle_add(on_done, archives[0].get("stats"))
+                    return
+        except Exception:
+            pass
+        GLib.idle_add(on_done, None)
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 def borg_extract(repo_path: str, archive_name: str, target_dir: str, paths: list[str], on_line, on_done) -> None:
@@ -331,6 +463,44 @@ def generate_extensions_meta(target_dir: Path) -> bool:
         return False
 
 
+def generate_system_meta(target_dir: Path) -> bool:
+    target_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        r1 = subprocess.run(
+            ["rpm", "-qa", "--queryformat", "%{NAME}\n"],
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+        if r1.returncode == 0:
+            names = sorted(set(r1.stdout.splitlines()))
+            (target_dir / "packages.txt").write_text("\n".join(names), encoding="utf-8")
+            
+        r2 = subprocess.run(
+            ["dconf", "dump", "/"],
+            capture_output=True, text=True, encoding="utf-8", timeout=10,
+        )
+        if r2.returncode == 0:
+            (target_dir / "dconf-full.ini").write_text(r2.stdout, encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def restore_packages_meta(meta_dir: Path, on_line, on_done) -> None:
+    pkg_file = meta_dir / "packages.txt"
+    if not pkg_file.exists():
+        GLib.idle_add(on_done, False)
+        return
+    packages = pkg_file.read_text(encoding="utf-8").splitlines()
+    packages = [p.strip() for p in packages if p.strip()]
+    if not packages:
+        GLib.idle_add(on_done, True)
+        return
+        
+    from system import privileges
+    GLib.idle_add(on_line, "▶  Переустановка RPM-пакетов...\n")
+    privileges.run_privileged(["epm", "install", "-y", *packages], on_line, on_done)
+
+
 def restore_flatpak_meta(meta_dir: Path, on_line, on_done) -> None:
     def _worker():
         ok = True
@@ -366,6 +536,21 @@ def restore_flatpak_meta(meta_dir: Path, on_line, on_done) -> None:
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def restore_dconf_meta(meta_dir: Path) -> bool:
+    ini = meta_dir / "dconf-full.ini"
+    if not ini.exists():
+        return False
+    try:
+        r = subprocess.run(
+            ["dconf", "load", "/"],
+            input=ini.read_text(encoding="utf-8"),
+            text=True, encoding="utf-8", timeout=30
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def _systemd_user_dir() -> Path:
     return Path.home() / ".config" / "systemd" / "user"
 
@@ -392,6 +577,8 @@ def write_systemd_units(repo_path: str, paths: list[str], calendar_expr: str) ->
         "mkdir -p /tmp/altbooster-backup-meta && "
         "flatpak list --app --columns=application > /tmp/altbooster-backup-meta/flatpak-apps.txt 2>/dev/null; "
         "flatpak remotes --columns=name,url > /tmp/altbooster-backup-meta/flatpak-remotes.txt 2>/dev/null; "
+        "rpm -qa --queryformat \"%%{NAME}\\n\" | sort -u > /tmp/altbooster-backup-meta/packages.txt 2>/dev/null; "
+        "dconf dump / > /tmp/altbooster-backup-meta/dconf-full.ini 2>/dev/null; "
         f'{borg_exe} create --stats "{repo_path}::$(hostname)-$(date +%%Y-%%m-%%dT%%H-%%M)" '
         f"{paths_str} /tmp/altbooster-backup-meta {excludes_str}'\n"
     )

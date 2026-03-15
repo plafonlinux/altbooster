@@ -62,6 +62,10 @@ from system.borg import (
     is_timer_active,
     get_timer_next_run,
     DEFAULT_EXCLUDES,
+    generate_system_meta,
+    restore_packages_meta,
+    restore_dconf_meta,
+    borg_archive_info,
 )
 from system.btrfs import (
     is_home_on_btrfs,
@@ -138,6 +142,9 @@ __all__ = [
     "is_timer_active",
     "get_timer_next_run",
     "DEFAULT_EXCLUDES",
+    "generate_system_meta",
+    "restore_packages_meta",
+    "restore_dconf_meta",
     "is_home_on_btrfs",
     "get_btrfs_mount_for_home",
     "get_snapshots_dir",

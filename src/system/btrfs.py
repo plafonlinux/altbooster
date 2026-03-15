@@ -44,6 +44,7 @@ def get_snapshots_dir() -> Path:
     return Path.home() / ".local" / "share" / "altbooster" / "btrfs-snapshots"
 
 
+
 def btrfs_snapshot_create(on_line, on_done) -> None:
     mount_point = get_btrfs_mount_for_home()
     if not mount_point:
@@ -59,7 +60,11 @@ def btrfs_snapshot_create(on_line, on_done) -> None:
         f"mkdir -p {shlex.quote(str(snapshots_dir))} && "
         f"btrfs subvolume snapshot -r {shlex.quote(mount_point)} {shlex.quote(str(snapshot_path))}"
     )
-    privileges.run_privileged(["bash", "-c", cmd_str], on_line, on_done)
+
+    def _on_done(ok: bool):
+        on_done(ok)
+
+    privileges.run_privileged(["bash", "-c", cmd_str], on_line, _on_done)
 
 
 def btrfs_snapshot_list(on_done) -> None:
