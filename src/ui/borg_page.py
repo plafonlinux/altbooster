@@ -1994,7 +1994,7 @@ class BorgPage(Gtk.Box):
         card.append(size_lbl)
 
         def _on_size(s):
-            size_lbl.set_text(_fmt_size(s) if s else "")
+            size_lbl.set_text(f"эксклюзивно: {_fmt_size(s)}" if s else "")
         backend.btrfs_snapshot_size(snap["path"], _on_size)
 
         btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
