@@ -18,8 +18,6 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
 import config
 import backend
-from system import profile as profile_module
-from ui.profile_dialog import show_preset_save_dialog, show_preset_import_dialog
 from ui.setup_page import SetupPage
 from ui.apps_page import AppsPage
 from ui.extensions_page import ExtensionsPage
@@ -29,6 +27,7 @@ from ui.amd_page import AmdPage
 from ui.intel_page import IntelPage
 from ui.maintenance_page import MaintenancePage
 from ui.flatpak_page import FlatpakPage
+from ui.borg_page import BorgPage
 
 
 class AltBoosterWindow(Adw.ApplicationWindow):
@@ -93,7 +92,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         root.append(self._build_update_banner())
-        root.append(self._build_profile_banner())
 
         self._setup = SetupPage(self._log)
         self._apps = AppsPage(self._log)
@@ -105,12 +103,14 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._amd = AmdPage(self._log)
         self._intel = IntelPage(self._log)
         self._flatpak = FlatpakPage(self._log)
+        self._borg = BorgPage(self._log)
 
         for widget, name, title, icon in [
             (self._setup,       "setup",       "Начало",          "go-home-symbolic"),
             (self._apps,        "apps",        "Приложения",      "grid-large-symbolic"),
             (self._extensions,  "extensions",  "Расширения",      "application-x-addon-symbolic"),
             (self._flatpak,     "flatpak",     "Flatpak",         "flatpak-symbolic"),
+            (self._borg,       "borg",        "Резервная копия", "drive-harddisk-symbolic"),
             (self._terminal,   "terminal",    "Терминал",        "utilities-terminal-symbolic"),
             (self._amd,        "amd",         "AMD Radeon",      "video-display-symbolic"),
             (self._intel,      "intel",       "Intel",           "processor-symbolic"),
@@ -124,8 +124,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         stack_overlay = Gtk.Overlay()
         stack_overlay.set_child(self._stack)
         stack_overlay.set_vexpand(True)
-        self._relogin_revealer = self._build_relogin_banner()
-        stack_overlay.add_overlay(self._relogin_revealer)
+
         root.append(stack_overlay)
 
         self._split_view = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
@@ -182,8 +181,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._window_title = Adw.WindowTitle()
         self._window_title.set_title("ALT Booster")
         header.set_title_widget(self._window_title)
-
-        header.pack_start(self._build_preset_button())
 
         menu = Gio.Menu()
 
@@ -295,8 +292,45 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         self._bottom_list_widget = self._build_sidebar_bottom()
 
+        borg_list = Gtk.ListBox()
+        borg_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        borg_list.add_css_class("navigation-sidebar")
+        borg_row = Gtk.ListBoxRow()
+        borg_row.set_name("borg")
+        borg_row.set_tooltip_text("Резервная копия")
+        borg_box = Gtk.Box(spacing=7)
+        borg_box.set_margin_top(8)
+        borg_box.set_margin_bottom(8)
+        borg_box.set_margin_start(7)
+        borg_box.set_margin_end(7)
+        borg_icon = Gtk.Image.new_from_icon_name("drive-harddisk-symbolic")
+        borg_icon.set_pixel_size(16)
+        borg_lbl = Gtk.Label(label="Резервная копия")
+        borg_lbl.set_xalign(0.0)
+        borg_lbl.set_hexpand(True)
+        borg_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        borg_box.append(borg_icon)
+        borg_box.append(borg_lbl)
+        borg_row.set_child(borg_box)
+        borg_list.append(borg_row)
+        self._nav_images.append(borg_icon)
+        self._nav_labels.append(borg_lbl)
+        self._borg_list = borg_list
+
+        def _on_borg_selected(_, row):
+            if row is not None:
+                self._stack.set_visible_child_name("borg")
+                self._nav_list.unselect_all()
+
+        def _on_nav_deselects_borg(*_):
+            self._borg_list.unselect_all()
+
+        borg_list.connect("row-selected", _on_borg_selected)
+        nav_list.connect("row-selected", _on_nav_deselects_borg)
+
         self._sidebar_widget = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self._sidebar_widget.append(scroll)
+        self._sidebar_widget.append(borg_list)
         return self._sidebar_widget
 
     def _build_sidebar_bottom(self) -> Gtk.Widget:
@@ -381,7 +415,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
     def _on_bottom_row_activated(self, _, row):
         name = row.get_name()
-        if name == "update":
+        if name == "borg":
+            self._stack.set_visible_child_name("borg")
+            self._nav_list.unselect_all()
+        elif name == "update":
             self._check_for_updates()
         elif name == "settings":
             self._settings_popover.popup()
@@ -487,636 +524,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._update_banner_revealer.set_reveal_child(False)
         return self._update_banner_revealer
 
-
-    def _build_preset_button(self) -> Gtk.MenuButton:
-        self._preset_btn = Gtk.MenuButton()
-        self._preset_btn.add_css_class("flat")
-
-        self._preset_popover = Gtk.Popover()
-        self._preset_popover.set_has_arrow(False)
-        self._preset_btn.set_popover(self._preset_popover)
-
-        self._refresh_preset_menu()
-        return self._preset_btn
-
-    def _refresh_preset_menu(self):
-        presets = profile_module.list_presets()
-        active_name = config.state_get("active_preset")
-
-        display_name = active_name or "Default"
-        _btn_lbl = Gtk.Label(label=display_name)
-        _btn_lbl.set_max_width_chars(9)
-        _btn_lbl.set_ellipsize(Pango.EllipsizeMode.END)
-        _btn_lbl.set_tooltip_text(display_name if len(display_name) > 9 else None)
-        self._preset_btn.set_child(_btn_lbl)
-        self._preset_btn.set_always_show_arrow(True)
-
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        box.set_margin_top(4)
-        box.set_margin_bottom(4)
-        box.set_margin_start(4)
-        box.set_margin_end(4)
-
-        def _flat_row(label: str, icon: str, cb, sensitive: bool = True) -> Gtk.Button:
-            row = Gtk.Box(spacing=8)
-            row.set_margin_start(4)
-            img = Gtk.Image.new_from_icon_name(icon)
-            img.set_pixel_size(16)
-            row.append(img)
-            lbl_w = Gtk.Label(label=label)
-            lbl_w.set_xalign(0.0)
-            lbl_w.set_hexpand(True)
-            row.append(lbl_w)
-            btn = Gtk.Button()
-            btn.set_child(row)
-            btn.add_css_class("flat")
-            btn.set_sensitive(sensitive)
-            btn.connect("clicked", cb)
-            return btn
-
-        if presets:
-            for p_name, _ in presets:
-                row = Gtk.Box(spacing=8)
-                row.set_margin_start(4)
-                check_img = Gtk.Image.new_from_icon_name("object-select-symbolic")
-                check_img.set_pixel_size(16)
-                check_img.set_opacity(1.0 if p_name == active_name else 0.0)
-                row.append(check_img)
-                lbl_w = Gtk.Label(label=p_name)
-                lbl_w.set_xalign(0.0)
-                lbl_w.set_hexpand(True)
-                row.append(lbl_w)
-                btn = Gtk.Button()
-                btn.set_child(row)
-                btn.add_css_class("flat")
-                btn.connect("clicked", lambda _, n=p_name: self._on_preset_selected(n))
-                box.append(btn)
-        else:
-            placeholder = Gtk.Label(label="Нет сохранённых пресетов")
-            placeholder.add_css_class("dim-label")
-            placeholder.set_margin_top(6)
-            placeholder.set_margin_bottom(6)
-            placeholder.set_margin_start(8)
-            box.append(placeholder)
-
-        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-
-        has_active = bool(active_name and any(n == active_name for n, _ in presets))
-        box.append(_flat_row("Сохранить как новый…",    "list-add-symbolic",        self._on_preset_save_new))
-        box.append(_flat_row("Переименовать текущий…",  "document-edit-symbolic",   self._on_preset_rename,  has_active))
-        box.append(_flat_row("Удалить текущий",         "user-trash-symbolic",      self._on_preset_delete,  has_active))
-
-        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-
-        box.append(_flat_row("Экспортировать в файл…",  "document-send-symbolic",   self._on_preset_export_file))
-        box.append(_flat_row("Импортировать из файла…", "document-open-symbolic",   self._on_preset_import_file))
-
-        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-
-        box.append(_flat_row("Экспорт расширений…",    "application-x-addon-symbolic",       self._on_export_extensions))
-        box.append(_flat_row("Экспорт приложений…",    "application-x-executable-symbolic",  self._on_export_apps))
-
-        self._preset_popover.set_child(box)
-
-    def _on_preset_selected(self, name: str):
-        self._preset_popover.popdown()
-        for p_name, path in profile_module.list_presets():
-            if p_name == name:
-                try:
-                    data = profile_module.load_preset(path)
-                    show_preset_import_dialog(self, data, self._do_apply_preset)
-                except Exception as e:
-                    self._log(f"✘ Ошибка загрузки пресета: {e}\n")
-                return
-
-    def _on_preset_save_new(self, *_):
-        self._preset_popover.popdown()
-        existing = [n for n, _ in profile_module.list_presets()]
-        show_preset_save_dialog(self, existing, self._do_save_preset)
-
-    def _on_preset_rename(self, *_):
-        self._preset_popover.popdown()
-        active_name = config.state_get("active_preset")
-        if not active_name:
-            return
-        existing = [n for n, _ in profile_module.list_presets() if n != active_name]
-
-        def _do_rename(new_name: str):
-            for p_name, path in profile_module.list_presets():
-                if p_name == active_name:
-                    try:
-                        data = profile_module.load_preset(path)
-                        new_path = profile_module.save_preset(data, new_name)
-                        if new_path != path:
-                            path.unlink(missing_ok=True)
-                        config.state_set("active_preset", new_name)
-                        self._refresh_preset_menu()
-                        self._log(f"✔ Пресет переименован: «{active_name}» → «{new_name}»\n")
-                    except Exception as e:
-                        self._log(f"✘ Ошибка переименования: {e}\n")
-                    return
-
-        show_preset_save_dialog(self, existing, _do_rename)
-
-    def _on_preset_delete(self, *_):
-        self._preset_popover.popdown()
-        active_name = config.state_get("active_preset")
-        if not active_name:
-            return
-
-        d = Adw.AlertDialog(
-            heading=f"Удалить пресет «{active_name}»?",
-            body="Файл пресета будет удалён. Это действие нельзя отменить.",
-        )
-        d.add_response("cancel", "Отмена")
-        d.add_response("delete", "Удалить")
-        d.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
-        d.set_default_response("cancel")
-        d.set_close_response("cancel")
-
-        def _on_resp(_, r):
-            if r != "delete":
-                return
-            for p_name, path in profile_module.list_presets():
-                if p_name == active_name:
-                    try:
-                        path.unlink(missing_ok=True)
-                        config.state_set("active_preset", None)
-                        self._refresh_preset_menu()
-                        self._log(f"🗑 Пресет «{active_name}» удалён.\n")
-                    except Exception as e:
-                        self._log(f"✘ Ошибка удаления: {e}\n")
-                    return
-
-        d.connect("response", _on_resp)
-        d.present(self)
-
-    def _on_preset_export_file(self, *_):
-        self._preset_popover.popdown()
-        active_name = config.state_get("active_preset") or "Default"
-
-        date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-        safe_name = "".join(c if c.isalnum() or c in " _-" else "_" for c in active_name).strip()
-        filename = f"{safe_name}-{date_str}.altbooster"
-
-        dialog = Gtk.FileDialog()
-        dialog.set_title("Экспортировать пресет")
-        dialog.set_initial_name(filename)
-
-        def _on_save(d, res):
-            try:
-                file = d.save_finish(res)
-                if not file:
-                    return
-                for p_name, path in profile_module.list_presets():
-                    if p_name == active_name:
-                        shutil.copy2(path, file.get_path())
-                        self._log(f"✔ Пресет «{active_name}» экспортирован в {file.get_path()}\n")
-                        self.add_toast(Adw.Toast(title="Пресет экспортирован"))
-                        return
-                dest = file.get_path()
-                self._log(f"💾 Собираю текущее состояние для экспорта...\n")
-
-                def _collect():
-                    try:
-                        data = profile_module.collect_profile(active_name, self._apps._data)
-                        Path(dest).write_text(
-                            json.dumps(data, ensure_ascii=False, indent=2),
-                            encoding="utf-8",
-                        )
-                        GLib.idle_add(self._log, f"✔ Пресет экспортирован в {dest}\n")
-                        GLib.idle_add(self.add_toast, Adw.Toast(title="Пресет экспортирован"))
-                    except Exception as e:
-                        GLib.idle_add(self._log, f"✘ Ошибка экспорта: {e}\n")
-
-                threading.Thread(target=_collect, daemon=True).start()
-            except GLib.Error as e:
-                if e.code != 2:
-                    self._log(f"✘ Ошибка экспорта: {e}\n")
-
-        self._file_dialog = dialog
-        dialog.save(self, None, _on_save)
-
-    def _on_preset_import_file(self, *_):
-        self._preset_popover.popdown()
-        dialog = Gtk.FileDialog()
-        dialog.set_title("Импортировать пресет")
-
-        f_all = Gtk.FileFilter()
-        f_all.set_name("Файлы ALT Booster (*.altbooster, *.json)")
-        f_all.add_pattern("*.altbooster")
-        f_all.add_pattern("*.json")
-
-        f_preset = Gtk.FileFilter()
-        f_preset.set_name("Пресеты ALT Booster (*.altbooster)")
-        f_preset.add_pattern("*.altbooster")
-
-        f_json = Gtk.FileFilter()
-        f_json.set_name("JSON-экспорт (*.json)")
-        f_json.add_pattern("*.json")
-
-        filters = Gio.ListStore.new(Gtk.FileFilter)
-        filters.append(f_all)
-        filters.append(f_preset)
-        filters.append(f_json)
-        dialog.set_filters(filters)
-
-        def _on_open(d, res):
-            try:
-                file = d.open_finish(res)
-                if file:
-                    self._load_and_show_preset(file.get_path())
-            except GLib.Error as e:
-                if e.code != 2:
-                    self._log(f"✘ Ошибка выбора файла: {e}\n")
-
-        self._file_dialog = dialog
-        dialog.open(self, None, _on_open)
-
-    def _on_export_extensions(self, *_):
-        self._preset_popover.popdown()
-
-        d = Adw.AlertDialog(
-            heading="Экспорт расширений",
-            body="Что включить в файл экспорта?",
-        )
-        d.add_response("list",   "Только список")
-        d.add_response("full",   "Список + настройки")
-        d.add_response("cancel", "Отмена")
-        d.set_default_response("full")
-        d.set_close_response("cancel")
-
-        def _on_choice(_, response):
-            if response == "cancel":
-                return
-
-            include_dconf = (response == "full")
-
-            def _collect_and_save():
-                try:
-                    r_list = subprocess.run(
-                        ["gnome-extensions", "list", "--enabled"],
-                        capture_output=True, text=True, timeout=10,
-                    )
-                    enabled = [u.strip() for u in r_list.stdout.splitlines() if u.strip()]
-
-                    ext_data: dict = {"altbooster_extensions_backup": True, "extensions": enabled}
-
-                    if include_dconf:
-                        r_dconf = subprocess.run(
-                            ["dconf", "dump", "/org/gnome/shell/extensions/"],
-                            capture_output=True, text=True, timeout=10,
-                        )
-                        ext_data["extensions_dconf"] = r_dconf.stdout if r_dconf.returncode == 0 else ""
-
-                    GLib.idle_add(_show_save_dialog, ext_data)
-                except Exception as e:
-                    GLib.idle_add(self._log, f"✘ Ошибка сбора данных расширений: {e}\n")
-
-            def _show_save_dialog(ext_data):
-                date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-                suffix = "-full" if include_dconf else "-list"
-                filename = f"extensions{suffix}-{date_str}.json"
-
-                fdialog = Gtk.FileDialog()
-                fdialog.set_title("Экспорт расширений")
-                fdialog.set_initial_name(filename)
-
-                flt = Gtk.FileFilter()
-                flt.set_name("JSON (*.json)")
-                flt.add_pattern("*.json")
-                filters = Gio.ListStore.new(Gtk.FileFilter)
-                filters.append(flt)
-                fdialog.set_filters(filters)
-
-                def _on_save(fd, res):
-                    try:
-                        file = fd.save_finish(res)
-                        if not file:
-                            return
-                        Path(file.get_path()).write_text(
-                            json.dumps(ext_data, ensure_ascii=False, indent=2),
-                            encoding="utf-8",
-                        )
-                        self._log(f"✔ Расширения экспортированы в {file.get_path()}\n")
-                        self.add_toast(Adw.Toast(title="Расширения экспортированы"))
-                    except GLib.Error as e:
-                        if e.code != 2:
-                            self._log(f"✘ Ошибка сохранения: {e}\n")
-
-                self._file_dialog = fdialog
-                fdialog.save(self, None, _on_save)
-
-            threading.Thread(target=_collect_and_save, daemon=True).start()
-
-        d.connect("response", _on_choice)
-        d.present(self)
-
-    def _on_export_apps(self, *_):
-        self._preset_popover.popdown()
-
-        self._log("💾 Собираю список установленных приложений...\n")
-
-        def _collect():
-            try:
-                apps = profile_module._get_installed_apps(self._apps._data)
-                apps_data = {
-                    "altbooster_apps_backup": True,
-                    "apps": apps,
-                }
-                GLib.idle_add(_show_save_dialog, apps_data)
-            except Exception as e:
-                GLib.idle_add(self._log, f"✘ Ошибка сбора приложений: {e}\n")
-
-        def _show_save_dialog(apps_data):
-            date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-
-            fdialog = Gtk.FileDialog()
-            fdialog.set_title("Экспорт приложений")
-            fdialog.set_initial_name(f"apps-{date_str}.json")
-
-            flt = Gtk.FileFilter()
-            flt.set_name("JSON (*.json)")
-            flt.add_pattern("*.json")
-            filters = Gio.ListStore.new(Gtk.FileFilter)
-            filters.append(flt)
-            fdialog.set_filters(filters)
-
-            def _on_save(fd, res):
-                try:
-                    file = fd.save_finish(res)
-                    if not file:
-                        return
-                    Path(file.get_path()).write_text(
-                        json.dumps(apps_data, ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
-                    count = len(apps_data["apps"])
-                    self._log(f"✔ Приложения экспортированы ({count} шт.) в {file.get_path()}\n")
-                    self.add_toast(Adw.Toast(title=f"Приложения экспортированы ({count})"))
-                except GLib.Error as e:
-                    if e.code != 2:
-                        self._log(f"✘ Ошибка сохранения: {e}\n")
-
-            self._file_dialog = fdialog
-            fdialog.save(self, None, _on_save)
-
-        threading.Thread(target=_collect, daemon=True).start()
-
-    def _load_and_show_preset(self, path_str: str):
-        try:
-            data = profile_module.load_preset(Path(path_str))
-            show_preset_import_dialog(self, data, self._do_apply_preset)
-        except Exception as e:
-            self._log(f"✘ Ошибка чтения пресета: {e}\n")
-
-    def _do_save_preset(self, name: str):
-        self._log(f"💾 Сохраняю пресет «{name}»...\n")
-
-        def _worker():
-            try:
-                data = profile_module.collect_profile(name, self._apps._data)
-                profile_module.save_preset(data, name)
-                config.state_set("active_preset", name)
-                GLib.idle_add(self._refresh_preset_menu)
-                GLib.idle_add(self._log, f"✔ Пресет «{name}» сохранён.\n")
-                GLib.idle_add(self.add_toast, Adw.Toast(title=f"Пресет «{name}» сохранён"))
-            except Exception as e:
-                GLib.idle_add(self._log, f"✘ Ошибка сохранения пресета: {e}\n")
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _find_app_install_cmd(self, app_info: dict) -> list | None:
-        app_id = app_info.get("id")
-        source_label = app_info.get("source_label", "")
-        for group in self._apps._data.get("groups", []):
-            for item in group.get("items", []):
-                if item.get("id") != app_id:
-                    continue
-                sources = item.get("sources") or (
-                    [item["source"]] if item.get("source") else []
-                )
-                for src in sources:
-                    if not source_label or src.get("label") == source_label:
-                        return src.get("cmd")
-                if sources:
-                    return sources[0].get("cmd")
-        return None
-
-    def _do_apply_preset(self, data: dict, flags: dict):
-        name = data.get("name", "Пресет")
-
-        deferred_settings: list[dict] = []
-        if flags.get("settings"):
-            deferred_settings = profile_module.apply_settings(data)
-            self._log("✔ Настройки из пресета применены.\n")
-            if data.get("custom_apps"):
-                GLib.idle_add(self._apps._load_and_build)
-
-        config.state_set("active_preset", name)
-        GLib.idle_add(self._refresh_preset_menu)
-
-        cmds: list[tuple[str, list, str]] = []
-
-        if flags.get("apps"):
-            for app_info in data.get("apps") or []:
-                cmd = self._find_app_install_cmd(app_info)
-                if cmd:
-                    kind = "epm" if cmd and cmd[0] == "epm" else "privileged"
-                    cmds.append((app_info.get("label", app_info["id"]), cmd, kind))
-
-        for entry in deferred_settings:
-            pkg = profile_module.theme_package(entry.get("value", ""))
-            if pkg:
-                cmds.append((entry["value"], ["apt-get", "install", "-y", pkg], "privileged"))
-
-        if flags.get("extensions"):
-            _system_ext_dir = Path("/usr/share/gnome-shell/extensions")
-            gext = shutil.which("gext") or str(
-                Path.home() / ".local" / "bin" / "gext"
-            )
-
-            installed_uuids = set()
-            try:
-                r_list = subprocess.run(["gnome-extensions", "list"], capture_output=True, text=True)
-                installed_uuids = set(line.strip() for line in r_list.stdout.splitlines() if line.strip())
-            except Exception:
-                pass
-
-            for uuid in data.get("extensions") or []:
-                if uuid in installed_uuids or (_system_ext_dir / uuid).exists():
-                    continue
-                cmds.append((uuid, [gext, "install", uuid], "shell"))
-
-        if not cmds:
-            self.add_toast(Adw.Toast(title=f"Пресет «{name}» применён"))
-            return
-
-        total = len(cmds)
-        self._log(f"▶ Применяю пресет «{name}»: {total} операций...\n")
-        self.start_progress(f"Применяю пресет «{name}»")
-
-        def _worker():
-            ok_count = 0
-
-            has_flatpak_src = any(
-                cmd and cmd[0] == "flatpak"
-                for _, cmd, _ in cmds
-            )
-            if has_flatpak_src and not shutil.which("flatpak"):
-                GLib.idle_add(self._log, "▶ Flatpak не найден, устанавливаю...\n")
-                backend.run_epm_sync(["epm", "-i", "-y", "flatpak"], lambda l: GLib.idle_add(self._log, l))
-
-            for label, cmd, kind in cmds:
-                GLib.idle_add(self._log, f"📦 {label}...\n")
-                if kind == "epm":
-                    ok = backend.run_epm_sync(cmd, lambda l: GLib.idle_add(self._log, l))
-                elif kind == "shell":
-                    r = subprocess.run(cmd, capture_output=True, text=True)
-                    if r.stdout:
-                        GLib.idle_add(self._log, r.stdout)
-                    ok = r.returncode == 0
-                else:
-                    ok = backend.run_privileged_sync(cmd, lambda l: GLib.idle_add(self._log, l))
-                if ok:
-                    ok_count += 1
-
-            for entry in deferred_settings:
-                if profile_module.theme_exists(entry.get("value", "")):
-                    backend.run_gsettings(["set", entry["schema"], entry["key"], entry["value"]])
-
-            dconf_text = data.get("extensions_dconf", "")
-            if dconf_text and flags.get("extensions"):
-                GLib.idle_add(self._log, "▶ Восстанавливаю конфиги расширений...\n")
-                try:
-                    proc = subprocess.run(
-                        ["dconf", "load", "/org/gnome/shell/extensions/"],
-                        input=dconf_text, text=True, capture_output=True,
-                    )
-                    if proc.returncode == 0:
-                        GLib.idle_add(self._log, "✔ Конфиги расширений восстановлены.\n")
-                    else:
-                        GLib.idle_add(self._log, f"⚠ dconf load: {proc.stderr.strip()}\n")
-                except Exception as e:
-                    GLib.idle_add(self._log, f"⚠ dconf load: {e}\n")
-
-            GLib.idle_add(self.stop_progress, ok_count == total)
-            GLib.idle_add(
-                self.add_toast,
-                Adw.Toast(title=f"Пресет «{name}» применён ({ok_count}/{total})"),
-            )
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-
-    def _build_profile_banner(self) -> Gtk.Revealer:
-        outer = Gtk.Box()
-        outer.set_halign(Gtk.Align.CENTER)
-        outer.set_margin_top(4)
-        outer.set_margin_bottom(2)
-        outer.set_opacity(0.92)
-
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        box.add_css_class("ab-float-banner")
-
-        icon = Gtk.Image.new_from_icon_name("document-open-symbolic")
-        icon.set_pixel_size(16)
-        box.append(icon)
-
-        self._profile_banner_label = Gtk.Label()
-        self._profile_banner_label.set_xalign(0.0)
-        box.append(self._profile_banner_label)
-
-        import_btn = Gtk.Button(label="Импортировать")
-        import_btn.add_css_class("suggested-action")
-        import_btn.add_css_class("pill")
-        import_btn.set_valign(Gtk.Align.CENTER)
-        import_btn.connect("clicked", self._on_profile_banner_import)
-        box.append(import_btn)
-
-        close_btn = Gtk.Button()
-        close_btn.set_icon_name("window-close-symbolic")
-        close_btn.add_css_class("flat")
-        close_btn.add_css_class("circular")
-        close_btn.set_valign(Gtk.Align.CENTER)
-        close_btn.connect("clicked", self._on_profile_banner_dismiss)
-        box.append(close_btn)
-
-        outer.append(box)
-
-        self._profile_banner_revealer = Gtk.Revealer()
-        self._profile_banner_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
-        self._profile_banner_revealer.set_transition_duration(300)
-        self._profile_banner_revealer.set_child(outer)
-        self._profile_banner_revealer.set_reveal_child(False)
-        self._profile_banner_path = None
-        return self._profile_banner_revealer
-
-
-    def _build_relogin_banner(self) -> Gtk.Revealer:
-        btn = Gtk.Button()
-        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        icon = Gtk.Image.new_from_icon_name("system-log-out-symbolic")
-        icon.set_pixel_size(16)
-        btn_box.append(icon)
-        btn_box.append(Gtk.Label(label="Перезайти в сессию"))
-        btn.set_child(btn_box)
-        btn.add_css_class("suggested-action")
-        btn.add_css_class("pill")
-        btn.set_margin_end(16)
-        btn.set_margin_bottom(16)
-        btn.set_halign(Gtk.Align.END)
-        btn.set_valign(Gtk.Align.END)
-        btn.connect("clicked", self._on_relogin_clicked)
-
-        revealer = Gtk.Revealer()
-        revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
-        revealer.set_transition_duration(300)
-        revealer.set_child(btn)
-        revealer.set_reveal_child(False)
-        revealer.set_halign(Gtk.Align.END)
-        revealer.set_valign(Gtk.Align.END)
-        revealer.set_can_target(False)
-        return revealer
-
-    def show_relogin_banner(self):
-        self._relogin_revealer.set_can_target(True)
-        self._relogin_revealer.set_reveal_child(True)
-
-    def _on_relogin_clicked(self, _btn):
-        self._relogin_revealer.set_reveal_child(False)
-        self._relogin_revealer.set_can_target(False)
-        subprocess.Popen(["gnome-session-quit", "--logout", "--no-prompt"])
-
-    def _check_for_import_candidates(self):
-        def _find():
-            candidates = profile_module.find_import_candidates()
-            dismissed = set(config.state_get("dismissed_profiles") or [])
-            for path in candidates:
-                if str(path) not in dismissed:
-                    GLib.idle_add(self._show_profile_banner, path)
-                    return
-
-        threading.Thread(target=_find, daemon=True).start()
-
-    def _show_profile_banner(self, path):
-        self._profile_banner_path = path
-        self._profile_banner_label.set_text(f"Найден пресет: {path.name}")
-        self._profile_banner_revealer.set_reveal_child(True)
-
-    def _on_profile_banner_import(self, *_):
-        self._profile_banner_revealer.set_reveal_child(False)
-        if self._profile_banner_path:
-            self._load_and_show_preset(str(self._profile_banner_path))
-
-    def _on_profile_banner_dismiss(self, *_):
-        self._profile_banner_revealer.set_reveal_child(False)
-        if self._profile_banner_path:
-            dismissed = list(config.state_get("dismissed_profiles") or [])
-            key = str(self._profile_banner_path)
-            if key not in dismissed:
-                dismissed.append(key)
-                config.state_set("dismissed_profiles", dismissed)
 
     def _on_update_found_global(self, version):
         self._update_banner_label.set_text(f"Доступна новая версия {version}")
@@ -1265,7 +672,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._maint.refresh_checks()
         self._log("👋 Добро пожаловать в ALT Booster. С чего начнём?\n")
         self._status_label.set_label("Готов к работе")
-        GLib.idle_add(self._check_for_import_candidates)
 
 
     def _load_settings(self):
