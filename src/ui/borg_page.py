@@ -1518,8 +1518,25 @@ class BorgPage(Gtk.Box):
         self._tm_sysinfo_label2.set_label("")
         sysinfo_card.append(self._tm_sysinfo_label2)
 
+        self._tm_sysinfo_card = sysinfo_card
         self._tm_box.append(sysinfo_card)
         threading.Thread(target=self._tm_load_sysinfo, daemon=True).start()
+
+        def _update_sysinfo_visibility(*_):
+            root = self._tm_sysinfo_card.get_root()
+            if root:
+                should = root.get_width() >= 800
+                if self._tm_sysinfo_card.get_visible() != should:
+                    self._tm_sysinfo_card.set_visible(should)
+
+        def _on_sysinfo_mapped(widget):
+            root = widget.get_root()
+            if root:
+                root.connect("notify::default-width", _update_sysinfo_visibility)
+                root.connect("notify::maximized", _update_sysinfo_visibility)
+                _update_sysinfo_visibility()
+
+        sysinfo_card.connect("map", _on_sysinfo_mapped)
 
         # ── заголовок «Резервные копии» + кнопка обновить ────────────────
         backups_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
