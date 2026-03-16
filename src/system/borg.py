@@ -15,6 +15,49 @@ from gi.repository import GLib
 import config
 
 
+OPTIONAL_EXCLUDES = [
+    {
+        "key": "steam_games",
+        "title": "Игры Steam",
+        "description": "steamapps/common — включите, чтобы сразу играть после восстановления",
+        "paths": [
+            "~/.local/share/Steam/steamapps/common",
+            "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common",
+        ],
+    },
+    {
+        "key": "vm_images",
+        "title": "Образы виртуальных машин",
+        "description": "GNOME Boxes, libvirt, VirtualBox — образы дисков",
+        "paths": [
+            "~/.local/share/gnome-boxes/images",
+            "~/.var/app/org.gnome.Boxes/data/gnome-boxes/images",
+            "~/.local/share/libvirt/images",
+            "~/.config/VirtualBox/*.vdi",
+            "~/.config/VirtualBox/*.vmdk",
+            "~/.config/VirtualBox/*.vhd",
+        ],
+    },
+    {
+        "key": "containers",
+        "title": "Контейнеры Podman / Docker",
+        "description": "~/.local/share/containers — образы и данные контейнеров",
+        "paths": [
+            "~/.local/share/containers",
+        ],
+    },
+    {
+        "key": "heroic_tools",
+        "title": "Wine / Proton для Heroic Games",
+        "description": "Дистрибутивы Wine и Proton — перекачиваются автоматически",
+        "paths": [
+            "~/.var/app/com.heroicgameslauncher.hgl/config/heroic/tools",
+        ],
+    },
+]
+
+_OPTIONAL_PATHS = {p for g in OPTIONAL_EXCLUDES for p in g["paths"]}
+
 DEFAULT_EXCLUDES = [
     # системный кэш
     "~/.cache",
