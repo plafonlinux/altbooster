@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import threading
 import urllib.request
@@ -8,6 +9,7 @@ from pathlib import Path
 CONFIG_DIR  = Path.home() / ".config" / "altbooster"
 CONFIG_FILE = CONFIG_DIR / "window.json"
 STATE_FILE  = CONFIG_DIR / "state.json"
+SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
 
 VERSION = "5.6.8-beta"
 
@@ -42,8 +44,9 @@ def load_state() -> None:
 def save_state() -> None:
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        with open(STATE_FILE, "w") as f:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(_state, f, indent=2)
+        os.chmod(STATE_FILE, 0o600)
     except OSError:
         pass
 

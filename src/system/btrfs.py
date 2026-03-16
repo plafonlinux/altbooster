@@ -14,10 +14,6 @@ import config
 from system import privileges
 
 
-def _systemd_user_dir() -> Path:
-    return Path.home() / ".config" / "systemd" / "user"
-
-
 def get_btrfs_mount_for_home() -> str | None:
     home = os.path.expanduser("~")
     try:
@@ -44,7 +40,6 @@ def get_snapshots_dir() -> Path:
     return Path.home() / ".local" / "share" / "altbooster" / "btrfs-snapshots"
 
 
-
 def btrfs_snapshot_create(on_line, on_done) -> None:
     mount_point = get_btrfs_mount_for_home()
     if not mount_point:
@@ -61,10 +56,7 @@ def btrfs_snapshot_create(on_line, on_done) -> None:
         f"btrfs subvolume snapshot -r {shlex.quote(mount_point)} {shlex.quote(str(snapshot_path))}"
     )
 
-    def _on_done(ok: bool):
-        on_done(ok)
-
-    privileges.run_privileged(["bash", "-c", cmd_str], on_line, _on_done)
+    privileges.run_privileged(["bash", "-c", cmd_str], on_line, on_done)
 
 
 def btrfs_snapshot_list(on_done) -> None:
@@ -188,7 +180,7 @@ def btrfs_snapshot_size(snapshot_path: str, on_done) -> None:
 
 
 def write_btrfs_systemd_units(interval_hours: int, keep_count: int) -> bool:
-    d = _systemd_user_dir()
+    d = config.SYSTEMD_USER_DIR
     d.mkdir(parents=True, exist_ok=True)
 
     mount_point = get_btrfs_mount_for_home()
@@ -274,6 +266,6 @@ def get_btrfs_timer_next_run() -> str | None:
                         usec = int(val)
                         dt = datetime.fromtimestamp(usec / 1_000_000)
                         return dt.strftime("%d.%m.%Y %H:%M")
-    except (ValueError, Exception):
+    except Exception:
         pass
     return None

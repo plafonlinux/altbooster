@@ -546,9 +546,8 @@ def generate_extensions_meta(target_dir: Path) -> bool:
         )
         if r_dconf.returncode == 0:
             ext_data["extensions_dconf"] = r_dconf.stdout
-        import json as _json
         (target_dir / "extensions.json").write_text(
-            _json.dumps(ext_data, ensure_ascii=False, indent=2), encoding="utf-8",
+            json.dumps(ext_data, ensure_ascii=False, indent=2), encoding="utf-8",
         )
         return True
     except Exception:
@@ -643,12 +642,15 @@ def restore_dconf_meta(meta_dir: Path) -> bool:
         return False
 
 
-def _systemd_user_dir() -> Path:
-    return Path.home() / ".config" / "systemd" / "user"
+def _run_systemctl(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["systemctl", "--user", *args],
+        capture_output=True, text=True, encoding="utf-8", timeout=10,
+    )
 
 
 def write_systemd_units(repo_path: str, paths: list[str], calendar_expr: str) -> bool:
-    d = _systemd_user_dir()
+    d = config.SYSTEMD_USER_DIR
     d.mkdir(parents=True, exist_ok=True)
     passphrase = config.state_get("borg_passphrase", "") or ""
     ssh_key = borg_ssh_key_path()
@@ -698,25 +700,16 @@ def write_systemd_units(repo_path: str, paths: list[str], calendar_expr: str) ->
 
 def enable_systemd_timer() -> bool:
     try:
-        r1 = subprocess.run(
-            ["systemctl", "--user", "daemon-reload"],
-            capture_output=True, timeout=10,
-        )
-        r2 = subprocess.run(
-            ["systemctl", "--user", "enable", "--now", "altbooster-backup.timer"],
-            capture_output=True, timeout=10,
-        )
-        return r1.returncode == 0 and r2.returncode == 0
+        _run_systemctl(["daemon-reload"])
+        r = _run_systemctl(["enable", "--now", "altbooster-backup.timer"])
+        return r.returncode == 0
     except Exception:
         return False
 
 
 def disable_systemd_timer() -> bool:
     try:
-        r = subprocess.run(
-            ["systemctl", "--user", "disable", "--now", "altbooster-backup.timer"],
-            capture_output=True, timeout=10,
-        )
+        r = _run_systemctl(["disable", "--now", "altbooster-backup.timer"])
         return r.returncode == 0
     except Exception:
         return False
@@ -724,10 +717,7 @@ def disable_systemd_timer() -> bool:
 
 def is_timer_active() -> bool:
     try:
-        r = subprocess.run(
-            ["systemctl", "--user", "is-active", "altbooster-backup.timer"],
-            capture_output=True, timeout=5,
-        )
+        r = _run_systemctl(["is-active", "altbooster-backup.timer"])
         return r.returncode == 0
     except Exception:
         return False
@@ -735,11 +725,7 @@ def is_timer_active() -> bool:
 
 def get_timer_next_run() -> str | None:
     try:
-        r = subprocess.run(
-            ["systemctl", "--user", "show", "altbooster-backup.timer",
-             "--property=NextElapseUSecRealtime"],
-            capture_output=True, text=True, encoding="utf-8", timeout=5,
-        )
+        r = _run_systemctl(["show", "altbooster-backup.timer", "--property=NextElapseUSecRealtime"])
         for line in r.stdout.splitlines():
             if "=" in line:
                 val = line.split("=", 1)[1].strip()

@@ -158,7 +158,7 @@ def is_fairlight_installed() -> bool:
         asound = "/etc/asound.conf"
         if not os.path.exists(asound):
             return False
-        with open(asound) as f:
+        with open(asound, encoding="utf-8") as f:
             return "type pulse" in f.read()
     except (subprocess.TimeoutExpired, OSError):
         return False
