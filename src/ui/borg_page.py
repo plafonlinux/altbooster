@@ -1460,8 +1460,18 @@ class BorgPage(Gtk.Box):
         self._build_prune_group()
         self._stack.add_titled_with_icon(scroll, "schedule", "График", "alarm-symbolic")
 
-    def _build_time_machine_tab(self) -> Gtk.ScrolledWindow:
-        scroll, self._tm_box = make_scrolled_page()
+    def _build_time_machine_tab(self) -> Gtk.Widget:
+        self._tm_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        self._tm_box.set_margin_top(20)
+        self._tm_box.set_margin_bottom(20)
+        self._tm_box.set_margin_start(20)
+        self._tm_box.set_margin_end(20)
+        self._tm_box.set_vexpand(True)
+
+        clamp = Adw.Clamp()
+        clamp.set_maximum_size(1152)
+        clamp.set_tightening_threshold(864)
+        clamp.set_child(self._tm_box)
 
         # ── строка: заголовок + эксперт-кнопка ──────────────────────────
         top_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -1511,11 +1521,22 @@ class BorgPage(Gtk.Box):
         self._tm_box.append(sysinfo_card)
         threading.Thread(target=self._tm_load_sysinfo, daemon=True).start()
 
-        # ── заголовок «Резервные копии» ──────────────────────────────────
+        # ── заголовок «Резервные копии» + кнопка обновить ────────────────
+        backups_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         backups_label = Gtk.Label(label="Резервные копии")
         backups_label.add_css_class("heading")
         backups_label.set_halign(Gtk.Align.START)
-        self._tm_box.append(backups_label)
+        backups_label.set_hexpand(True)
+        refresh_btn = Gtk.Button()
+        refresh_btn.set_icon_name("view-refresh-symbolic")
+        refresh_btn.add_css_class("flat")
+        refresh_btn.add_css_class("circular")
+        refresh_btn.set_valign(Gtk.Align.CENTER)
+        refresh_btn.set_tooltip_text("Обновить список архивов")
+        refresh_btn.connect("clicked", lambda _: self._tm_refresh_archives())
+        backups_header.append(backups_label)
+        backups_header.append(refresh_btn)
+        self._tm_box.append(backups_header)
 
         # ── спиннер / пустое состояние ───────────────────────────────────
         self._tm_spinner = Gtk.Spinner()
@@ -1524,6 +1545,7 @@ class BorgPage(Gtk.Box):
         self._tm_box.append(self._tm_spinner)
 
         self._tm_placeholder = Adw.StatusPage()
+        self._tm_placeholder.add_css_class("compact")
         self._tm_placeholder.set_visible(False)
         self._tm_box.append(self._tm_placeholder)
 
@@ -1582,8 +1604,36 @@ class BorgPage(Gtk.Box):
         self._tm_repo_slot = Gtk.Box()
         self._tm_box.append(self._tm_repo_slot)
 
-        scroll.connect("map", lambda _: (self._tm_refresh_archives(), self._move_repo_group_to(self._tm_repo_slot)))
-        return scroll
+        # ── блок переноса на другой компьютер ────────────────────────────
+        transfer_group = Adw.PreferencesGroup()
+        transfer_group.set_title("Перенос на другой компьютер")
+
+        self._sw_tar_export = Adw.SwitchRow()
+        self._sw_tar_export.set_title("Сохранять .tar после бэкапа")
+        self._sw_tar_export.set_subtitle("Копирует borg-репозиторий в один .tar-файл на указанный носитель")
+        self._sw_tar_export.set_active(config.state_get("borg_tar_export_enabled", False))
+        self._sw_tar_export.connect("notify::active", self._on_tar_export_toggled)
+        transfer_group.add(self._sw_tar_export)
+
+        self._row_tar_path = Adw.EntryRow()
+        self._row_tar_path.set_title("Папка назначения")
+        self._row_tar_path.set_text(config.state_get("borg_tar_export_path", "") or "")
+        self._row_tar_path.set_show_apply_button(True)
+        self._row_tar_path.connect("apply", lambda _: config.state_set("borg_tar_export_path", self._row_tar_path.get_text().strip()))
+        self._row_tar_path.set_visible(config.state_get("borg_tar_export_enabled", False))
+
+        tar_pick_btn = Gtk.Button()
+        tar_pick_btn.set_icon_name("folder-open-symbolic")
+        tar_pick_btn.add_css_class("flat")
+        tar_pick_btn.set_valign(Gtk.Align.CENTER)
+        tar_pick_btn.connect("clicked", self._on_pick_tar_folder)
+        self._row_tar_path.add_suffix(tar_pick_btn)
+        transfer_group.add(self._row_tar_path)
+
+        self._tm_box.append(transfer_group)
+
+        clamp.connect("map", lambda _: (self._tm_refresh_archives(), self._move_repo_group_to(self._tm_repo_slot)))
+        return clamp
 
     def _tm_load_sysinfo(self):
         _ansi = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
@@ -1638,7 +1688,7 @@ class BorgPage(Gtk.Box):
         simple = (slot is self._tm_repo_slot)
         self._repo_group.set_title("Куда сохранять" if simple else "Расположение")
         self._row_repo_path.set_title("Папка для резервных копий" if simple else "Путь к хранилищу")
-        self._row_passphrase.set_visible(not simple)
+        self._row_passphrase.set_visible(True)
         self._ssh_section.set_visible(not simple)
         slot.append(self._repo_group)
 
@@ -1648,8 +1698,8 @@ class BorgPage(Gtk.Box):
             return
 
         def _worker():
-            archives = list(reversed(backend.borg_list(repo_path)))
-            GLib.idle_add(self._tm_show_delete_dialog, archives)
+            archives, _ = backend.borg_list(repo_path)
+            GLib.idle_add(self._tm_show_delete_dialog, list(reversed(archives)))
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -1712,17 +1762,17 @@ class BorgPage(Gtk.Box):
         self._tm_show_placeholder("loading")
 
         def _worker():
-            archives = backend.borg_list(repo_path)
-            GLib.idle_add(self._tm_populate_archives, list(reversed(archives)))
+            archives, error = backend.borg_list(repo_path)
+            GLib.idle_add(self._tm_populate_archives, list(reversed(archives)), error)
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _tm_populate_archives(self, archives: list[dict]):
+    def _tm_populate_archives(self, archives: list[dict], error: str = ""):
         while self._tm_carousel.get_n_pages() > 0:
             self._tm_carousel.remove(self._tm_carousel.get_nth_page(0))
 
         if not archives:
-            self._tm_show_placeholder("empty")
+            self._tm_show_placeholder("empty", error)
             return
 
         for archive in archives:
@@ -1735,6 +1785,8 @@ class BorgPage(Gtk.Box):
         self._tm_carousel.set_visible(True)
         self._tm_carousel_row.set_visible(True)
         self._tm_dots.set_visible(True)
+        self._tm_create_btn.set_visible(True)
+        self._tm_delete_btn.set_visible(True)
         self._tm_update_nav_buttons()
 
     def _tm_build_archive_card(self, archive: dict) -> Gtk.Box:
@@ -1793,7 +1845,7 @@ class BorgPage(Gtk.Box):
 
         return card
 
-    def _tm_show_placeholder(self, state: str):
+    def _tm_show_placeholder(self, state: str, error: str = ""):
         self._tm_carousel.set_visible(False)
         self._tm_carousel_row.set_visible(False)
         self._tm_dots.set_visible(False)
@@ -1802,6 +1854,8 @@ class BorgPage(Gtk.Box):
             self._tm_placeholder.set_visible(False)
             self._tm_spinner.set_spinning(True)
             self._tm_spinner.set_visible(True)
+            self._tm_create_btn.set_visible(False)
+            self._tm_delete_btn.set_visible(False)
             return
 
         self._tm_spinner.set_spinning(False)
@@ -1810,6 +1864,8 @@ class BorgPage(Gtk.Box):
 
         expert = config.state_get("borg_expert_mode", False)
         if state == "not_configured":
+            self._tm_create_btn.set_visible(False)
+            self._tm_delete_btn.set_visible(False)
             self._tm_placeholder.set_icon_name("drive-harddisk-symbolic")
             if expert:
                 self._tm_placeholder.set_title("Хранилище не настроено")
@@ -1820,19 +1876,39 @@ class BorgPage(Gtk.Box):
                 self._tm_placeholder.set_child(btn)
             else:
                 self._tm_placeholder.set_title("Резервных копий пока нет")
-                self._tm_placeholder.set_description("Нажмите «Создать резервную копию» для первого бэкапа")
-                self._tm_placeholder.set_child(None)
+                self._tm_placeholder.set_description("Создайте первый бэкап или откройте существующий архив")
+                btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+                btns.set_halign(Gtk.Align.CENTER)
+                btn_create = Gtk.Button(label="Создать первый бэкап")
+                btn_create.add_css_class("pill")
+                btn_create.add_css_class("suggested-action")
+                btn_create.connect("clicked", lambda _: self._tm_on_create())
+                btn_open = Gtk.Button(label="У меня есть архив")
+                btn_open.add_css_class("pill")
+                btn_open.add_css_class("flat")
+                btn_open.connect("clicked", lambda _: self._tm_open_existing_dialog())
+                btns.append(btn_create)
+                btns.append(btn_open)
+                self._tm_placeholder.set_child(btns)
         else:
             self._tm_placeholder.set_icon_name("document-revert-symbolic")
             self._tm_placeholder.set_title("Архивов пока нет")
             if expert:
+                self._tm_create_btn.set_visible(False)
+                self._tm_delete_btn.set_visible(False)
                 self._tm_placeholder.set_description("Создайте первый архив на вкладке «Хранилище»")
                 btn = Gtk.Button(label="Создать архив")
                 btn.add_css_class("pill")
                 btn.connect("clicked", lambda _: self._stack.set_visible_child_name("info"))
                 self._tm_placeholder.set_child(btn)
             else:
-                self._tm_placeholder.set_description("Нажмите «Создать резервную копию» ниже")
+                self._tm_create_btn.set_visible(True)
+                self._tm_delete_btn.set_visible(False)
+                if error:
+                    self._tm_placeholder.set_description(error[:200])
+                    self._log(f"borg list: {error}\n")
+                else:
+                    self._tm_placeholder.set_description("Нажмите «Создать резервную копию» ниже")
                 self._tm_placeholder.set_child(None)
 
     def _tm_update_nav_buttons(self):
@@ -1876,6 +1952,81 @@ class BorgPage(Gtk.Box):
         expert = not config.state_get("borg_expert_mode", False)
         config.state_set("borg_expert_mode", expert)
         self._apply_mode(expert)
+
+    def _tm_open_existing_dialog(self):
+        dialog = Adw.AlertDialog(
+            heading="Открыть существующий архив",
+            body="Укажите путь к borg-репозиторию и пароль шифрования (если задан).",
+        )
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.set_margin_top(8)
+
+        path_row = Adw.EntryRow()
+        path_row.set_title("Путь к архиву")
+        path_row.set_text(config.state_get("borg_repo_path", "") or "")
+
+        pick_btn = Gtk.Button()
+        pick_btn.set_icon_name("folder-open-symbolic")
+        pick_btn.add_css_class("flat")
+        pick_btn.set_valign(Gtk.Align.CENTER)
+
+        def _on_folder_selected(fd, result, _):
+            try:
+                folder = fd.select_folder_finish(result)
+                if folder:
+                    path_row.set_text(folder.get_path())
+            except GLib.Error:
+                pass
+
+        def _pick(_btn):
+            try:
+                fd = Gtk.FileDialog()
+                fd.set_title("Выберите папку архива")
+                fd.select_folder(dialog.get_root(), None, _on_folder_selected, None)
+            except AttributeError:
+                fc = Gtk.FileChooserNative(
+                    title="Выберите папку архива",
+                    action=Gtk.FileChooserAction.SELECT_FOLDER,
+                    transient_for=dialog.get_root(),
+                    accept_label="Выбрать",
+                    cancel_label="Отмена",
+                )
+                def _resp(d, r):
+                    if r == Gtk.ResponseType.ACCEPT:
+                        path_row.set_text(d.get_file().get_path())
+                    d.unref()
+                fc.connect("response", _resp)
+                fc.show()
+
+        pick_btn.connect("clicked", _pick)
+        path_row.add_suffix(pick_btn)
+
+        pw_row = Adw.PasswordEntryRow()
+        pw_row.set_title("Пароль архива")
+        pw_row.set_text(config.state_get("borg_passphrase", "") or "")
+
+        box.append(path_row)
+        box.append(pw_row)
+        dialog.set_extra_child(box)
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("open", "Открыть")
+        dialog.set_default_response("open")
+        dialog.set_close_response("cancel")
+
+        def _on_response(d, response):
+            if response != "open":
+                return
+            path = path_row.get_text().strip()
+            if not path:
+                return
+            config.state_set("borg_repo_path", path)
+            config.state_set("borg_passphrase", pw_row.get_text())
+            self._row_repo_path.set_text(path)
+            self._row_passphrase.set_text(pw_row.get_text())
+            self._tm_refresh_archives()
+
+        dialog.connect("response", _on_response)
+        dialog.present(self.get_root())
 
     def _tm_on_create(self):
         repo_path = self._row_repo_path.get_text().strip() or config.state_get("borg_repo_path", "") or ""
@@ -1951,11 +2102,26 @@ class BorgPage(Gtk.Box):
         self._log(f"\n▶  Создание резервной копии {archive_name}...\n")
 
         def _done(ok):
-            if hasattr(win, "stop_progress"):
-                win.stop_progress(ok)
             self._log("✔  Резервная копия создана\n" if ok else "✘  Ошибка при создании резервной копии\n")
             if ok:
                 config.state_set("borg_last_backup", GLib.DateTime.new_now_local().format("%d.%m.%Y %H:%M"))
+                export_enabled = config.state_get("borg_tar_export_enabled", False)
+                export_path = (config.state_get("borg_tar_export_path", "") or "").strip()
+                if export_enabled and export_path:
+                    GLib.idle_add(win.start_progress, "Экспорт в .tar...")
+                    self._log("▶  Экспорт borg-репозитория в .tar...\n")
+
+                    def _on_export_done(ok_exp):
+                        if hasattr(win, "stop_progress"):
+                            win.stop_progress(ok_exp)
+                        self._log("✔  Экспорт завершён\n" if ok_exp else "✘  Ошибка экспорта\n")
+                        GLib.idle_add(self._tm_refresh_archives)
+
+                    backend.borg_export_tar(repo_path, export_path, self._log, _on_export_done)
+                    return
+            if hasattr(win, "stop_progress"):
+                win.stop_progress(ok)
+            if ok:
                 GLib.idle_add(self._tm_refresh_archives)
 
         backend.borg_create(repo_path, archive_name, paths, excludes, self._log, _done)
@@ -2037,6 +2203,7 @@ class BorgPage(Gtk.Box):
         self._row_passphrase = Adw.PasswordEntryRow()
         self._row_passphrase.set_title("Пароль шифрования (опционально)")
         self._row_passphrase.set_text(config.state_get("borg_passphrase", "") or "")
+        self._row_passphrase.set_show_apply_button(True)
         self._row_passphrase.connect("apply", lambda _: self._save_repo_settings())
         self._repo_group.add(self._row_passphrase)
 
@@ -2594,9 +2761,8 @@ class BorgPage(Gtk.Box):
         if not repo_path:
             GLib.idle_add(self._populate_archives, [])
             return
-        archives = backend.borg_list(repo_path)
-        archives_sorted = list(reversed(archives))
-        GLib.idle_add(self._populate_archives, archives_sorted)
+        archives, _ = backend.borg_list(repo_path)
+        GLib.idle_add(self._populate_archives, list(reversed(archives)))
 
     def _populate_archives(self, archives: list[dict]):
         try:
@@ -2752,9 +2918,48 @@ class BorgPage(Gtk.Box):
         except GLib.Error:
             pass
 
+    def _on_tar_export_toggled(self, sw, _):
+        active = sw.get_active()
+        config.state_set("borg_tar_export_enabled", active)
+        self._row_tar_path.set_visible(active)
+
+    def _on_pick_tar_folder(self, _btn):
+        try:
+            fd = Gtk.FileDialog()
+            fd.set_title("Папка для .tar-файла")
+            fd.select_folder(self.get_root(), None, self._on_tar_folder_selected, None)
+        except AttributeError:
+            fc = Gtk.FileChooserNative(
+                title="Папка для .tar-файла",
+                action=Gtk.FileChooserAction.SELECT_FOLDER,
+                transient_for=self.get_root(),
+                accept_label="Выбрать",
+                cancel_label="Отмена",
+            )
+            def _resp(d, r):
+                if r == Gtk.ResponseType.ACCEPT:
+                    p = d.get_file().get_path()
+                    self._row_tar_path.set_text(p)
+                    config.state_set("borg_tar_export_path", p)
+                d.unref()
+            fc.connect("response", _resp)
+            fc.show()
+
+    def _on_tar_folder_selected(self, dialog, result, _):
+        try:
+            folder = dialog.select_folder_finish(result)
+            if folder:
+                p = folder.get_path()
+                self._row_tar_path.set_text(p)
+                config.state_set("borg_tar_export_path", p)
+        except GLib.Error:
+            pass
+
     def _save_repo_settings(self):
         config.state_set("borg_repo_path", self._row_repo_path.get_text().strip())
         config.state_set("borg_passphrase", self._row_passphrase.get_text())
+        if self._stack.get_visible_child_name() == "timemachine":
+            GLib.idle_add(self._tm_refresh_archives)
 
     def _on_install_borg(self, _btn):
         self._btn_install.set_sensitive(False)

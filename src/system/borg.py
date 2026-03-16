@@ -63,10 +63,19 @@ DEFAULT_EXCLUDES = [
     "~/.var/app/ru.linux_gaming.PortProton/data/prefixes/*/drive_c/Program Files (x86)",
     "~/.var/app/ru.linux_gaming.PortProton/data/prefixes/*/drive_c/users/*/AppData/Local/Temp",
     "~/.var/app/ru.linux_gaming.PortProton/data/prefixes/*/drive_c/users/*/AppData/Local/Microsoft/Windows/INetCache",
-    # образы виртуальных машин
+    # образы виртуальных машин и сохранённые состояния (suspend saves)
     "~/.local/share/gnome-boxes/images",
     "~/.var/app/org.gnome.Boxes/data/gnome-boxes/images",
+    "~/.var/app/org.gnome.Boxes/config/libvirt/qemu/save",
     "~/.local/share/libvirt/images",
+    "~/.config/libvirt/qemu/save",
+    # Heroic Games Launcher — дистрибутивы Wine/Proton (re-downloadable)
+    "~/.var/app/com.heroicgameslauncher.hgl/config/heroic/tools",
+    # Warehouse (Flattool) — снимки flatpak-приложений
+    "~/.var/app/io.github.flattool.Warehouse/data/Snapshots",
+    # Telegram — медиакэш
+    "~/.var/app/org.telegram.desktop/data/TelegramDesktop/tdata/user_data/media_cache",
+    "~/.config/TelegramDesktop/tdata/user_data/media_cache",
     "~/.config/VirtualBox/*.vdi",
     "~/.config/VirtualBox/*.vmdk",
     "~/.config/VirtualBox/*.vhd",
@@ -235,18 +244,21 @@ def borg_create(repo_path: str, archive_name: str, paths: list[str], excludes: l
     _run_borg_async(cmd, _on_line_ru, on_done, env=_borg_env(repo_path))
 
 
-def borg_list(repo_path: str) -> list[dict]:
+def borg_list(repo_path: str) -> tuple[list[dict], str]:
     try:
         r = subprocess.run(
             [_borg_exe(), "list", "--json", repo_path],
             capture_output=True, text=True, encoding="utf-8", timeout=30,
             env=_borg_env(repo_path),
         )
-        if r.returncode == 0:
-            return json.loads(r.stdout).get("archives", [])
-    except Exception:
-        pass
-    return []
+        if r.returncode in (0, 1):
+            try:
+                return json.loads(r.stdout).get("archives", []), ""
+            except Exception:
+                pass
+        return [], (r.stderr or r.stdout or f"returncode={r.returncode}").strip()
+    except Exception as e:
+        return [], str(e)
 
 
 def borg_list_archive(repo_path: str, archive_name: str) -> list[dict]:
@@ -327,6 +339,29 @@ def borg_compact(repo_path: str, on_line, on_done) -> None:
         [_borg_exe(), "compact", repo_path],
         on_line, on_done, env=_borg_env(repo_path),
     )
+
+
+def borg_export_tar(repo_path: str, target_dir: str, on_line, on_done) -> None:
+    repo = Path(repo_path)
+    date_str = datetime.datetime.now().strftime("%Y-%m-%d")
+    tar_path = Path(target_dir) / f"borg-backup-{date_str}.tar"
+
+    def _worker():
+        try:
+            Path(target_dir).mkdir(parents=True, exist_ok=True)
+            r = subprocess.run(
+                ["tar", "-cf", str(tar_path), "-C", str(repo.parent), repo.name],
+                capture_output=True, text=True, encoding="utf-8",
+            )
+            if r.stderr:
+                GLib.idle_add(on_line, r.stderr)
+            GLib.idle_add(on_line, f"   → {tar_path}\n")
+            GLib.idle_add(on_done, r.returncode == 0)
+        except Exception as e:
+            GLib.idle_add(on_line, f"   ✘ {e}\n")
+            GLib.idle_add(on_done, False)
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 def borg_ssh_key_path() -> Path:
