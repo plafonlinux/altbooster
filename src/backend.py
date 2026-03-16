@@ -66,6 +66,7 @@ from system.borg import (
     restore_packages_meta,
     restore_dconf_meta,
     borg_archive_info,
+    borg_export_tar,
 )
 from system.btrfs import (
     is_home_on_btrfs,

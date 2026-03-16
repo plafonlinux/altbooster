@@ -121,6 +121,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             p.set_icon_name(icon)
 
         self._stack.set_vexpand(True)
+        self._stack.connect("notify::visible-child", self._on_stack_child_changed)
         stack_overlay = Gtk.Overlay()
         stack_overlay.set_child(self._stack)
         stack_overlay.set_vexpand(True)
@@ -249,6 +250,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._nav_list = nav_list
         self._nav_images: list[Gtk.Image] = []
         self._nav_labels: list[Gtk.Label] = []
+        self._nav_rows: list[Gtk.ListBoxRow] = []
+        self._nav_names: list[str] = []
 
         for name, title, icon_name in [
             ("setup",       "Начало",          "go-home-symbolic"),
@@ -281,6 +284,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             nav_list.append(row)
             self._nav_images.append(img)
             self._nav_labels.append(lbl)
+            self._nav_rows.append(row)
+            self._nav_names.append(name)
 
         nav_list.select_row(nav_list.get_row_at_index(0))
         nav_list.connect("row-selected", self._on_nav_row_selected)
@@ -315,6 +320,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         borg_list.append(borg_row)
         self._nav_images.append(borg_icon)
         self._nav_labels.append(borg_lbl)
+        self._borg_row = borg_row
         self._borg_list = borg_list
 
         def _on_borg_selected(_, row):
@@ -422,6 +428,18 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             self._check_for_updates()
         elif name == "settings":
             self._settings_popover.popup()
+
+    def _on_stack_child_changed(self, stack, _pspec):
+        name = stack.get_visible_child_name()
+        if name == "borg":
+            self._nav_list.unselect_all()
+            self._borg_list.select_row(self._borg_row)
+        else:
+            self._borg_list.unselect_all()
+            for row in self._nav_rows:
+                if row.get_name() == name:
+                    self._nav_list.select_row(row)
+                    return
 
     def _on_nav_row_selected(self, _, row):
         if row is not None:
