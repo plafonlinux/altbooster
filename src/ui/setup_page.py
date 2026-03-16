@@ -431,6 +431,11 @@ class SetupPage(Gtk.Box):
                 if hasattr(win, "stop_progress"):
                     win.stop_progress(False)
 
+            def on_no_changes():
+                _reset_row()
+                if hasattr(win, "stop_progress"):
+                    win.stop_progress(True)
+
             GLib.idle_add(
                 lambda: InstallPreviewDialog(
                     parent=self.get_root(),
@@ -439,8 +444,11 @@ class SetupPage(Gtk.Box):
                     cmd=["apt-get", "dist-upgrade"],
                     on_confirm=on_confirm,
                     on_cancel=on_cancel,
+                    on_no_changes=on_no_changes,
                     runner=backend.run_privileged_sync,
                     empty_message="Система и приложения обновлены",
+                    log=self._log,
+                    no_changes_message="ℹ  Система актуальна — обновлений нет.\n",
                 ).present()
             )
 
