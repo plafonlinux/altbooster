@@ -82,9 +82,23 @@ DEFAULT_EXCLUDES = [
     # ISO в папках загрузок
     "~/Загрузки/*.iso",
     "~/Downloads/*.iso",
-    # Steam — игры (сами игры, не настройки)
-    "~/.local/share/Steam/steamapps",
-    "~/.var/app/com.valvesoftware.Steam/data/Steam/steamapps",
+    # Steam (native) — игры и runtime (перекачиваемое)
+    "~/.local/share/Steam/steamapps/common",
+    "~/.local/share/Steam/steamapps/shadercache",
+    "~/.local/share/Steam/ubuntu12_32",
+    "~/.local/share/Steam/ubuntu12_64",
+    "~/.local/share/Steam/package",
+    "~/.local/share/Steam/appcache",
+    "~/.local/share/Steam/logs",
+    # Steam (Flatpak) — игры и runtime (перекачиваемое), userdata/ сохраняется
+    "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common",
+    "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/shadercache",
+    "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/ubuntu12_32",
+    "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/ubuntu12_64",
+    "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/package",
+    "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/appcache",
+    "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/config/htmlcache",
+    "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/logs",
     # DaVinci Resolve — только кэш, не проекты
     "~/.local/share/DaVinciResolve/DVIP/Cache",
     "~/.local/share/DaVinciResolve/logs",
