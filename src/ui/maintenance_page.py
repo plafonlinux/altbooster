@@ -3,7 +3,6 @@ import json
 import os
 import shlex
 import threading
-import time
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -317,9 +316,9 @@ class MaintenancePage(Gtk.Box):
         for row in self._rows:
             if self._cancel_tasks:
                 break
+            row._done_event.clear()
             GLib.idle_add(row.start)
-            while row._running or row.result is None:
-                time.sleep(0.2)
+            row._done_event.wait()
         GLib.idle_add(self._all_done)
 
     def _all_done(self):

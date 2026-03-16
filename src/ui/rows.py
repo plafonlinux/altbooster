@@ -180,6 +180,8 @@ class AppRow(Adw.ActionRow):
         self._log = log_fn
         self._on_change = on_change_cb
         self._installing = False
+        self._install_event = threading.Event()
+        self._install_event.set()
         self._state_key = f"app_{app['id']}"
         self._installed_source_index = -1
         self._selected_source_index = 0
@@ -388,6 +390,7 @@ class AppRow(Adw.ActionRow):
 
     def _on_install(self, _=None):
         if self._installing or self.is_installed():
+            self._install_event.set()
             return
 
         idx = self._selected_source_index
@@ -396,6 +399,7 @@ class AppRow(Adw.ActionRow):
 
         if not self._sources:
              self._log("\n✘  Нет источников установки для этого приложения.\n")
+             self._install_event.set()
              return
 
         src = self._sources[idx]
@@ -415,6 +419,7 @@ class AppRow(Adw.ActionRow):
             self._do_install(src, cmd, is_epm)
 
         def on_cancel():
+            self._install_event.set()
             self._btn.set_sensitive(True)
             self._btn.set_label("Установить")
             if self._src_menu_btn:
@@ -430,9 +435,11 @@ class AppRow(Adw.ActionRow):
             on_confirm=on_confirm,
             on_cancel=on_cancel,
             runner=runner,
+            log=self._log,
         ).present()
 
     def _do_install(self, src, cmd, is_epm):
+        self._install_event.clear()
         self._installing = True
         self._btn.set_sensitive(False)
         if self._src_menu_btn:
@@ -540,6 +547,7 @@ class AppRow(Adw.ActionRow):
 
     def _install_done(self, ok):
         self._installing = False
+        self._install_event.set()
         self._prog.set_visible(False)
         win = self.get_root()
         if ok:
@@ -581,6 +589,8 @@ class TaskRow(Adw.ActionRow):
         self._on_progress = on_progress
         self._running = False
         self.result = None
+        self._done_event = threading.Event()
+        self._done_event.set()
 
         self.set_title(task["label"])
         self.set_subtitle(task["desc"])
@@ -658,6 +668,7 @@ class TaskRow(Adw.ActionRow):
 
     def _mark_done_init(self):
         self.result = True
+        self._done_event.set()
         set_status_ok(self._status)
         self._btn.set_label("Применено")
         self._btn.set_sensitive(False)
@@ -669,6 +680,7 @@ class TaskRow(Adw.ActionRow):
     def start(self):
         if self._running:
             return
+        self._done_event.clear()
         self._running = True
         self.result = None
         self._btn.set_sensitive(False)
@@ -719,6 +731,7 @@ class TaskRow(Adw.ActionRow):
     def _finish(self, ok):
         self._running = False
         self.result = ok
+        self._done_event.set()
         self._prog.set_fraction(1.0 if ok else 0.0)
         win = self.get_root()
         if ok:

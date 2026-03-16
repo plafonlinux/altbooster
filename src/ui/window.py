@@ -45,6 +45,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         _src_base = _icons_base / "hicolor" / "scalable"
         _dst_hicolor = Path.home() / ".local" / "share" / "icons" / "hicolor"
         _dst_base = _dst_hicolor / "scalable"
+        _icons_copied = False
         for _cat in ("apps", "devices"):
             _src_cat = _src_base / _cat
             _dst_cat = _dst_base / _cat
@@ -56,16 +57,20 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 try:
                     if not _dst.exists() or _dst.read_bytes() != _svg.read_bytes():
                         shutil.copy2(_svg, _dst)
+                        _icons_copied = True
                 except OSError:
                     pass
 
-        try:
-            subprocess.run(
-                ["gtk-update-icon-cache", "-f", "-t", str(_dst_hicolor)],
-                capture_output=True, timeout=5,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            pass
+        if _icons_copied:
+            def _update_icon_cache(_dst_hicolor=_dst_hicolor):
+                try:
+                    subprocess.run(
+                        ["gtk-update-icon-cache", "-f", "-t", str(_dst_hicolor)],
+                        capture_output=True, timeout=5,
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            threading.Thread(target=_update_icon_cache, daemon=True).start()
 
         _it = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
         _it.add_search_path(str(_icons_base))
@@ -217,6 +222,15 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 min-width: 0;
                 min-height: 0;
             }
+            .ab-float-banner {
+                background-color: alpha(@card_bg_color, 0.9);
+                border-radius: 20px;
+                padding: 5px 14px 5px 16px;
+                border: 1px solid alpha(@borders, 0.4);
+            }
+            .ab-float-banner label {
+                font-size: 0.82em;
+            }
         """)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), _dot_css,
@@ -248,6 +262,27 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         return header
 
+    @staticmethod
+    def _make_nav_row(name: str, title: str, icon_name: str):
+        row = Gtk.ListBoxRow()
+        row.set_name(name)
+        row.set_tooltip_text(title)
+        box = Gtk.Box(spacing=7)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
+        box.set_margin_start(7)
+        box.set_margin_end(7)
+        img = Gtk.Image.new_from_icon_name(icon_name)
+        img.set_pixel_size(16)
+        lbl = Gtk.Label(label=title)
+        lbl.set_xalign(0.0)
+        lbl.set_hexpand(True)
+        lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        box.append(img)
+        box.append(lbl)
+        row.set_child(box)
+        return row, img, lbl
+
     def _build_sidebar(self) -> Gtk.Widget:
         nav_list = Gtk.ListBox()
         nav_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
@@ -269,23 +304,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             ("davinci",     "DaVinci Resolve", "davinci-symbolic"),
             ("maintenance", "Обслуживание",    "emblem-system-symbolic"),
         ]:
-            row = Gtk.ListBoxRow()
-            row.set_name(name)
-            row.set_tooltip_text(title)
-            box = Gtk.Box(spacing=7)
-            box.set_margin_top(8)
-            box.set_margin_bottom(8)
-            box.set_margin_start(7)
-            box.set_margin_end(7)
-            img = Gtk.Image.new_from_icon_name(icon_name)
-            img.set_pixel_size(16)
-            lbl = Gtk.Label(label=title)
-            lbl.set_xalign(0.0)
-            lbl.set_hexpand(True)
-            lbl.set_ellipsize(Pango.EllipsizeMode.END)
-            box.append(img)
-            box.append(lbl)
-            row.set_child(box)
+            row, img, lbl = self._make_nav_row(name, title, icon_name)
             nav_list.append(row)
             self._nav_images.append(img)
             self._nav_labels.append(lbl)
@@ -305,23 +324,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         borg_list = Gtk.ListBox()
         borg_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         borg_list.add_css_class("navigation-sidebar")
-        borg_row = Gtk.ListBoxRow()
-        borg_row.set_name("borg")
-        borg_row.set_tooltip_text("Резервная копия")
-        borg_box = Gtk.Box(spacing=7)
-        borg_box.set_margin_top(8)
-        borg_box.set_margin_bottom(8)
-        borg_box.set_margin_start(7)
-        borg_box.set_margin_end(7)
-        borg_icon = Gtk.Image.new_from_icon_name("drive-harddisk-symbolic")
-        borg_icon.set_pixel_size(16)
-        borg_lbl = Gtk.Label(label="Резервная копия")
-        borg_lbl.set_xalign(0.0)
-        borg_lbl.set_hexpand(True)
-        borg_lbl.set_ellipsize(Pango.EllipsizeMode.END)
-        borg_box.append(borg_icon)
-        borg_box.append(borg_lbl)
-        borg_row.set_child(borg_box)
+        borg_row, borg_icon, borg_lbl = self._make_nav_row("borg", "Резервная копия", "drive-harddisk-symbolic")
         borg_list.append(borg_row)
         self._nav_images.append(borg_icon)
         self._nav_labels.append(borg_lbl)
@@ -426,10 +429,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
     def _on_bottom_row_activated(self, _, row):
         name = row.get_name()
-        if name == "borg":
-            self._stack.set_visible_child_name("borg")
-            self._nav_list.unselect_all()
-        elif name == "update":
+        if name == "update":
             self._check_for_updates()
         elif name == "settings":
             self._settings_popover.popup()

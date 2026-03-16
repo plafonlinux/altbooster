@@ -8,7 +8,6 @@ import re
 import shutil
 import subprocess
 import tempfile
-import time
 import threading
 import urllib.parse
 import urllib.request
@@ -467,8 +466,6 @@ class ExtensionsPage(Gtk.Box):
         return group
 
     def _load_installed(self):
-        time.sleep(1.0)
-
         user_exts   = _read_extensions_from(_USER_EXT_DIR)
         system_exts = _read_extensions_from(_SYSTEM_EXT_DIR)
         enabled     = _get_enabled_uuids()
@@ -613,7 +610,6 @@ class ExtensionsPage(Gtk.Box):
                 if ok:
                     self._log("✔  Установлено!\n")
                     GLib.idle_add(self._refresh_installed)
-                    GLib.idle_add(lambda: win.show_relogin_banner() if hasattr(win, "show_relogin_banner") else None)
                 else:
                     self._log(f"✘  Ошибка установки {pkg}\n")
                     GLib.idle_add(set_status_error, status)
@@ -649,7 +645,6 @@ class ExtensionsPage(Gtk.Box):
             if ok:
                 self._log("✔  Установлено!\n")
                 GLib.idle_add(self._refresh_installed)
-                GLib.idle_add(lambda: win.show_relogin_banner() if hasattr(win, "show_relogin_banner") else None)
             else:
                 if err_msg: self._log(f"✘  Ошибка: {err_msg}\n")
                 GLib.idle_add(set_status_error, status)
@@ -738,7 +733,6 @@ class ExtensionsPage(Gtk.Box):
                 if ok:
                     GLib.idle_add(self._log, f"✔  {uuid} удалён!\n")
                     GLib.idle_add(self._refresh_installed)
-                    GLib.idle_add(lambda: win.show_relogin_banner() if hasattr(win, "show_relogin_banner") else None)
                 else:
                     GLib.idle_add(self._log, f"✘  Не удалось удалить: {r.stderr.strip()}\n")
 

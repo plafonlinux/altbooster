@@ -8,12 +8,12 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-gi.require_version("Gdk", "4.0")
-from gi.repository import Adw, Gdk, GLib, Gtk
+from gi.repository import Adw, GLib, Gtk
 
 import backend
 import config
@@ -83,23 +83,6 @@ class AppsPage(Gtk.Box):
         self._btn_reset.add_css_class("pill")
         self._btn_reset.connect("clicked", self._on_factory_reset)
         self._btns_box.append(self._btn_reset)
-
-        _banner_css = Gtk.CssProvider()
-        _banner_css.load_from_data(b"""
-            .ab-float-banner {
-                background-color: alpha(@card_bg_color, 0.9);
-                border-radius: 20px;
-                padding: 5px 14px 5px 16px;
-                border: 1px solid alpha(@borders, 0.4);
-            }
-            .ab-float-banner label {
-                font-size: 0.82em;
-            }
-        """)
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), _banner_css,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-        )
 
         self._banner_dismissed = False
         banner_outer = Gtk.Box()
@@ -227,18 +210,21 @@ class AppsPage(Gtk.Box):
         else:
             GLib.idle_add(self._log, "ℹ Не найдено в выбранном источнике, ищу в других...\n")
             all_branches = ["p11", "sisyphus", "epm_play", "flathub"]
-            fallback = []
-            for ob in all_branches:
-                if ob == branch:
-                    continue
-                try:
-                    r = self._fetch_from_source(query, ob)
-                    for pkg in r:
-                        pkg["installed"] = self._check_installed(pkg["install_id"], pkg["install_type"])
-                    if r:
-                        fallback.append((ob, r))
-                except Exception:
-                    pass
+            other_branches = [ob for ob in all_branches if ob != branch]
+            fallback_map = {}
+            with ThreadPoolExecutor(max_workers=len(other_branches)) as executor:
+                futures = {executor.submit(self._fetch_from_source, query, ob): ob for ob in other_branches}
+                for future in as_completed(futures):
+                    ob = futures[future]
+                    try:
+                        r = future.result()
+                        for pkg in r:
+                            pkg["installed"] = self._check_installed(pkg["install_id"], pkg["install_type"])
+                        if r:
+                            fallback_map[ob] = r
+                    except Exception:
+                        pass
+            fallback = [(ob, fallback_map[ob]) for ob in other_branches if ob in fallback_map]
             GLib.idle_add(self._display_pkg_results, fallback, True)
         
         GLib.idle_add(self._search_entry.set_sensitive, True)
@@ -934,14 +920,13 @@ class AppsPage(Gtk.Box):
         for row in to_install:
             if self._cancel_install:
                 break
-            while row._installing:
+            while row._installing and not self._cancel_install:
                 time.sleep(0.5)
-
+            if self._cancel_install:
+                break
+            row._install_event.clear()
             GLib.idle_add(row._on_install)
-
-            time.sleep(1.0)
-            while row._installing:
-                time.sleep(0.5)
+            row._install_event.wait(timeout=300)
         GLib.idle_add(self._done)
 
     def _done(self):

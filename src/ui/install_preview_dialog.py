@@ -24,8 +24,11 @@ class InstallPreviewDialog(Adw.Window):
         cmd: list[str],
         on_confirm,
         on_cancel,
+        on_no_changes=None,
         runner=None,
         empty_message: str = "Нет изменений — пакет уже установлен.",
+        log=None,
+        no_changes_message: str | None = None,
     ):
         super().__init__()
         self.set_transient_for(parent)
@@ -41,7 +44,10 @@ class InstallPreviewDialog(Adw.Window):
         self._empty_message = empty_message
         self._on_confirm = on_confirm
         self._on_cancel = on_cancel
+        self._on_no_changes = on_no_changes or on_cancel
         self._confirmed = False
+        self._log = log
+        self._no_changes_message = no_changes_message or f"ℹ  «{app_name}»: уже установлен, обновлять нечего.\n"
 
         self._confirm_btn = Gtk.Button(label="Продолжить установку")
         self._confirm_btn.add_css_class("suggested-action")
@@ -80,11 +86,11 @@ class InstallPreviewDialog(Adw.Window):
         spacer.set_hexpand(True)
         bar.append(spacer)
 
-        cancel_btn = Gtk.Button(label="Отмена")
-        cancel_btn.add_css_class("flat")
-        cancel_btn.add_css_class("pill")
-        cancel_btn.connect("clicked", self._on_cancel_clicked)
-        bar.append(cancel_btn)
+        self._cancel_btn = Gtk.Button(label="Отмена")
+        self._cancel_btn.add_css_class("flat")
+        self._cancel_btn.add_css_class("pill")
+        self._cancel_btn.connect("clicked", self._on_cancel_clicked)
+        bar.append(self._cancel_btn)
 
         bar.append(self._confirm_btn)
         return bar
@@ -125,7 +131,10 @@ class InstallPreviewDialog(Adw.Window):
             self._confirm_btn.set_label("Закрыть")
             self._confirm_btn.remove_css_class("suggested-action")
             self._confirm_btn.add_css_class("flat")
+            self._cancel_btn.set_visible(False)
             self._no_active_changes = True
+            if self._log:
+                self._log(self._no_changes_message)
         else:
             self._no_active_changes = False
 
@@ -481,7 +490,7 @@ class InstallPreviewDialog(Adw.Window):
         self._confirmed = True
         self.close()
         if getattr(self, "_no_active_changes", False):
-            self._on_cancel()
+            self._on_no_changes()
         else:
             self._on_confirm()
 

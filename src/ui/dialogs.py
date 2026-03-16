@@ -24,15 +24,6 @@ if _HAS_SECRET:
     )
 
 
-def get_saved_password():
-    if not _HAS_SECRET:
-        return None
-    try:
-        return Secret.password_lookup_sync(_SECRET_SCHEMA, {"type": "sudo_password"}, None)
-    except Exception:
-        return None
-
-
 def save_password(pw):
     if not _HAS_SECRET:
         return
@@ -41,15 +32,6 @@ def save_password(pw):
             _SECRET_SCHEMA, {"type": "sudo_password"}, Secret.COLLECTION_DEFAULT,
             "ALT Booster Sudo Password", pw, None,
         )
-    except Exception:
-        pass
-
-
-def clear_saved_password():
-    if not _HAS_SECRET:
-        return
-    try:
-        Secret.password_clear_sync(_SECRET_SCHEMA, {"type": "sudo_password"}, None)
     except Exception:
         pass
 
