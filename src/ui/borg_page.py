@@ -1466,12 +1466,17 @@ class BorgPage(Gtk.Box):
         self._tm_box.set_margin_bottom(20)
         self._tm_box.set_margin_start(20)
         self._tm_box.set_margin_end(20)
-        self._tm_box.set_vexpand(True)
+        self._tm_box.set_hexpand(True)
 
         clamp = Adw.Clamp()
         clamp.set_maximum_size(1152)
         clamp.set_tightening_threshold(864)
         clamp.set_child(self._tm_box)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        scroll.set_child(clamp)
 
         # ── строка: заголовок + эксперт-кнопка ──────────────────────────
         top_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -1649,8 +1654,8 @@ class BorgPage(Gtk.Box):
 
         self._tm_box.append(transfer_group)
 
-        clamp.connect("map", lambda _: (self._tm_refresh_archives(), self._move_repo_group_to(self._tm_repo_slot)))
-        return clamp
+        scroll.connect("map", lambda _: (self._tm_refresh_archives(), self._move_repo_group_to(self._tm_repo_slot)))
+        return scroll
 
     def _tm_load_sysinfo(self):
         _ansi = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
