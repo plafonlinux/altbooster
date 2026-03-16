@@ -212,6 +212,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 padding: 0;
                 font-size: 0;
             }
+            statuspage.compact scrolledwindow scrollbar {
+                opacity: 0;
+                min-width: 0;
+                min-height: 0;
+            }
         """)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), _dot_css,
