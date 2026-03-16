@@ -62,6 +62,7 @@ from system.borg import (
     is_timer_active,
     get_timer_next_run,
     DEFAULT_EXCLUDES,
+    OPTIONAL_EXCLUDES,
     generate_system_meta,
     restore_packages_meta,
     restore_dconf_meta,

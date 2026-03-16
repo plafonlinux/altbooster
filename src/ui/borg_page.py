@@ -220,7 +220,21 @@ class BorgArchiveBrowserDialog(Adw.Window):
     def _on_loaded(self, items: list[dict]):
         self._all_items = items
         self._children = self._build_tree(items)
+        self._dir_sizes = self._compute_dir_sizes(items)
         self._navigate_to("")
+
+    def _compute_dir_sizes(self, items: list[dict]) -> dict:
+        sizes = {}
+        for item in items:
+            if item.get("type", "-") != "-":
+                continue
+            path = item.get("path", "").rstrip("/")
+            size = item.get("size") or 0
+            parts = path.split("/")
+            for i in range(len(parts)):
+                key = "/".join(parts[:i])
+                sizes[key] = sizes.get(key, 0) + size
+        return sizes
 
     def _build_tree(self, items: list[dict]) -> dict:
         children = {}
@@ -283,9 +297,13 @@ class BorgArchiveBrowserDialog(Adw.Window):
             name = d.split("/")[-1]
             sub = self._children.get(d, {"dirs": [], "files": []})
             count = len(sub["dirs"]) + len(sub["files"])
+            dir_size = self._dir_sizes.get(d, 0)
+            subtitle = f"{count} элем."
+            if dir_size:
+                subtitle += f"  ·  {_fmt_size(dir_size)}"
             row = Adw.ActionRow()
             row.set_title(name)
-            row.set_subtitle(f"{count} элем." if count else "")
+            row.set_subtitle(subtitle)
             row.set_activatable(True)
             icon = make_icon("folder-symbolic", 16)
             row.add_prefix(icon)
@@ -1758,16 +1776,24 @@ class BorgPage(Gtk.Box):
             repo = config.state_get("borg_repo_path", "") or ""
             win = self.get_root()
 
+            _all_ok = [True]
+
             def _delete_next(names):
                 if not names:
+                    if hasattr(win, "stop_progress"):
+                        GLib.idle_add(win.stop_progress, _all_ok[0])
                     GLib.idle_add(self._tm_refresh_archives)
                     return
                 n = names[0]
                 self._log(f"▶  Удаление {n}...\n")
-                backend.borg_delete_archive(
-                    repo, n, self._log,
-                    lambda ok: (self._log("✔\n" if ok else "✘\n"), _delete_next(names[1:]))
-                )
+
+                def _on_done(ok):
+                    self._log("✔\n" if ok else "✘\n")
+                    if not ok:
+                        _all_ok[0] = False
+                    _delete_next(names[1:])
+
+                backend.borg_delete_archive(repo, n, self._log, _on_done)
 
             if hasattr(win, "start_progress"):
                 win.start_progress("Удаление архивов...")
@@ -1856,14 +1882,23 @@ class BorgPage(Gtk.Box):
 
         backend.borg_archive_info(repo_path, name, _on_info)
 
-        btn = Gtk.Button(label="Восстановить")
-        btn.add_css_class("suggested-action")
-        btn.add_css_class("pill")
-        btn.set_halign(Gtk.Align.CENTER)
-        btn.set_margin_bottom(16)
+        btns_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btns_row.set_halign(Gtk.Align.CENTER)
+        btns_row.set_margin_bottom(16)
+
+        btn_browse = Gtk.Button(label="Содержимое")
+        btn_browse.add_css_class("pill")
+        btn_browse.connect("clicked", lambda _, n=name: BorgArchiveBrowserDialog(self.get_root(), repo_path, n).present())
+        btns_row.append(btn_browse)
+
+        btn_restore = Gtk.Button(label="Восстановить")
+        btn_restore.add_css_class("suggested-action")
+        btn_restore.add_css_class("pill")
         display = f"{date_part} {time_part}".strip()
-        btn.connect("clicked", lambda _, n=name, d=display: self._show_restore_dialog(n, d))
-        card.append(btn)
+        btn_restore.connect("clicked", lambda _, n=name, d=display: self._show_restore_dialog(n, d))
+        btns_row.append(btn_restore)
+
+        card.append(btns_row)
 
         return card
 
@@ -1924,14 +1959,11 @@ class BorgPage(Gtk.Box):
                 btn.connect("clicked", lambda _: self._stack.set_visible_child_name("info"))
                 self._tm_placeholder.set_child(btn)
             else:
+                self._tm_placeholder.set_visible(False)
                 self._tm_create_btn.set_visible(True)
                 self._tm_delete_btn.set_visible(False)
                 if error:
-                    self._tm_placeholder.set_description(error[:200])
                     self._log(f"borg list: {error}\n")
-                else:
-                    self._tm_placeholder.set_description("Нажмите «Создать резервную копию» ниже")
-                self._tm_placeholder.set_child(None)
 
     def _tm_update_nav_buttons(self):
         n = self._tm_carousel.get_n_pages()
@@ -2055,12 +2087,45 @@ class BorgPage(Gtk.Box):
         if not repo_path:
             repo_path = str(Path.home() / ".local" / "share" / "altbooster" / "backup")
         config.state_set("borg_repo_path", repo_path)
-        if not backend.is_repo_initialized(repo_path):
-            self._tm_ask_password_and_init(repo_path)
-        else:
-            self._tm_do_backup()
+        self._tm_show_exclude_dialog(repo_path)
 
-    def _tm_ask_password_and_init(self, repo_path: str):
+    def _tm_show_exclude_dialog(self, repo_path: str):
+        dialog = Adw.AlertDialog(heading="Что включить в бэкап?")
+        dialog.set_body("Мы исключаем крупные папки, которые можно перекачать. Отметьте, что хотите сохранить:")
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("start", "Создать")
+        dialog.set_default_response("start")
+        dialog.set_close_response("cancel")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_margin_top(8)
+        checks = []
+        for group in backend.OPTIONAL_EXCLUDES:
+            row = Adw.ActionRow()
+            row.set_title(group["title"])
+            row.set_subtitle(group["description"])
+            cb = Gtk.CheckButton()
+            cb.set_valign(Gtk.Align.CENTER)
+            row.add_prefix(cb)
+            row.set_activatable_widget(cb)
+            box.append(row)
+            checks.append((cb, group["paths"]))
+
+        dialog.set_extra_child(box)
+
+        def _on_response(d, response):
+            if response != "start":
+                return
+            extra_includes = {p for cb, paths in checks if cb.get_active() for p in paths}
+            if not backend.is_repo_initialized(repo_path):
+                self._tm_ask_password_and_init(repo_path, extra_includes)
+            else:
+                self._tm_do_backup(extra_includes)
+
+        dialog.connect("response", _on_response)
+        dialog.present(self.get_root())
+
+    def _tm_ask_password_and_init(self, repo_path: str, extra_includes: set = None):
         dialog = Adw.AlertDialog(
             heading="Защитите резервную копию",
             body="Придумайте пароль для шифрования архива. Запомните его — без него восстановление невозможно.",
@@ -2089,7 +2154,7 @@ class BorgPage(Gtk.Box):
                     win.stop_progress(ok)
                 if ok:
                     self._log("✔  Хранилище готово\n")
-                    self._tm_do_backup()
+                    self._tm_do_backup(extra_includes)
                 else:
                     self._log("✘  Ошибка инициализации хранилища\n")
 
@@ -2098,7 +2163,7 @@ class BorgPage(Gtk.Box):
         dialog.connect("response", _on_response)
         dialog.present(self.get_root())
 
-    def _tm_do_backup(self):
+    def _tm_do_backup(self, extra_includes: set = None):
         repo_path = config.state_get("borg_repo_path", "") or ""
         if not repo_path:
             return
@@ -2106,7 +2171,7 @@ class BorgPage(Gtk.Box):
         home = Path.home()
         paths = [str(home), str(config.CONFIG_DIR)]
 
-        excludes = list(backend.DEFAULT_EXCLUDES)
+        excludes = [p for p in backend.DEFAULT_EXCLUDES if not (extra_includes and p in extra_includes)]
         if repo_path.startswith(str(home)):
             excludes.append(repo_path)
 
