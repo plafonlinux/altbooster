@@ -1575,7 +1575,7 @@ class BorgPage(Gtk.Box):
         self._tm_carousel = Adw.Carousel()
         self._tm_carousel.set_hexpand(True)
         self._tm_carousel.set_spacing(8)
-        self._tm_carousel.set_allow_scroll_wheel(True)
+        self._tm_carousel.set_allow_scroll_wheel(False)
         self._tm_carousel.connect("page-changed", lambda _c, _i: self._tm_update_nav_buttons())
         self._tm_carousel.set_visible(False)
 
