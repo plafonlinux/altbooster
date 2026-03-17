@@ -12,9 +12,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk
 
-import backend
+from core import backend
 from ui.rows import SettingRow
-from widgets import make_icon, make_status_icon, set_status_ok, set_status_error
+from ui.widgets import make_icon, make_status_icon, set_status_ok, set_status_error
 
 _banner_css = Gtk.CssProvider()
 _banner_css.load_from_data(b"""

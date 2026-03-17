@@ -16,18 +16,18 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
-import config
-import backend
-from ui.setup_page import SetupPage
-from ui.apps_page import AppsPage
-from ui.extensions_page import ExtensionsPage
-from ui.terminal_page import TerminalPage
-from ui.davinci_page import DaVinciPage
-from ui.amd_page import AmdPage
-from ui.intel_page import IntelPage
-from ui.maintenance_page import MaintenancePage
-from ui.flatpak_page import FlatpakPage
-from ui.borg_page import BorgPage
+from core import config
+from core import backend
+from tabs.setup import SetupPage
+from tabs.apps import AppsPage
+from tabs.extensions import ExtensionsPage
+from tabs.terminal import TerminalPage
+from tabs.davinci import DaVinciPage
+from tabs.amd import AmdPage
+from tabs.intel import IntelPage
+from tabs.maintenance import MaintenancePage
+from tabs.flatpak import FlatpakPage
+from tabs.timesync import BorgPage
 
 
 class AltBoosterWindow(Adw.ApplicationWindow):
@@ -115,7 +115,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             (self._apps,        "apps",        "Приложения",      "grid-large-symbolic"),
             (self._extensions,  "extensions",  "Расширения",      "application-x-addon-symbolic"),
             (self._flatpak,     "flatpak",     "Flatpak",         "flatpak-symbolic"),
-            (self._borg,       "borg",        "Резервная копия", "drive-harddisk-symbolic"),
+            (self._borg,       "borg",        "TimeSync", "drive-harddisk-symbolic"),
             (self._terminal,   "terminal",    "Терминал",        "utilities-terminal-symbolic"),
             (self._amd,        "amd",         "AMD Radeon",      "video-display-symbolic"),
             (self._intel,      "intel",       "Intel",           "processor-symbolic"),
@@ -324,7 +324,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         borg_list = Gtk.ListBox()
         borg_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         borg_list.add_css_class("navigation-sidebar")
-        borg_row, borg_icon, borg_lbl = self._make_nav_row("borg", "Резервная копия", "drive-harddisk-symbolic")
+        borg_row, borg_icon, borg_lbl = self._make_nav_row("borg", "TimeSync", "drive-harddisk-symbolic")
         borg_list.append(borg_row)
         self._nav_images.append(borg_icon)
         self._nav_labels.append(borg_lbl)

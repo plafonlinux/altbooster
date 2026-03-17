@@ -10,8 +10,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
-import backend
-from dynamic_page import DynamicPage
+from core import backend
+from ui.dynamic_page import DynamicPage
 from ui.common import load_module
 from ui.rows import SettingRow
 
@@ -71,7 +71,6 @@ class AmdPage(DynamicPage):
                 changed = True
 
             if changed:
-                import tempfile
                 with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp:
                     tmp.writelines(new_lines)
                     tmp_path = tmp.name

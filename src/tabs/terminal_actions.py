@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import backend
+from core import backend
 
 _FASTFETCH_CONFIG = """{
     "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",

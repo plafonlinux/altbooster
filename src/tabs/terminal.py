@@ -11,9 +11,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
-import backend
-import config
-from widgets import make_scrolled_page
+from core import backend
+from core import config
+from ui.widgets import make_scrolled_page
 from ui.rows import SettingRow
 
 

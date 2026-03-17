@@ -9,8 +9,8 @@ from typing import Any
 
 from gi.repository import GLib
 
-import backend
-import config
+from core import backend
+from core import config
 
 _OVERCLOCK_PARAMS = "amdgpu.ppfeaturemask=0xffffffff radeon.cik_support=0 amdgpu.cik_support=1"
 _GRUB_CONF = "/etc/sysconfig/grub2"

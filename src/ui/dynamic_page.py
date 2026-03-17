@@ -11,10 +11,44 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk
 
-import backend
-import config
-from builtin_actions import BUILTIN_REGISTRY
-from widgets import (
+from core import backend
+from core import config
+from tabs.terminal_actions import (
+    check_ptyxis_default, set_ptyxis_default,
+    check_shortcut_1, set_shortcut_1,
+    check_shortcut_2, set_shortcut_2,
+    check_zsh_default, set_zsh_default,
+    install_zplug, check_ptyxis_font,
+    install_fastfetch_config, check_zsh_aliases, add_zsh_aliases,
+)
+from tabs.amd_actions import (
+    check_overclock, enable_overclock,
+    check_wheel, setup_lact_wheel,
+    apply_lact_config, confirm_reboot,
+)
+
+BUILTIN_REGISTRY: dict[str, Callable] = {
+    "check_ptyxis_default":     check_ptyxis_default,
+    "set_ptyxis_default":       set_ptyxis_default,
+    "check_shortcut_1":         check_shortcut_1,
+    "set_shortcut_1":           set_shortcut_1,
+    "check_shortcut_2":         check_shortcut_2,
+    "set_shortcut_2":           set_shortcut_2,
+    "check_zsh_default":        check_zsh_default,
+    "set_zsh_default":          set_zsh_default,
+    "install_zplug":            install_zplug,
+    "check_ptyxis_font":        check_ptyxis_font,
+    "install_fastfetch_config": install_fastfetch_config,
+    "check_zsh_aliases":        check_zsh_aliases,
+    "add_zsh_aliases":          add_zsh_aliases,
+    "check_overclock":          check_overclock,
+    "enable_overclock":         enable_overclock,
+    "check_wheel":              check_wheel,
+    "setup_lact_wheel":         setup_lact_wheel,
+    "apply_lact_config":        apply_lact_config,
+    "confirm_reboot":           confirm_reboot,
+}
+from ui.widgets import (
     make_icon, make_button, make_status_icon,
     set_status_ok, set_status_error, clear_status, make_suffix_box,
 )

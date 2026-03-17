@@ -27,10 +27,10 @@ _badge_css.load_from_data(b"""
     }
 """)
 
-import backend
-import config
+from core import backend
+from core import config
 from ui.install_preview_dialog import InstallPreviewDialog
-from widgets import (
+from ui.widgets import (
     make_icon, make_button, make_status_icon,
     set_status_ok, set_status_error, clear_status, make_suffix_box,
 )

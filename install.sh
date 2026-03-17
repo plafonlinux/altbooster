@@ -51,15 +51,13 @@ ok
 step "Копирование файлов"
 install -d "$APP_DIR"
 cp -r "$SCRIPT_DIR/src/"* "$APP_DIR/"
-chmod +x "$APP_DIR/main.py"
+chmod +x "$APP_DIR/altbooster.py"
 ok
 
 # Иконки
 step "Установка иконок"
 install -d "$ICON_DIR"
 install -m 644 "$SCRIPT_DIR/icons/altbooster.svg" "$ICON_DIR/altbooster.svg"
-install -m 644 "$SCRIPT_DIR/icons/davinci-symbolic.svg" "$ICON_DIR/davinci-symbolic.svg"
-install -m 644 "$SCRIPT_DIR/icons/flathub-symbolic.svg" "$ICON_DIR/flathub-symbolic.svg"
 gtk-update-icon-cache /usr/local/share/icons/hicolor 2>/dev/null || true
 ok
 
@@ -87,7 +85,7 @@ ok
 step "Создание команды altbooster"
 cat > "$BIN" << 'BINEOF'
 #!/bin/bash
-exec python3 /usr/local/share/altbooster/main.py "$@"
+exec python3 /usr/local/share/altbooster/altbooster.py "$@"
 BINEOF
 chmod +x "$BIN"
 ok

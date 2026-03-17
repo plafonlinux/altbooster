@@ -13,7 +13,7 @@ from typing import Callable, Sequence
 
 from gi.repository import GLib
 
-import config
+from core import config
 
 OnLine = Callable[[str], None]
 OnDone = Callable[[bool], None]

@@ -24,7 +24,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gio, Adw, GLib
 
-import config
+from core import config
 config.DEBUG = _DEBUG
 from ui import PlafonWindow
 

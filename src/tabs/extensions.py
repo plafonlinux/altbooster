@@ -18,8 +18,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
-import backend
-from widgets import (
+from core import backend
+from ui.widgets import (
     make_button, make_scrolled_page, make_icon,
     make_status_icon, set_status_ok, set_status_error, clear_status, make_suffix_box,
 )
