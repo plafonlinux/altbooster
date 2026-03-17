@@ -11,9 +11,8 @@ install-data:
 	install -d $(PREFIXBIN)
 	cp -a $(NAME).desktop $(SHAREDIR)/applications
 	cp -a icons/$(NAME).svg $(SHAREDIR)/icons/hicolor/512x512/apps
-	cp -a src/*.py $(SHAREDIR)/$(NAME)
-	cp -p -r src/builtin_actions src/modules src/system src/ui $(SHAREDIR)/$(NAME) 
+	cp -a src/altbooster.py $(SHAREDIR)/$(NAME)
+	cp -p -r src/core src/tabs src/ui src/modules $(SHAREDIR)/$(NAME)
 
 install-bin:
 	install -Dm755 $(NAME) $(PREFIXBIN)/$(NAME)
-	

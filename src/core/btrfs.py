@@ -10,8 +10,8 @@ from pathlib import Path
 
 from gi.repository import GLib
 
-import config
-from system import privileges
+from core import config
+from core import privileges
 
 
 def get_btrfs_mount_for_home() -> str | None:

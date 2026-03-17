@@ -12,7 +12,7 @@ import gi
 gi.require_version("GLib", "2.0")
 from gi.repository import GLib
 
-import config
+from core import config
 
 
 OPTIONAL_EXCLUDES = [
@@ -189,6 +189,10 @@ def borg_version() -> str | None:
     except Exception:
         pass
     return None
+
+
+def borg_ssh_key_path() -> Path:
+    return config.CONFIG_DIR / "borg_id_ed25519"
 
 
 def _borg_env(repo_path: str) -> dict:
@@ -421,10 +425,6 @@ def borg_export_tar(repo_path: str, target_dir: str, on_line, on_done) -> None:
     threading.Thread(target=_worker, daemon=True).start()
 
 
-def borg_ssh_key_path() -> Path:
-    return config.CONFIG_DIR / "borg_id_ed25519"
-
-
 def borg_generate_ssh_key() -> bool:
     key_path = borg_ssh_key_path()
     if key_path.exists():
@@ -445,294 +445,6 @@ def borg_get_pubkey() -> str | None:
     try:
         if pub.exists():
             return pub.read_text(encoding="utf-8").strip()
-    except Exception:
-        pass
-    return None
-
-
-def find_gvfs_google_drive() -> str | None:
-    gvfs_base = Path(f"/run/user/{os.getuid()}/gvfs")
-    if gvfs_base.exists():
-        for entry in gvfs_base.iterdir():
-            if "google-drive" in entry.name and entry.is_dir():
-                return str(entry)
-    try:
-        r = subprocess.run(
-            ["gio", "mount", "-l"],
-            capture_output=True, text=True, encoding="utf-8", timeout=5,
-        )
-        for line in r.stdout.splitlines():
-            if "google-drive" in line.lower():
-                gvfs_base2 = Path(f"/run/user/{os.getuid()}/gvfs")
-                for entry in gvfs_base2.iterdir():
-                    if "google-drive" in entry.name:
-                        return str(entry)
-    except Exception:
-        pass
-    return None
-
-
-def flatpak_apps_from_booster_list() -> list[tuple[str, str]]:
-    paths_to_try = [
-        Path.home() / ".config" / "altbooster" / "apps.json",
-        Path(__file__).resolve().parent.parent / "modules" / "apps.json",
-    ]
-    for path in paths_to_try:
-        if not path.exists():
-            continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        result = []
-        seen = set()
-        for group in data.get("groups", []):
-            for item in group.get("items", []):
-                sources = item.get("sources", [])
-                single = item.get("source")
-                if single:
-                    sources = [single] + sources
-                for src in sources:
-                    check = src.get("check", [])
-                    if len(check) >= 2 and check[0] == "flatpak":
-                        app_id = check[1]
-                        if app_id not in seen:
-                            seen.add(app_id)
-                            result.append((item.get("label", app_id), app_id))
-                        break
-        return result
-    return []
-
-
-def generate_flatpak_meta(target_dir: Path, source_mode: int | None = 0) -> bool:
-    target_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        if source_mode is not None:
-            r1 = subprocess.run(
-                ["flatpak", "list", "--app", "--columns=application"],
-                capture_output=True, text=True, encoding="utf-8", timeout=15,
-            )
-            installed_ids = {l.strip() for l in r1.stdout.splitlines() if l.strip()}
-            if source_mode == 1:
-                booster_ids = [app_id for _, app_id in flatpak_apps_from_booster_list()]
-                all_ids = [app_id for app_id in booster_ids if app_id in installed_ids]
-            else:
-                all_ids = list(installed_ids)
-            (target_dir / "flatpak-apps.txt").write_text(
-                "\n".join(all_ids) + ("\n" if all_ids else ""), encoding="utf-8"
-            )
-        r2 = subprocess.run(
-            ["flatpak", "remotes", "--columns=name,url"],
-            capture_output=True, text=True, encoding="utf-8", timeout=10,
-        )
-        (target_dir / "flatpak-remotes.txt").write_text(r2.stdout, encoding="utf-8")
-        return True
-    except Exception:
-        return False
-
-
-def generate_extensions_meta(target_dir: Path) -> bool:
-    target_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        r = subprocess.run(
-            ["gnome-extensions", "list", "--enabled"],
-            capture_output=True, text=True, encoding="utf-8", timeout=10,
-        )
-        enabled = [u.strip() for u in r.stdout.splitlines() if u.strip()]
-        ext_data: dict = {"extensions": enabled}
-        r_dconf = subprocess.run(
-            ["dconf", "dump", "/org/gnome/shell/extensions/"],
-            capture_output=True, text=True, encoding="utf-8", timeout=10,
-        )
-        if r_dconf.returncode == 0:
-            ext_data["extensions_dconf"] = r_dconf.stdout
-        (target_dir / "extensions.json").write_text(
-            json.dumps(ext_data, ensure_ascii=False, indent=2), encoding="utf-8",
-        )
-        return True
-    except Exception:
-        return False
-
-
-def generate_system_meta(target_dir: Path) -> bool:
-    target_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        r1 = subprocess.run(
-            ["rpm", "-qa", "--queryformat", "%{NAME}\n"],
-            capture_output=True, text=True, encoding="utf-8", timeout=30,
-        )
-        if r1.returncode == 0:
-            names = sorted(set(r1.stdout.splitlines()))
-            (target_dir / "packages.txt").write_text("\n".join(names), encoding="utf-8")
-            
-        r2 = subprocess.run(
-            ["dconf", "dump", "/"],
-            capture_output=True, text=True, encoding="utf-8", timeout=10,
-        )
-        if r2.returncode == 0:
-            (target_dir / "dconf-full.ini").write_text(r2.stdout, encoding="utf-8")
-        return True
-    except Exception:
-        return False
-
-
-def restore_packages_meta(meta_dir: Path, on_line, on_done) -> None:
-    pkg_file = meta_dir / "packages.txt"
-    if not pkg_file.exists():
-        GLib.idle_add(on_done, False)
-        return
-    packages = pkg_file.read_text(encoding="utf-8").splitlines()
-    packages = [p.strip() for p in packages if p.strip()]
-    if not packages:
-        GLib.idle_add(on_done, True)
-        return
-        
-    from system import privileges
-    GLib.idle_add(on_line, "▶  Переустановка RPM-пакетов...\n")
-    privileges.run_privileged(["epm", "install", "-y", *packages], on_line, on_done)
-
-
-def restore_flatpak_meta(meta_dir: Path, on_line, on_done) -> None:
-    def _worker():
-        ok = True
-        remotes_file = meta_dir / "flatpak-remotes.txt"
-        if remotes_file.exists():
-            GLib.idle_add(on_line, "▶  Восстановление репозиториев Flatpak...\n")
-            for line in remotes_file.read_text(encoding="utf-8").splitlines():
-                parts = line.split()
-                if len(parts) < 2:
-                    continue
-                name, url = parts[0].strip(), parts[1].strip()
-                if not name or not url:
-                    continue
-                r = subprocess.run(
-                    ["flatpak", "remote-add", "--user", "--if-not-exists", name, url],
-                    capture_output=True, text=True, encoding="utf-8", timeout=30,
-                )
-                GLib.idle_add(on_line, f"   {'✔' if r.returncode == 0 else '⚠'} {name}\n")
-        apps_file = meta_dir / "flatpak-apps.txt"
-        if apps_file.exists():
-            GLib.idle_add(on_line, "▶  Переустановка Flatpak-приложений...\n")
-            for app_id in apps_file.read_text(encoding="utf-8").splitlines():
-                app_id = app_id.strip()
-                if not app_id:
-                    continue
-                r = subprocess.run(
-                    ["flatpak", "install", "-y", "--user", app_id],
-                    capture_output=True, text=True, encoding="utf-8", timeout=300,
-                )
-                GLib.idle_add(on_line, f"   {'✔' if r.returncode == 0 else '⚠'} {app_id}\n")
-        GLib.idle_add(on_done, ok)
-
-    threading.Thread(target=_worker, daemon=True).start()
-
-
-def restore_dconf_meta(meta_dir: Path) -> bool:
-    ini = meta_dir / "dconf-full.ini"
-    if not ini.exists():
-        return False
-    try:
-        r = subprocess.run(
-            ["dconf", "load", "/"],
-            input=ini.read_text(encoding="utf-8"),
-            text=True, encoding="utf-8", timeout=30
-        )
-        return r.returncode == 0
-    except Exception:
-        return False
-
-
-def _run_systemctl(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["systemctl", "--user", *args],
-        capture_output=True, text=True, encoding="utf-8", timeout=10,
-    )
-
-
-def write_systemd_units(repo_path: str, paths: list[str], calendar_expr: str) -> bool:
-    d = config.SYSTEMD_USER_DIR
-    d.mkdir(parents=True, exist_ok=True)
-    passphrase = config.state_get("borg_passphrase", "") or ""
-    ssh_key = borg_ssh_key_path()
-    paths_str = " ".join(f'"{p}"' for p in paths)
-    excludes_str = " ".join(
-        f'--exclude "{os.path.expanduser(e)}"' for e in DEFAULT_EXCLUDES
-    )
-    borg_exe = _borg_exe()
-
-    service_content = (
-        "[Unit]\n"
-        "Description=ALT Booster — резервное копирование\n\n"
-        "[Service]\n"
-        "Type=oneshot\n"
-        f"Environment=BORG_PASSPHRASE={passphrase}\n"
-        f"Environment=BORG_RSH=ssh -i {ssh_key} -o StrictHostKeyChecking=accept-new\n"
-        "ExecStart=/bin/bash -c '"
-        "mkdir -p /tmp/altbooster-backup-meta && "
-        "flatpak list --app --columns=application > /tmp/altbooster-backup-meta/flatpak-apps.txt 2>/dev/null; "
-        "flatpak remotes --columns=name,url > /tmp/altbooster-backup-meta/flatpak-remotes.txt 2>/dev/null; "
-        "rpm -qa --queryformat \"%%{NAME}\\n\" | sort -u > /tmp/altbooster-backup-meta/packages.txt 2>/dev/null; "
-        "dconf dump / > /tmp/altbooster-backup-meta/dconf-full.ini 2>/dev/null; "
-        f'{borg_exe} create --stats "{repo_path}::$(hostname)-$(date +%%Y-%%m-%%dT%%H-%%M)" '
-        f"{paths_str} /tmp/altbooster-backup-meta {excludes_str}'\n"
-    )
-
-    timer_content = (
-        "[Unit]\n"
-        "Description=ALT Booster — таймер резервного копирования\n\n"
-        "[Timer]\n"
-        f"OnCalendar={calendar_expr}\n"
-        "Persistent=true\n\n"
-        "[Install]\n"
-        "WantedBy=timers.target\n"
-    )
-
-    service_file = d / "altbooster-backup.service"
-    timer_file = d / "altbooster-backup.timer"
-    try:
-        service_file.write_text(service_content, encoding="utf-8")
-        service_file.chmod(0o600)
-        timer_file.write_text(timer_content, encoding="utf-8")
-        return True
-    except Exception:
-        return False
-
-
-def enable_systemd_timer() -> bool:
-    try:
-        _run_systemctl(["daemon-reload"])
-        r = _run_systemctl(["enable", "--now", "altbooster-backup.timer"])
-        return r.returncode == 0
-    except Exception:
-        return False
-
-
-def disable_systemd_timer() -> bool:
-    try:
-        r = _run_systemctl(["disable", "--now", "altbooster-backup.timer"])
-        return r.returncode == 0
-    except Exception:
-        return False
-
-
-def is_timer_active() -> bool:
-    try:
-        r = _run_systemctl(["is-active", "altbooster-backup.timer"])
-        return r.returncode == 0
-    except Exception:
-        return False
-
-
-def get_timer_next_run() -> str | None:
-    try:
-        r = _run_systemctl(["show", "altbooster-backup.timer", "--property=NextElapseUSecRealtime"])
-        for line in r.stdout.splitlines():
-            if "=" in line:
-                val = line.split("=", 1)[1].strip()
-                if val and val != "0":
-                    usec = int(val)
-                    dt = datetime.datetime.fromtimestamp(usec / 1_000_000)
-                    return dt.strftime("%d.%m.%Y %H:%M")
     except Exception:
         pass
     return None

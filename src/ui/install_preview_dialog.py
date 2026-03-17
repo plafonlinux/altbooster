@@ -9,7 +9,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
-from system.packages import InstallPreview, get_install_preview
+from core.packages import InstallPreview, get_install_preview
 
 _MAX_PKG_ROWS = 20
 

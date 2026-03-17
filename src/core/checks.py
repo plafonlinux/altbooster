@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .privileges import get_sudo_password, run_privileged_sync
 from .gsettings import gsettings_get
-import config
+from core import config
 
 def is_sudo_enabled() -> bool:
     try:

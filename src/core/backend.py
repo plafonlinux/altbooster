@@ -1,4 +1,4 @@
-from system.privileges import (
+from core.privileges import (
     set_sudo_password,
     get_sudo_password,
     set_sudo_nopass,
@@ -13,13 +13,12 @@ from system.privileges import (
     OnLine,
     OnDone,
 )
-from system.gsettings import run_gsettings, gsettings_get
-from system.checks import (
+from core.gsettings import run_gsettings, gsettings_get
+from core.checks import (
     is_sudo_enabled,
     is_flathub_enabled,
     is_fstrim_enabled,
     is_fractional_scaling_enabled,
-    is_system_busy,
     check_app_installed,
     is_vm_dirty_optimized,
     is_drive_menu_patched,
@@ -29,12 +28,12 @@ from system.checks import (
     is_fairlight_installed,
     is_epm_installed,
 )
-from system.tweaks import (
+from core.tweaks import (
     apply_vm_dirty,
     patch_drive_menu,
     install_aac_codec,
 )
-from system.borg import (
+from core.borg import (
     is_borg_installed,
     borg_version,
     is_repo_initialized,
@@ -69,7 +68,7 @@ from system.borg import (
     borg_archive_info,
     borg_export_tar,
 )
-from system.btrfs import (
+from core.btrfs import (
     is_home_on_btrfs,
     get_btrfs_mount_for_home,
     get_snapshots_dir,

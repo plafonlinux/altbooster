@@ -13,10 +13,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk
 
-import backend
-import config
+from core import backend
+from core import config
 from ui.install_preview_dialog import InstallPreviewDialog
-from widgets import make_button, make_icon, make_scrolled_page
+from ui.widgets import make_button, make_icon, make_scrolled_page
 from ui.rows import SettingRow
 
 _SOURCES_DIR = Path("/etc/apt/sources.list.d")
