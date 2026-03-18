@@ -13,6 +13,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango
 
 from core import backend
 from core import config
+from core.borg import _write_borg_env_file
 from ui.widgets import (
     make_icon, make_scrolled_page, make_button,
     make_status_icon, set_status_ok, set_status_error, clear_status,
@@ -628,7 +629,7 @@ class BorgPage(Gtk.Box):
                 page.set_visible(False)
             if self._page_btrfs:
                 self._page_btrfs.set_visible(False)
-        self._tm_expert_btn.set_label("Расширенные настройки")
+        self._tm_expert_btn.set_label("Экспертный режим")
         self._btn_simple_mode.set_visible(expert)
         self._btn_init_repo.set_visible(expert)
 
@@ -747,10 +748,23 @@ class BorgPage(Gtk.Box):
             if response != "start":
                 return
             extra_includes = {p for cb, paths in checks if cb.get_active() for p in paths}
-            if not backend.is_repo_initialized(repo_path):
-                self._tm_ask_password_and_init(repo_path, extra_includes)
-            else:
-                self._tm_do_backup(extra_includes)
+            home = Path.home()
+            opts = {
+                "paths": [str(home), str(config.CONFIG_DIR)],
+                "flatpak_apps": True,
+                "flatpak_apps_source": 0,
+                "flatpak_remotes": True,
+                "extensions": True,
+            }
+
+            def _after_summary():
+                if not backend.is_repo_initialized(repo_path):
+                    self._tm_ask_password_and_init(repo_path, extra_includes)
+                else:
+                    self._tm_do_backup(extra_includes)
+
+            summary = BorgBackupSummaryDialog(self.get_root(), repo_path, opts, _after_summary)
+            summary.present()
 
         dialog.connect("response", _on_response)
         dialog.present(self.get_root())
@@ -801,6 +815,8 @@ class BorgPage(Gtk.Box):
         home = Path.home()
         paths = [str(home), str(config.CONFIG_DIR)]
 
+        build_artifact_paths = {p for g in backend.OPTIONAL_EXCLUDES if g["key"] == "build_artifacts" for p in g["paths"]}
+        include_build = bool(extra_includes and extra_includes & build_artifact_paths)
         excludes = [p for p in backend.DEFAULT_EXCLUDES if not (extra_includes and p in extra_includes)]
         if repo_path.startswith(str(home)):
             excludes.append(repo_path)
@@ -841,7 +857,7 @@ class BorgPage(Gtk.Box):
             if ok:
                 GLib.idle_add(self._tm_refresh_archives)
 
-        backend.borg_create(repo_path, archive_name, paths, excludes, self._log, _done)
+        backend.borg_create(repo_path, archive_name, paths, excludes, self._log, _done, exclude_caches=not include_build)
 
     def _build_status_group(self):
         group = Adw.PreferencesGroup()
@@ -1675,6 +1691,7 @@ class BorgPage(Gtk.Box):
     def _save_repo_settings(self):
         config.state_set("borg_repo_path", self._row_repo_path.get_text().strip())
         config.state_set("borg_passphrase", self._row_passphrase.get_text())
+        _write_borg_env_file()
         if self._stack.get_visible_child_name() == "timesync":
             GLib.idle_add(self._tm_refresh_archives)
 

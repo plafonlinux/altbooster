@@ -44,7 +44,6 @@ def patch_drive_menu(on_log: OnLine, on_done: OnDone) -> None:
     script = f"""set -e
 TARGET="/usr/share/gnome-shell/extensions/drive-menu@gnome-shell-extensions.gcampax.github.com/extension.js"
 BACKUP="$TARGET.bak"
-ORIGINAL_SIZE=6197
 
 echo "Проверяю наличие системного расширения..."
 
@@ -52,16 +51,6 @@ if [ ! -f "$TARGET" ]; then
     echo "Ошибка: файл $TARGET не найден."
     rm -f {qpatch}
     exit 1
-fi
-
-CURRENT_SIZE=$(stat -c%s "$TARGET")
-echo "Оригинальный размер: $ORIGINAL_SIZE"
-echo "Текущий размер:      $CURRENT_SIZE"
-
-if [ "$CURRENT_SIZE" != "$ORIGINAL_SIZE" ]; then
-    echo "Размер файла изменился. Патч НЕ применяется."
-    rm -f {qpatch}
-    exit 0
 fi
 
 if grep -q "this._mounts.some" "$TARGET"; then

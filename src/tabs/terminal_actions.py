@@ -69,7 +69,7 @@ def _add_custom_keybinding(index: int) -> None:
     path = f"'{_KEYBINDINGS_BASE}/custom{index}/'"
     arr_res = subprocess.run(
         ["dconf", "read", _KEYBINDINGS_BASE],
-        capture_output=True, text=True,
+        capture_output=True, text=True, timeout=5,
     )
     arr = arr_res.stdout.strip()
     if path not in arr:
@@ -77,13 +77,13 @@ def _add_custom_keybinding(index: int) -> None:
             new_arr = f"[{path}]"
         else:
             new_arr = arr[:-1] + f", {path}]"
-        subprocess.run(["dconf", "write", _KEYBINDINGS_BASE, new_arr])
+        subprocess.run(["dconf", "write", _KEYBINDINGS_BASE, new_arr], timeout=5)
 
 
 def check_ptyxis_default(_page: Any, _arg: Any) -> bool:
     r = subprocess.run(
         ["xdg-mime", "query", "default", "x-scheme-handler/terminal"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, timeout=5,
     )
     return "org.gnome.Ptyxis.desktop" in r.stdout
 
@@ -91,7 +91,7 @@ def check_ptyxis_default(_page: Any, _arg: Any) -> bool:
 def set_ptyxis_default(page, _arg: Any) -> bool:
     r = subprocess.run(
         ["xdg-mime", "default", "org.gnome.Ptyxis.desktop", "x-scheme-handler/terminal"],
-        capture_output=True,
+        capture_output=True, timeout=5,
     )
     ok = r.returncode == 0
     if page:
@@ -102,7 +102,7 @@ def set_ptyxis_default(page, _arg: Any) -> bool:
 def check_ptyxis_font(_page: Any, _arg: Any) -> bool:
     r = subprocess.run(
         ["dconf", "read", "/org/gnome/Ptyxis/Profiles/default/font-name"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, timeout=5,
     )
     return "FiraCode Nerd Font" in r.stdout
 
@@ -110,7 +110,7 @@ def check_ptyxis_font(_page: Any, _arg: Any) -> bool:
 def check_shortcut_1(_page: Any, _arg: Any) -> bool:
     r = subprocess.run(
         ["dconf", "read", f"{_KEYBINDINGS_BASE}/custom0/command"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, timeout=5,
     )
     return "'ptyxis'" in r.stdout
 
@@ -122,7 +122,7 @@ def set_shortcut_1(page, _arg: Any) -> bool:
         [f"{base}/command", "'ptyxis'"],
         [f"{base}/binding", "'<Primary><Alt>t'"],
     ]:
-        subprocess.run(["dconf", "write"] + args, capture_output=True)
+        subprocess.run(["dconf", "write"] + args, capture_output=True, timeout=5)
     _add_custom_keybinding(0)
     if page:
         page.log("\n✔  Ctrl+Alt+T назначен!\n")
@@ -132,7 +132,7 @@ def set_shortcut_1(page, _arg: Any) -> bool:
 def check_shortcut_2(_page: Any, _arg: Any) -> bool:
     r = subprocess.run(
         ["dconf", "read", f"{_KEYBINDINGS_BASE}/custom1/command"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, timeout=5,
     )
     return "'ptyxis'" in r.stdout
 
@@ -144,7 +144,7 @@ def set_shortcut_2(page, _arg: Any) -> bool:
         [f"{base}/command", "'ptyxis'"],
         [f"{base}/binding", "'<Super>Return'"],
     ]:
-        subprocess.run(["dconf", "write"] + args, capture_output=True)
+        subprocess.run(["dconf", "write"] + args, capture_output=True, timeout=5)
     _add_custom_keybinding(1)
     if page:
         page.log("\n✔  Super+Enter назначен!\n")
@@ -153,7 +153,7 @@ def set_shortcut_2(page, _arg: Any) -> bool:
 
 def check_zsh_default(_page: Any, _arg: Any) -> bool:
     username = os.environ.get("USER", "")
-    r = subprocess.run(["getent", "passwd", username], capture_output=True, text=True)
+    r = subprocess.run(["getent", "passwd", username], capture_output=True, text=True, timeout=5)
     return "/zsh" in r.stdout
 
 
@@ -172,18 +172,24 @@ def install_zplug(page, _arg: Any) -> bool:
         if page:
             page.log("\nℹ  zplug уже установлен\n")
         return True
-    r = subprocess.run(
-        ["git", "clone", "https://github.com/zplug/zplug", zplug_dir],
-        capture_output=True, text=True,
-    )
-    ok = r.returncode == 0
-    if page:
-        if r.stdout:
-            page.log(r.stdout)
-        if r.stderr:
-            page.log(r.stderr)
-        page.log("\n✔  zplug установлен!\n" if ok else "\n✘  Ошибка установки zplug\n")
-    return ok
+    try:
+        r = subprocess.run(
+            ["git", "clone", "https://github.com/zplug/zplug", zplug_dir],
+            capture_output=True, text=True, timeout=120,
+        )
+        ok = r.returncode == 0
+        if page:
+            if r.stdout:
+                page.log(r.stdout)
+            if r.stderr:
+                page.log(r.stderr)
+            page.log("\n✔  zplug установлен!\n" if ok else "\n✘  Ошибка установки zplug\n")
+        return ok
+    except subprocess.TimeoutExpired:
+        if page:
+            page.log("\n✘  Таймаут git clone (120 с). Проверьте соединение.\n")
+        return False
+
 
 
 def install_fastfetch_config(page, _arg: Any) -> bool:

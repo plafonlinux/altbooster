@@ -29,6 +29,7 @@ _badge_css.load_from_data(b"""
 
 from core import backend
 from core import config
+from core.checks import invalidate_flatpak_cache
 from ui.install_preview_dialog import InstallPreviewDialog
 from ui.widgets import (
     make_icon, make_button, make_status_icon,
@@ -551,6 +552,7 @@ class AppRow(Adw.ActionRow):
         self._prog.set_visible(False)
         win = self.get_root()
         if ok:
+            invalidate_flatpak_cache()
             self._log(f"✔  {self._app['label']} установлен!\n")
             if hasattr(win, "stop_progress"): win.stop_progress(ok)
             config.state_set(self._state_key, True)
@@ -569,6 +571,7 @@ class AppRow(Adw.ActionRow):
         self._prog.set_visible(False)
         win = self.get_root()
         if ok:
+            invalidate_flatpak_cache()
             self._log(f"✔  {self._app['label']} удалён!\n")
             if hasattr(win, "stop_progress"): win.stop_progress(ok)
             config.state_set(self._state_key, False)
@@ -632,11 +635,7 @@ class TaskRow(Adw.ActionRow):
             if os.path.exists(path):
                 ok = True
             else:
-                pw = backend.get_sudo_password()
-                if pw:
-                    ok = backend.run_privileged_sync(["test", "-e", path], lambda _: None)
-                else:
-                    can_verify = False
+                ok = backend.run_privileged_sync(["test", "-e", path], lambda _: None)
 
         elif check.get("type") == "file_contains":
             path = os.path.expanduser(check["path"])
@@ -645,19 +644,9 @@ class TaskRow(Adw.ActionRow):
                 with open(path, encoding="utf-8", errors="ignore") as f:
                     ok = needle in f.read()
             except OSError:
-                pw = backend.get_sudo_password()
-                if pw:
-                    try:
-                        res = subprocess.run(
-                            ["sudo", "-S", "cat", path],
-                            input=pw + "\n",
-                            capture_output=True, text=True,
-                        )
-                        ok = needle in res.stdout
-                    except Exception:
-                        can_verify = False
-                else:
-                    can_verify = False
+                lines: list[str] = []
+                backend.run_privileged_sync(["cat", path], lambda line: lines.append(line))
+                ok = needle in "".join(lines)
 
         if ok:
             if self._state_key:

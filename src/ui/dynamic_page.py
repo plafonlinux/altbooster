@@ -4,6 +4,7 @@ import shutil
 import os
 import subprocess
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
 import gi
@@ -103,6 +104,8 @@ def run_check(check: dict | None) -> bool:
             except Exception:
                 return False
 
+    if config.DEBUG:
+        print(f"[ALT Booster] run_check: неизвестный тип '{kind}'")
     return False
 
 
@@ -146,7 +149,7 @@ class ActionDispatcher:
                 ok = backend.run_epm_sync(action["cmd"], page.log)
 
             elif kind == "shell":
-                r = subprocess.run(action["cmd"], capture_output=True, text=True)
+                r = subprocess.run(action["cmd"], capture_output=True, text=True, timeout=30)
                 if r.stdout:
                     GLib.idle_add(page.log, r.stdout)
                 if r.stderr:
@@ -379,6 +382,8 @@ class DynamicPage(Gtk.Box):
         self._rows_with_checks: list[Adw.ActionRow] = []
         self._btn_size_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         self._factory = RowFactory(self)
+        self._poll_running = False
+        self._poll_lock = threading.Lock()
 
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -422,10 +427,26 @@ class DynamicPage(Gtk.Box):
                     self._rows_with_checks.append(row)
 
     def _poll_checks(self) -> None:
-        for row in self._rows_with_checks:
-            check = getattr(row, "_dp_check", None)
-            ok = run_check(check)
-            GLib.idle_add(self._apply_check_result, row, ok)
+        with self._poll_lock:
+            if self._poll_running:
+                return
+            self._poll_running = True
+        try:
+            rows = list(self._rows_with_checks)
+            if not rows:
+                return
+            with ThreadPoolExecutor(max_workers=min(8, len(rows))) as pool:
+                futures = {pool.submit(run_check, getattr(r, "_dp_check", None)): r for r in rows}
+                for future in as_completed(futures):
+                    row = futures[future]
+                    try:
+                        ok = future.result()
+                    except Exception:
+                        ok = False
+                    GLib.idle_add(self._apply_check_result, row, ok)
+        finally:
+            with self._poll_lock:
+                self._poll_running = False
 
     def _apply_check_result(self, row: Adw.ActionRow, ok: bool) -> None:
         status = getattr(row, "_dp_status", None)

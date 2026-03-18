@@ -54,6 +54,23 @@ OPTIONAL_EXCLUDES = [
             "~/.var/app/com.heroicgameslauncher.hgl/config/heroic/tools",
         ],
     },
+    {
+        "key": "build_artifacts",
+        "title": "Сборочные артефакты (Rust, Node.js, Java...)",
+        "description": "target/, build/, .gradle/ — первый бэкап может занять часы при большом объёме",
+        "paths": [
+            "**/target",
+            "**/build",
+            "**/.gradle",
+            "**/.next",
+            "**/.nuxt",
+            "**/.svelte-kit",
+            "**/.output",
+            "~/.cargo/registry",
+            "~/.cargo/git",
+            "~/.rustup/toolchains",
+        ],
+    },
 ]
 
 _OPTIONAL_PATHS = {p for g in OPTIONAL_EXCLUDES for p in g["paths"]}
@@ -152,12 +169,23 @@ DEFAULT_EXCLUDES = [
     # Python виртуальные окружения
     "**/venv",
     "**/.venv",
+    "**/.tox",
+    # сборочные артефакты
+    "**/target",
+    "**/build",
+    "**/.gradle",
+    "**/.next",
+    "**/.nuxt",
+    "**/.svelte-kit",
+    "**/.output",
     # менеджеры пакетов — кэш
     "~/.npm",
     "~/.yarn/cache",
     "~/.gradle/caches",
     "~/.m2/repository",
     "~/.cargo/registry",
+    "~/.cargo/git",
+    "~/.rustup/toolchains",
     # прочее
     "~/.local/share/gvfs-metadata",
     "~/.local/share/Trash",
@@ -197,6 +225,11 @@ def _borg_env(repo_path: str) -> dict:
     env["BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK"] = "yes"
     ssh_key = borg_ssh_key_path()
     if ("@" in repo_path or repo_path.startswith("ssh://")) and ssh_key.exists():
+        try:
+            if ssh_key.stat().st_mode & 0o077:
+                os.chmod(ssh_key, 0o600)
+        except OSError:
+            pass
         env["BORG_RSH"] = f"ssh -i {ssh_key} -o StrictHostKeyChecking=accept-new"
     return env
 
@@ -291,11 +324,15 @@ def _translate_borg_line(line: str) -> str:
     return line
 
 
-def borg_create(repo_path: str, archive_name: str, paths: list[str], excludes: list[str], on_line, on_done) -> None:
+def borg_create(repo_path: str, archive_name: str, paths: list[str], excludes: list[str], on_line, on_done, exclude_caches: bool = True) -> None:
     def _on_line_ru(line: str):
         on_line(_translate_borg_line(line))
 
-    cmd = [_borg_exe(), "create", "--stats", "--progress", f"{repo_path}::{archive_name}"] + paths
+    cmd = [_borg_exe(), "create", "--stats", "--progress", "--compression", "lz4"]
+    if exclude_caches:
+        cmd.append("--exclude-caches")
+    cmd.append(f"{repo_path}::{archive_name}")
+    cmd += paths
     for e in excludes:
         cmd += ["--exclude", os.path.expanduser(e)]
     _run_borg_async(cmd, _on_line_ru, on_done, env=_borg_env(repo_path))
@@ -649,11 +686,30 @@ def _run_systemctl(args: list[str]) -> subprocess.CompletedProcess:
     )
 
 
+_BORG_ENV_FILE = config.CONFIG_DIR / "borg-env"
+
+
+def _write_borg_env_file() -> bool:
+    passphrase = config.state_get("borg_passphrase", "") or ""
+    ssh_key = borg_ssh_key_path()
+    content = (
+        f"BORG_PASSPHRASE={passphrase}\n"
+        f"BORG_RSH=ssh -i {ssh_key} -o StrictHostKeyChecking=accept-new\n"
+    )
+    try:
+        config.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        _BORG_ENV_FILE.write_text(content, encoding="utf-8")
+        _BORG_ENV_FILE.chmod(0o600)
+        return True
+    except Exception:
+        return False
+
+
 def write_systemd_units(repo_path: str, paths: list[str], calendar_expr: str) -> bool:
     d = config.SYSTEMD_USER_DIR
     d.mkdir(parents=True, exist_ok=True)
-    passphrase = config.state_get("borg_passphrase", "") or ""
-    ssh_key = borg_ssh_key_path()
+    if not _write_borg_env_file():
+        return False
     paths_str = " ".join(f'"{p}"' for p in paths)
     excludes_str = " ".join(
         f'--exclude "{os.path.expanduser(e)}"' for e in DEFAULT_EXCLUDES
@@ -665,15 +721,14 @@ def write_systemd_units(repo_path: str, paths: list[str], calendar_expr: str) ->
         "Description=ALT Booster — резервное копирование\n\n"
         "[Service]\n"
         "Type=oneshot\n"
-        f"Environment=BORG_PASSPHRASE={passphrase}\n"
-        f"Environment=BORG_RSH=ssh -i {ssh_key} -o StrictHostKeyChecking=accept-new\n"
+        f"EnvironmentFile={_BORG_ENV_FILE}\n"
         "ExecStart=/bin/bash -c '"
         "mkdir -p /tmp/altbooster-backup-meta && "
         "flatpak list --app --columns=application > /tmp/altbooster-backup-meta/flatpak-apps.txt 2>/dev/null; "
         "flatpak remotes --columns=name,url > /tmp/altbooster-backup-meta/flatpak-remotes.txt 2>/dev/null; "
         "rpm -qa --queryformat \"%%{NAME}\\n\" | sort -u > /tmp/altbooster-backup-meta/packages.txt 2>/dev/null; "
         "dconf dump / > /tmp/altbooster-backup-meta/dconf-full.ini 2>/dev/null; "
-        f'{borg_exe} create --stats "{repo_path}::$(hostname)-$(date +%%Y-%%m-%%dT%%H-%%M)" '
+        f'{borg_exe} create --stats --compression lz4 "{repo_path}::$(hostname)-$(date +%%Y-%%m-%%dT%%H-%%M)" '
         f"{paths_str} /tmp/altbooster-backup-meta {excludes_str}'\n"
     )
 

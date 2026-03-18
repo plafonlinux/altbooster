@@ -31,6 +31,19 @@ from tabs.timesync import BorgPage
 
 
 class AltBoosterWindow(Adw.ApplicationWindow):
+    _MAIN_TABS = [
+        ("setup",       "Начало",          "go-home-symbolic",             SetupPage),
+        ("apps",        "Приложения",      "grid-large-symbolic",          AppsPage),
+        ("extensions",  "Расширения",      "application-x-addon-symbolic", ExtensionsPage),
+        ("flatpak",     "Flatpak",         "flatpak-symbolic",             FlatpakPage),
+        ("terminal",    "Терминал",        "utilities-terminal-symbolic",  TerminalPage),
+        ("amd",         "AMD Radeon",      "video-display-symbolic",       AmdPage),
+        ("intel",       "Intel",           "processor-symbolic",           IntelPage),
+        ("davinci",     "DaVinci Resolve", "davinci-symbolic",             DaVinciPage),
+        ("maintenance", "Обслуживание",    "emblem-system-symbolic",       MaintenancePage),
+    ]
+    _BORG_TAB = ("borg", "TimeSync", "drive-harddisk-symbolic", BorgPage)
+
     def __init__(self, **kwargs):
         start_time = time.time()
         super().__init__(**kwargs)
@@ -55,7 +68,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             for _svg in _src_cat.glob("*.svg"):
                 _dst = _dst_cat / _svg.name
                 try:
-                    if not _dst.exists() or _dst.read_bytes() != _svg.read_bytes():
+                    _src_st = _svg.stat()
+                    _dst_st = _dst.stat() if _dst.exists() else None
+                    if not _dst_st or _dst_st.st_size != _src_st.st_size or _dst_st.st_mtime < _src_st.st_mtime:
                         shutil.copy2(_svg, _dst)
                         _icons_copied = True
                 except OSError:
@@ -98,32 +113,16 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         root.append(self._build_update_banner())
 
-        self._setup = SetupPage(self._log)
-        self._apps = AppsPage(self._log)
-        self._extensions = ExtensionsPage(self._log)
-        self._terminal = TerminalPage(self._log)
-        self._davinci = DaVinciPage(self._log)
-        self._maint = MaintenancePage(self._log)
-
-        self._amd = AmdPage(self._log)
-        self._intel = IntelPage(self._log)
-        self._flatpak = FlatpakPage(self._log)
-        self._borg = BorgPage(self._log)
-
-        for widget, name, title, icon in [
-            (self._setup,       "setup",       "Начало",          "go-home-symbolic"),
-            (self._apps,        "apps",        "Приложения",      "grid-large-symbolic"),
-            (self._extensions,  "extensions",  "Расширения",      "application-x-addon-symbolic"),
-            (self._flatpak,     "flatpak",     "Flatpak",         "flatpak-symbolic"),
-            (self._borg,       "borg",        "TimeSync", "drive-harddisk-symbolic"),
-            (self._terminal,   "terminal",    "Терминал",        "utilities-terminal-symbolic"),
-            (self._amd,        "amd",         "AMD Radeon",      "video-display-symbolic"),
-            (self._intel,      "intel",       "Intel",           "processor-symbolic"),
-            (self._davinci,    "davinci",     "DaVinci Resolve", "davinci-symbolic"),
-            (self._maint,      "maintenance", "Обслуживание",    "emblem-system-symbolic"),
-        ]:
-            p = self._stack.add_titled(widget, name, title)
+        self._pages = {}
+        for name, title, icon, PageClass in [*self._MAIN_TABS, self._BORG_TAB]:
+            page = PageClass(self._log)
+            self._pages[name] = page
+            p = self._stack.add_titled(page, name, title)
             p.set_icon_name(icon)
+
+        self._setup = self._pages["setup"]
+        self._maint = self._pages["maintenance"]
+        self._borg  = self._pages["borg"]
 
         self._stack.set_vexpand(True)
         self._stack.connect("notify::visible-child", self._on_stack_child_changed)
@@ -201,6 +200,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         menu.append_section(None, section_reset)
 
         section_about = Gio.Menu()
+        section_about.append("Справка", "win.help")
         section_about.append("О приложении", "win.about")
         menu.append_section(None, section_about)
 
@@ -239,6 +239,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         actions = [
             ("check_update",      self._check_for_updates),
+            ("help",              self._show_help),
             ("about",             self._show_about),
             ("clear_log",         self._clear_log),
             ("reset_state",       self._reset_state),
@@ -293,17 +294,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._nav_rows: list[Gtk.ListBoxRow] = []
         self._nav_names: list[str] = []
 
-        for name, title, icon_name in [
-            ("setup",       "Начало",          "go-home-symbolic"),
-            ("apps",        "Приложения",      "grid-large-symbolic"),
-            ("extensions",  "Расширения",      "application-x-addon-symbolic"),
-            ("flatpak",     "Flatpak",         "flatpak-symbolic"),
-            ("terminal",    "Терминал",        "utilities-terminal-symbolic"),
-            ("amd",         "AMD Radeon",      "video-display-symbolic"),
-            ("intel",       "Intel",           "processor-symbolic"),
-            ("davinci",     "DaVinci Resolve", "davinci-symbolic"),
-            ("maintenance", "Обслуживание",    "emblem-system-symbolic"),
-        ]:
+        for name, title, icon_name, _ in self._MAIN_TABS:
             row, img, lbl = self._make_nav_row(name, title, icon_name)
             nav_list.append(row)
             self._nav_images.append(img)
@@ -324,7 +315,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         borg_list = Gtk.ListBox()
         borg_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         borg_list.add_css_class("navigation-sidebar")
-        borg_row, borg_icon, borg_lbl = self._make_nav_row("borg", "TimeSync", "drive-harddisk-symbolic")
+        _bn, _bt, _bi, _ = self._BORG_TAB
+        borg_row, borg_icon, borg_lbl = self._make_nav_row(_bn, _bt, _bi)
         borg_list.append(borg_row)
         self._nav_images.append(borg_icon)
         self._nav_labels.append(borg_lbl)
@@ -647,37 +639,14 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._maint.set_sensitive_all(False)
 
         def _check():
-            if not shutil.which("sudo"):
-                GLib.idle_add(self._log, "ℹ Sudo не найден. Включен режим pkexec.\n")
-                GLib.idle_add(self._use_pkexec_auth)
-                return
-
-            try:
-                if subprocess.run(["sudo", "-n", "true"], capture_output=True, timeout=1).returncode == 0:
-                    backend.set_sudo_nopass(True)
-                    GLib.idle_add(self._auth_ok)
-                    return
-            except Exception:
-                pass
-
             GLib.idle_add(self._log, "ℹ Инициализация pkexec...\n")
-            backend.set_pkexec_mode(True)
             ok, is_cancel = backend.start_pkexec_shell()
             if ok:
                 GLib.idle_add(self._auth_ok)
-            elif is_cancel:
-                GLib.idle_add(self._log, "⚠ Аутентификация отменена пользователем.\n")
-                GLib.idle_add(self.close)
             else:
-                GLib.idle_add(self._log, "⚠ pkexec недоступен. Закрытие приложения.\n")
-                GLib.idle_add(self.close)
+                GLib.idle_add(self.get_application().quit)
 
         threading.Thread(target=_check, daemon=True).start()
-
-    def _use_pkexec_auth(self):
-        backend.set_pkexec_mode(True)
-        self._log("🔑 Используется pkexec (polkit) для привилегированных команд.\n")
-        self._auth_ok()
 
     def _restart_app(self):
         GLib.timeout_add(600, self._do_restart)
@@ -691,6 +660,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         return False
 
     def _auth_ok(self):
+        self.present()
         self._maint.set_sensitive_all(True)
         self._maint.refresh_checks()
         self._log("👋 Добро пожаловать в ALT Booster. С чего начнём?\n")
@@ -707,7 +677,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def _on_close(self, _):
         try:
             os.makedirs(config.CONFIG_DIR, exist_ok=True)
-            with open(config.CONFIG_FILE, "w") as f:
+            with open(config.CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump({
                     "width": self.get_width(),
                     "height": self.get_height(),
@@ -726,6 +696,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._stack.set_visible_child_name("setup")
         self._update_badge_dot.set_visible(False)
         self._setup.check_for_updates(manual=True, on_update_found=self._on_update_found_global)
+
+    def _show_help(self, *_):
+        from ui.help_dialog import HelpDialog
+        HelpDialog(self)
 
     def _show_about(self, *_):
         d = Adw.AboutDialog()

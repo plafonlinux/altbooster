@@ -130,11 +130,20 @@ def _fix_float_versions_in_metadata(log_fn: Callable[[str], None] | None = None)
             if isinstance(orig_ver, float):
                 data["version"] = str(orig_ver)
                 new_text = json.dumps(data, ensure_ascii=False, indent=2)
-                r = subprocess.run(
-                    ["sudo", "-n", "tee", str(meta_path)],
-                    input=new_text, capture_output=True, text=True,
-                )
-                if r.returncode == 0:
+                ok = False
+                try:
+                    fd, tmp = tempfile.mkstemp(suffix=".json")
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        f.write(new_text)
+                    ok = backend.run_privileged_sync(["cp", tmp, str(meta_path)], lambda _: None)
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        os.unlink(tmp)
+                    except Exception:
+                        pass
+                if ok:
                     if log_fn:
                         log_fn(f"✔  Исправлена float-версия в системном расширении {meta_path.parent.name}\n")
                 else:

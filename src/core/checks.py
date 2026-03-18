@@ -3,53 +3,19 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
+import threading
 from pathlib import Path
 
-from .privileges import get_sudo_password, run_privileged_sync
+from .privileges import run_privileged_sync
 from .gsettings import gsettings_get
 from core import config
 
 def is_sudo_enabled() -> bool:
-    try:
-        env = os.environ.copy()
-        env["LC_ALL"] = "C"
-        res = subprocess.run(["sudo", "-n", "true"], capture_output=True, text=True, env=env, timeout=2)
-        if sys.stdin.isatty() and res.returncode == 0:
-            return True
-        if "password is required" in res.stderr.lower():
-            return True
-    except Exception:
-        pass
-
-    password = get_sudo_password()
-    if password:
-        try:
-            env = os.environ.copy()
-            env["LC_ALL"] = "C"
-            res = subprocess.run(
-                ["sudo", "-S", "/usr/sbin/control", "sudowheel"],
-                input=password + "\n",
-                capture_output=True,
-                text=True,
-                timeout=2,
-                env=env,
-            )
-            out = (res.stdout + res.stderr).lower()
-            if "enabled" in out or "wheelonly" in out:
-                return True
-        except Exception:
-            pass
-
-    if not sys.stdin.isatty():
-        control = shutil.which("control") or "/usr/sbin/control"
-        lines: list[str] = []
-        run_privileged_sync([control, "sudowheel"], lambda line: lines.append(line))
-        out = "".join(lines).lower()
-        if "enabled" in out or "wheelonly" in out:
-            return True
-
-    return False
+    control = shutil.which("control") or "/usr/sbin/control"
+    lines: list[str] = []
+    run_privileged_sync([control, "sudowheel"], lambda line: lines.append(line))
+    out = "".join(lines).lower()
+    return "enabled" in out or "wheelonly" in out
 
 
 def is_flathub_enabled() -> bool:
@@ -87,15 +53,39 @@ def is_system_busy() -> bool:
     return False
 
 
+_flatpak_list_cache: set[str] | None = None
+_flatpak_list_lock = threading.Lock()
+
+
+def _get_flatpak_installed() -> set[str]:
+    global _flatpak_list_cache
+    with _flatpak_list_lock:
+        if _flatpak_list_cache is not None:
+            return _flatpak_list_cache
+    try:
+        res = subprocess.run(
+            ["flatpak", "list", "--app", "--columns=application"],
+            capture_output=True, text=True, timeout=15,
+        )
+        ids = {line.strip() for line in res.stdout.splitlines() if line.strip()}
+    except (subprocess.TimeoutExpired, OSError):
+        ids = set()
+    with _flatpak_list_lock:
+        _flatpak_list_cache = ids
+    return ids
+
+
+def invalidate_flatpak_cache() -> None:
+    global _flatpak_list_cache
+    with _flatpak_list_lock:
+        _flatpak_list_cache = None
+
+
 def check_app_installed(source: dict) -> bool:
     kind, value = source["check"]
     try:
         if kind == "flatpak":
-            res = subprocess.run(
-                ["flatpak", "list", "--app", "--columns=application"],
-                capture_output=True, text=True, timeout=15,
-            )
-            return value in res.stdout
+            return value in _get_flatpak_installed()
         if kind == "rpm":
             if subprocess.run(["rpm", "-q", value], capture_output=True, timeout=10).returncode == 0:
                 return True

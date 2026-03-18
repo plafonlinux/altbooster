@@ -11,6 +11,16 @@ BIN="/usr/local/bin/altbooster"
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'; BOLD='\033[1m'
 
 if [[ $EUID -ne 0 ]]; then
+    DE="${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-unknown}}"
+    if [[ ! "$DE" =~ [Gg][Nn][Oo][Mm][Ee] ]]; then
+        echo -e "${YELLOW}⚠  ALT Booster разработан для GNOME.${NC}"
+        echo -e "   Обнаружено окружение: ${BOLD}${DE}${NC}"
+        echo -e "   Приложение использует GTK4 + libadwaita и не тестировалось на других DE."
+        echo ""
+        read -r -p "   Продолжить установку? [y/N] " _confirm
+        [[ "$_confirm" =~ ^[Yy]$ ]] || exit 0
+        echo ""
+    fi
     echo -e "${YELLOW}🔒 Требуются права root...${NC}"
     # На чистой установке ALT Linux sudo может быть не настроен.
     # Пробуем использовать pkexec (запросит пароль root).

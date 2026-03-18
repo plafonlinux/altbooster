@@ -43,8 +43,7 @@ class AltBoosterApp(Adw.Application):
         self.add_action(quit_action)
         self.set_accels_for_action("app.quit", ["<Primary>q"])
         win = PlafonWindow(application=app)
-        win.present()
-        GLib.timeout_add(400, win.ask_password)
+        win.ask_password()
 
 if __name__ == "__main__":
     if os.geteuid() == 0:

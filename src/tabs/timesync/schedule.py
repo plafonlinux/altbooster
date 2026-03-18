@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from core import config
+from core.borg import _write_borg_env_file, _BORG_ENV_FILE
 from .borg import _borg_exe, borg_ssh_key_path, DEFAULT_EXCLUDES
 from .snapshots import get_btrfs_mount_for_home, get_snapshots_dir
 
@@ -21,8 +22,8 @@ def _run_systemctl(args: list[str]) -> subprocess.CompletedProcess:
 def write_systemd_units(repo_path: str, paths: list[str], calendar_expr: str) -> bool:
     d = config.SYSTEMD_USER_DIR
     d.mkdir(parents=True, exist_ok=True)
-    passphrase = config.state_get("borg_passphrase", "") or ""
-    ssh_key = borg_ssh_key_path()
+    if not _write_borg_env_file():
+        return False
     paths_str = " ".join(f'"{p}"' for p in paths)
     excludes_str = " ".join(
         f'--exclude "{os.path.expanduser(e)}"' for e in DEFAULT_EXCLUDES
@@ -34,8 +35,7 @@ def write_systemd_units(repo_path: str, paths: list[str], calendar_expr: str) ->
         "Description=ALT Booster — резервное копирование\n\n"
         "[Service]\n"
         "Type=oneshot\n"
-        f"Environment=BORG_PASSPHRASE={passphrase}\n"
-        f"Environment=BORG_RSH=ssh -i {ssh_key} -o StrictHostKeyChecking=accept-new\n"
+        f"EnvironmentFile={_BORG_ENV_FILE}\n"
         "ExecStart=/bin/bash -c '"
         "mkdir -p /tmp/altbooster-backup-meta && "
         "flatpak list --app --columns=application > /tmp/altbooster-backup-meta/flatpak-apps.txt 2>/dev/null; "

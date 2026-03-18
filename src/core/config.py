@@ -11,7 +11,7 @@ CONFIG_FILE = CONFIG_DIR / "window.json"
 STATE_FILE  = CONFIG_DIR / "state.json"
 SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
 
-VERSION = "5.6.8-beta"
+VERSION = "5.6.9-alpha"
 
 DEBUG: bool = False
 
@@ -30,43 +30,53 @@ APT_LOCK_FILES = [
 ]
 
 _state: dict = {}
+_state_lock = threading.Lock()
 
 
 def load_state() -> None:
     global _state
     try:
         with open(STATE_FILE) as f:
-            _state = json.load(f)
+            data = json.load(f)
+        with _state_lock:
+            _state = data
     except (OSError, json.JSONDecodeError):
-        _state = {}
+        with _state_lock:
+            _state = {}
 
 
 def save_state() -> None:
+    with _state_lock:
+        data = dict(_state)
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(_state, f, indent=2)
+            json.dump(data, f, indent=2)
         os.chmod(STATE_FILE, 0o600)
     except OSError:
         pass
 
 
 def state_get(key: str, default=None):
-    return _state.get(key, default)
+    with _state_lock:
+        return _state.get(key, default)
 
 
 def state_set(key: str, value) -> None:
-    _state[key] = value
+    with _state_lock:
+        _state[key] = value
     save_state()
 
 
 def reset_state() -> None:
-    _state.clear()
+    with _state_lock:
+        _state.clear()
     save_state()
 
 
 def get_state_copy() -> dict:
-    return dict(_state)
+    with _state_lock:
+        return dict(_state)
 
 
 def get_dv_cache() -> str:

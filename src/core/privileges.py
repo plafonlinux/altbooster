@@ -3,9 +3,7 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
-import stat
 import subprocess
-import tempfile
 import threading
 import time
 import uuid
@@ -18,32 +16,14 @@ from core import config
 OnLine = Callable[[str], None]
 OnDone = Callable[[bool], None]
 
-_sudo_password: str | None = None
-_sudo_lock = threading.Lock()
-_sudo_nopass: bool = False
-
 _current_proc: subprocess.Popen | None = None
 _current_proc_lock = threading.Lock()
 
 _stdbuf: list[str] = ["stdbuf", "-oL"] if shutil.which("stdbuf") else []
 
-
-def set_sudo_password(pw: str) -> None:
-    global _sudo_password
-    with _sudo_lock:
-        _sudo_password = pw
-
-def get_sudo_password() -> str:
-    with _sudo_lock:
-        return _sudo_password or ""
-
-def set_sudo_nopass(enabled: bool) -> None:
-    global _sudo_nopass
-    _sudo_nopass = enabled
-
-_use_pkexec: bool = False
 _pkexec_shell_proc: subprocess.Popen | None = None
 _pkexec_shell_lock = threading.Lock()
+
 
 def _get_pkexec_shell() -> subprocess.Popen | None:
     global _pkexec_shell_proc
@@ -66,28 +46,16 @@ def _get_pkexec_shell() -> subprocess.Popen | None:
 
     return _pkexec_shell_proc
 
-def set_pkexec_mode(enabled: bool) -> None:
-    global _use_pkexec
-    _use_pkexec = enabled
 
 def cancel_current() -> None:
-    global _current_proc
-    if _use_pkexec:
-        with _pkexec_shell_lock:
-            proc = _pkexec_shell_proc
-        if proc and proc.poll() is None:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
-        return
-    with _current_proc_lock:
-        proc = _current_proc
+    with _pkexec_shell_lock:
+        proc = _pkexec_shell_proc
     if proc and proc.poll() is None:
         try:
             proc.terminate()
         except Exception:
             pass
+
 
 def start_pkexec_shell() -> tuple[bool, bool]:
     global _pkexec_shell_proc
@@ -149,39 +117,12 @@ def start_pkexec_shell() -> tuple[bool, bool]:
             proc.kill()
         return False, is_cancel
 
-def _minimal_env() -> dict[str, str]:
-    return {
-        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        "HOME": os.environ.get("HOME", "/root"),
-        "USER": os.environ.get("USER", ""),
-        "LOGNAME": os.environ.get("LOGNAME", ""),
-        "LANG": "C",
-        "LC_ALL": "C",
-    }
-
-
-def sudo_check(pw: str) -> bool:
-    try:
-        env = _minimal_env()
-        subprocess.run(["sudo", "-k"], env=env, capture_output=True, timeout=3)
-        result = subprocess.run(
-            ["sudo", "-S", "id", "-u"],
-            input=pw + "\n",
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env=env,
-            timeout=10,
-        )
-        return result.returncode == 0 and result.stdout.strip() == "0"
-    except (OSError, subprocess.SubprocessError, UnicodeError):
-        return False
 
 def _is_apt_locked() -> bool:
     for lock_file in config.APT_LOCK_FILES:
         if not os.path.exists(lock_file):
             continue
-        if subprocess.run(["fuser", lock_file], capture_output=True).returncode == 0:
+        if subprocess.run(["fuser", lock_file], capture_output=True, timeout=5).returncode == 0:
             return True
     return False
 
@@ -296,83 +237,7 @@ def _run_pkexec(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
 
 
 def run_privileged(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
-    if _use_pkexec:
-        _run_pkexec(cmd, on_line, on_done)
-        return
-
-    if cmd and cmd[0] in ("apt", "apt-get", "epm", "epmi"):
-        on_line = _apt_dedup_filter(on_line)
-
-    cmd = _wrap_epm_auto_install(cmd)
-
-    def _worker() -> None:
-        global _current_proc
-        password = get_sudo_password()
-
-        check_lock = False
-        if cmd:
-            if cmd[0] in ("apt", "apt-get", "flatpak"):
-                check_lock = True
-            elif cmd[0] == "bash" and len(cmd) >= 3:
-                if "apt-get" in cmd[2] or "epm" in cmd[2] or "flatpak" in cmd[2]:
-                    check_lock = True
-        if check_lock:
-            _wait_for_apt_lock(on_line)
-
-        _cmd = [*_stdbuf, *cmd]
-        if _sudo_nopass:
-            proc = subprocess.Popen(
-                ["sudo", "-n", *_cmd],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-            )
-        else:
-            proc = subprocess.Popen(
-                ["sudo", "-S", *_cmd],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-            )
-            if proc.stdin:
-                try:
-                    proc.stdin.write(password + "\n")
-                    proc.stdin.flush()
-                except BrokenPipeError:
-                    pass
-                proc.stdin.close()
-
-        with _current_proc_lock:
-            _current_proc = proc
-
-        def _drain_stderr() -> None:
-            if not proc.stderr:
-                return
-            for line in proc.stderr:
-                low = line.lower()
-                if "sudo" in low or "password" in low:
-                    continue
-                GLib.idle_add(on_line, line)
-
-        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
-        stderr_thread.start()
-
-        if proc.stdout:
-            for line in proc.stdout:
-                GLib.idle_add(on_line, line)
-
-        stderr_thread.join()
-        proc.wait()
-        with _current_proc_lock:
-            if _current_proc is proc:
-                _current_proc = None
-        GLib.idle_add(on_done, proc.returncode == 0)
-
-    threading.Thread(target=_worker, daemon=True).start()
+    _run_pkexec(cmd, on_line, on_done)
 
 def run_privileged_sync(cmd: Sequence[str], on_line: OnLine) -> bool:
     event = threading.Event()
@@ -402,62 +267,5 @@ def run_epm_sync(cmd: Sequence[str], on_line: OnLine) -> bool:
 
 def run_epm(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
     cmd = _wrap_epm_auto_install(cmd)
-
     on_line = _apt_dedup_filter(on_line)
-
-    if _use_pkexec:
-        _run_pkexec(cmd, on_line, on_done)
-        return
-
-    def _worker() -> None:
-        global _current_proc
-        _wait_for_apt_lock(on_line)
-
-        askpass_path: str | None = None
-        try:
-            if _sudo_nopass:
-                proc = subprocess.Popen(
-                    ["sudo", "-n", *cmd],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    stdin=subprocess.DEVNULL,
-                    text=True,
-                    encoding="utf-8",
-                )
-            else:
-                password = get_sudo_password()
-                env = os.environ.copy()
-                fd, askpass_path = tempfile.mkstemp(suffix=".sh")
-                with os.fdopen(fd, "w", encoding="utf-8") as script:
-                    script.write("#!/bin/sh\n")
-                    script.write(f"printf '%s\\n' {shlex.quote(password)}\n")
-                os.chmod(askpass_path, stat.S_IRWXU)
-                env["SUDO_ASKPASS"] = askpass_path
-                proc = subprocess.Popen(
-                    ["sudo", "-A", *cmd],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    stdin=subprocess.DEVNULL,
-                    text=True,
-                    encoding="utf-8",
-                    env=env,
-                )
-
-            with _current_proc_lock:
-                _current_proc = proc
-            if proc.stdout:
-                for line in proc.stdout:
-                    GLib.idle_add(on_line, line)
-            proc.wait()
-            with _current_proc_lock:
-                if _current_proc is proc:
-                    _current_proc = None
-            GLib.idle_add(on_done, proc.returncode == 0)
-        finally:
-            if askpass_path:
-                try:
-                    os.unlink(askpass_path)
-                except OSError:
-                    pass
-
-    threading.Thread(target=_worker, daemon=True).start()
+    _run_pkexec(cmd, on_line, on_done)

@@ -160,6 +160,8 @@ class AppsPage(Gtk.Box):
         self._clear_pkg_search_results()
         branch_map = {0: "p11", 1: "sisyphus", 2: "epm_play", 3: "flathub"}
         branch = branch_map.get(self._branch_combo.get_selected(), "p11")
+        if branch == "epm_play":
+            self._epm_play_cache = None
         threading.Thread(target=self._do_pkg_search, args=(text, branch), daemon=True).start()
 
     def _fetch_from_source(self, query, branch):

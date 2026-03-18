@@ -1,10 +1,5 @@
 from core.privileges import (
-    set_sudo_password,
-    get_sudo_password,
-    set_sudo_nopass,
-    set_pkexec_mode,
     start_pkexec_shell,
-    sudo_check,
     run_privileged,
     run_privileged_sync,
     run_epm,
