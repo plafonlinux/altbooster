@@ -261,10 +261,22 @@ class FstabRow(Adw.ExpanderRow):
         existing = self._read_fstab_mountpoints()
         new_entries = [e for e in entries if e["mountpoint"] not in existing]
 
-        if not new_entries:
-            self._log("ℹ  Все точки монтирования уже присутствуют в /etc/fstab\n")
+        if new_entries:
+            self._start_add(new_entries)
             return
 
+        mounted = self._read_mounted_points()
+        unmounted = [e for e in entries if e["mountpoint"] not in mounted]
+
+        if unmounted:
+            self._start_mount(
+                unmounted,
+                f"ℹ  Записи уже в fstab. Монтирование {len(unmounted)} точек...\n",
+            )
+        else:
+            self._show_remount_dialog(entries)
+
+    def _start_add(self, new_entries):
         self._new_mounts = [e["mountpoint"] for e in new_entries]
         self._running = True
         self._btn.set_sensitive(False)
@@ -288,11 +300,65 @@ class FstabRow(Adw.ExpanderRow):
                 f"ℹ  Обнаружены NFS записи. Убедитесь, что на сервере разрешён доступ "
                 f"с IP этой машины{ip_hint} (Synology: DSM → Общая папка → Разрешения NFS).\n"
             )
+            body = (
+                f"Убедитесь, что на сервере NFS разрешён доступ с IP этой машины{ip_hint}.\n\n"
+                "Synology: DSM → Общая папка → Разрешения NFS"
+            )
+            dlg = Adw.AlertDialog(heading="Обнаружены NFS записи", body=body)
+            dlg.add_response("ok", "Понятно")
+            dlg.set_default_response("ok")
+            dlg.present(self.get_root())
 
         self._log(f"\n▶  Добавление {len(new_entries)} записей в fstab...\n")
         for e in new_entries:
             self._log(f"   {e['line']}\n")
         backend.run_privileged(["bash", "-c", script_fstab], self._log, self._fstab_done)
+
+    def _start_mount(self, entries, msg):
+        self._new_mounts = []
+        self._running = True
+        self._btn.set_sensitive(False)
+        self._btn.set_label("…")
+        clear_status(self._status)
+        self._log(msg)
+        for e in entries:
+            self._log(f"   {e['mountpoint']}\n")
+        backend.run_privileged(["mount", "-a"], self._log, self._mount_done)
+
+    def _show_remount_dialog(self, entries):
+        self._log("ℹ  Все точки монтирования уже в fstab и смонтированы\n")
+        dlg = Adw.AlertDialog(
+            heading="Все диски смонтированы",
+            body=(
+                "Все указанные точки монтирования уже присутствуют в /etc/fstab и подключены.\n\n"
+                "Перезапустить монтирование?"
+            ),
+        )
+        dlg.add_response("cancel", "Отмена")
+        dlg.add_response("remount", "Перемонтировать")
+        dlg.set_response_appearance("remount", Adw.ResponseAppearance.SUGGESTED)
+        dlg.set_default_response("cancel")
+        dlg.set_close_response("cancel")
+
+        def on_response(d, response):
+            if response == "remount":
+                self._do_remount(entries)
+
+        dlg.connect("response", on_response)
+        dlg.present(self.get_root())
+
+    def _do_remount(self, entries):
+        self._new_mounts = []
+        self._running = True
+        self._btn.set_sensitive(False)
+        self._btn.set_label("…")
+        clear_status(self._status)
+        mounts_args = " ".join(shlex.quote(e["mountpoint"]) for e in entries)
+        script = f"umount -l {mounts_args} ; mount -a"
+        self._log(f"▶  Перемонтирование {len(entries)} точек...\n")
+        for e in entries:
+            self._log(f"   {e['mountpoint']}\n")
+        backend.run_privileged(["bash", "-c", script], self._log, self._mount_done)
 
     def _fstab_done(self, ok):
         if not ok:
@@ -313,8 +379,9 @@ class FstabRow(Adw.ExpanderRow):
         if ok:
             self._log("✔  Все диски подключены\n")
         else:
-            self._log("⚠  fstab обновлён, но некоторые диски не подключились (сервер недоступен?)\n")
-        GLib.idle_add(self._show_nautilus_dialog)
+            self._log("⚠  Некоторые диски не подключились (сервер недоступен?)\n")
+        if self._new_mounts:
+            GLib.idle_add(self._show_nautilus_dialog)
 
     def _show_nautilus_dialog(self):
         win = self.get_root()
@@ -386,6 +453,14 @@ class FstabRow(Adw.ExpanderRow):
                 return s.getsockname()[0]
         except Exception:
             return None
+
+    @staticmethod
+    def _read_mounted_points():
+        try:
+            with open("/proc/mounts", encoding="utf-8") as f:
+                return {line.split()[1] for line in f if len(line.split()) >= 2}
+        except OSError:
+            return set()
 
     @staticmethod
     def _read_fstab_mountpoints():
