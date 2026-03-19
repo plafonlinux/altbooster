@@ -291,23 +291,7 @@ class FstabRow(Adw.ExpanderRow):
             f"printf '%s\\n' {fstab_append} >> /etc/fstab"
         )
 
-        nfs_entries = [e for e in new_entries if e["fstype"] in ("nfs", "nfs4", "nfs3")]
-        if nfs_entries:
-            server_ip = nfs_entries[0]["line"].split(":")[0].split()[-1]
-            local_ip = self._get_local_ip_for(server_ip)
-            ip_hint = f" ({local_ip})" if local_ip else ""
-            self._log(
-                f"ℹ  Обнаружены NFS записи. Убедитесь, что на сервере разрешён доступ "
-                f"с IP этой машины{ip_hint} (Synology: DSM → Общая папка → Разрешения NFS).\n"
-            )
-            body = (
-                f"Убедитесь, что на сервере NFS разрешён доступ с IP этой машины{ip_hint}.\n\n"
-                "Synology: DSM → Общая папка → Разрешения NFS"
-            )
-            dlg = Adw.AlertDialog(heading="Обнаружены NFS записи", body=body)
-            dlg.add_response("ok", "Понятно")
-            dlg.set_default_response("ok")
-            dlg.present(self.get_root())
+        self._show_nfs_dialog_if_needed(new_entries)
 
         self._log(f"\n▶  Добавление {len(new_entries)} записей в fstab...\n")
         for e in new_entries:
@@ -320,10 +304,31 @@ class FstabRow(Adw.ExpanderRow):
         self._btn.set_sensitive(False)
         self._btn.set_label("…")
         clear_status(self._status)
+        self._show_nfs_dialog_if_needed(entries)
         self._log(msg)
         for e in entries:
             self._log(f"   {e['mountpoint']}\n")
         backend.run_privileged(["mount", "-a"], self._log, self._mount_done)
+
+    def _show_nfs_dialog_if_needed(self, entries):
+        nfs_entries = [e for e in entries if e["fstype"] in ("nfs", "nfs4", "nfs3")]
+        if not nfs_entries:
+            return
+        server_ip = nfs_entries[0]["line"].split(":")[0].split()[-1]
+        local_ip = self._get_local_ip_for(server_ip)
+        ip_hint = f" ({local_ip})" if local_ip else ""
+        self._log(
+            f"ℹ  Обнаружены NFS записи. Убедитесь, что на сервере разрешён доступ "
+            f"с IP этой машины{ip_hint} (Synology: DSM → Общая папка → Разрешения NFS).\n"
+        )
+        body = (
+            f"Убедитесь, что на сервере NFS разрешён доступ с IP этой машины{ip_hint}.\n\n"
+            "Synology: DSM → Общая папка → Разрешения NFS"
+        )
+        dlg = Adw.AlertDialog(heading="Обнаружены NFS записи", body=body)
+        dlg.add_response("ok", "Понятно")
+        dlg.set_default_response("ok")
+        dlg.present(self.get_root())
 
     def _show_remount_dialog(self, entries):
         self._log("ℹ  Все точки монтирования уже в fstab и смонтированы\n")
