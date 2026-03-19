@@ -2,6 +2,7 @@
 import json
 import os
 import shlex
+import socket
 import threading
 
 import gi
@@ -272,29 +273,48 @@ class FstabRow(Adw.ExpanderRow):
 
         mounts_args = " ".join(shlex.quote(e["mountpoint"]) for e in new_entries)
         fstab_append = " ".join(shlex.quote(e["line"]) for e in new_entries)
-        script = (
+        script_fstab = (
             f"mkdir -p {mounts_args} && "
             f"printf '\\n# Добавлено ALT Booster\\n' >> /etc/fstab && "
-            f"printf '%s\\n' {fstab_append} >> /etc/fstab && "
-            f"mount -a"
+            f"printf '%s\\n' {fstab_append} >> /etc/fstab"
         )
+
+        nfs_entries = [e for e in new_entries if e["fstype"] in ("nfs", "nfs4", "nfs3")]
+        if nfs_entries:
+            server_ip = nfs_entries[0]["line"].split(":")[0].split()[-1]
+            local_ip = self._get_local_ip_for(server_ip)
+            ip_hint = f" ({local_ip})" if local_ip else ""
+            self._log(
+                f"ℹ  Обнаружены NFS записи. Убедитесь, что на сервере разрешён доступ "
+                f"с IP этой машины{ip_hint} (Synology: DSM → Общая папка → Разрешения NFS).\n"
+            )
 
         self._log(f"\n▶  Добавление {len(new_entries)} записей в fstab...\n")
         for e in new_entries:
             self._log(f"   {e['line']}\n")
-        backend.run_privileged(["bash", "-c", script], self._log, self._done)
+        backend.run_privileged(["bash", "-c", script_fstab], self._log, self._fstab_done)
 
-    def _done(self, ok):
+    def _fstab_done(self, ok):
+        if not ok:
+            self._running = False
+            self._btn.set_label("Применить")
+            self._btn.set_sensitive(True)
+            set_status_error(self._status)
+            self._log("✘  Ошибка при обновлении fstab\n")
+            return
+        self._log("✔  fstab обновлён. Монтирование дисков...\n")
+        backend.run_privileged(["mount", "-a"], self._log, self._mount_done)
+
+    def _mount_done(self, ok):
         self._running = False
         self._btn.set_label("Применить")
         self._btn.set_sensitive(True)
+        set_status_ok(self._status)
         if ok:
-            set_status_ok(self._status)
-            self._log("✔  fstab обновлён, диски подключены\n")
-            GLib.idle_add(self._show_nautilus_dialog)
+            self._log("✔  Все диски подключены\n")
         else:
-            set_status_error(self._status)
-            self._log("✘  Ошибка при обновлении fstab\n")
+            self._log("⚠  fstab обновлён, но некоторые диски не подключились (сервер недоступен?)\n")
+        GLib.idle_add(self._show_nautilus_dialog)
 
     def _show_nautilus_dialog(self):
         win = self.get_root()
@@ -351,8 +371,21 @@ class FstabRow(Adw.ExpanderRow):
                 continue
             parts = stripped.split()
             if len(parts) >= 2:
-                entries.append({"line": stripped, "mountpoint": parts[1]})
+                entries.append({
+                    "line": stripped,
+                    "mountpoint": parts[1],
+                    "fstype": parts[2] if len(parts) >= 3 else "",
+                })
         return entries
+
+    @staticmethod
+    def _get_local_ip_for(server_ip):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect((server_ip, 2049))
+                return s.getsockname()[0]
+        except Exception:
+            return None
 
     @staticmethod
     def _read_fstab_mountpoints():
