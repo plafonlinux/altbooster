@@ -82,6 +82,7 @@ class BorgPage(Gtk.Box):
         btrfs_w = self._stack.get_child_by_name("btrfs")
         self._page_btrfs = self._stack.get_page(btrfs_w) if btrfs_w else None
 
+        self._fastfetch_offer_shown = False
         self._update_sections_visibility()
         threading.Thread(target=self._refresh_status_thread, daemon=True).start()
         self._apply_mode(config.state_get("borg_expert_mode", False))
@@ -141,6 +142,24 @@ class BorgPage(Gtk.Box):
         self._tm_box.append(top_bar)
 
         # ── блок «Этот компьютер» (fastfetch) ────────────────────────────
+        sysinfo_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        sysinfo_title = Gtk.Label(label="Этот компьютер")
+        sysinfo_title.add_css_class("heading")
+        sysinfo_title.set_halign(Gtk.Align.START)
+        sysinfo_title.set_hexpand(True)
+        self._tm_sysinfo_toggle = Gtk.ToggleButton()
+        self._tm_sysinfo_toggle.set_icon_name("pan-end-symbolic")
+        self._tm_sysinfo_toggle.add_css_class("flat")
+        self._tm_sysinfo_toggle.add_css_class("circular")
+        self._tm_sysinfo_toggle.set_valign(Gtk.Align.CENTER)
+        sysinfo_header.append(sysinfo_title)
+        sysinfo_header.append(self._tm_sysinfo_toggle)
+        self._tm_box.append(sysinfo_header)
+
+        self._tm_sysinfo_revealer = Gtk.Revealer()
+        self._tm_sysinfo_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self._tm_sysinfo_revealer.set_reveal_child(False)
+
         sysinfo_card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         sysinfo_card.add_css_class("card")
         sysinfo_card.set_overflow(Gtk.Overflow.HIDDEN)
@@ -172,25 +191,16 @@ class BorgPage(Gtk.Box):
         self._tm_sysinfo_label2.set_label("")
         sysinfo_card.append(self._tm_sysinfo_label2)
 
-        self._tm_sysinfo_card = sysinfo_card
-        self._tm_box.append(sysinfo_card)
+        self._tm_sysinfo_revealer.set_child(sysinfo_card)
+        self._tm_box.append(self._tm_sysinfo_revealer)
+
+        def _on_sysinfo_toggle(btn):
+            expanded = btn.get_active()
+            self._tm_sysinfo_revealer.set_reveal_child(expanded)
+            btn.set_icon_name("pan-down-symbolic" if expanded else "pan-end-symbolic")
+
+        self._tm_sysinfo_toggle.connect("toggled", _on_sysinfo_toggle)
         threading.Thread(target=self._tm_load_sysinfo, daemon=True).start()
-
-        def _update_sysinfo_visibility(*_):
-            root = self._tm_sysinfo_card.get_root()
-            if root:
-                should = root.get_width() >= 800
-                if self._tm_sysinfo_card.get_visible() != should:
-                    self._tm_sysinfo_card.set_visible(should)
-
-        def _on_sysinfo_mapped(widget):
-            root = widget.get_root()
-            if root:
-                root.connect("notify::default-width", _update_sysinfo_visibility)
-                root.connect("notify::maximized", _update_sysinfo_visibility)
-                _update_sysinfo_visibility()
-
-        sysinfo_card.connect("map", _on_sysinfo_mapped)
 
         # ── заголовок «Резервные копии» + кнопка обновить ────────────────
         backups_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -324,6 +334,39 @@ class BorgPage(Gtk.Box):
             except Exception:
                 continue
         GLib.idle_add(self._tm_sysinfo_label.set_label, "fastfetch не установлен")
+        GLib.idle_add(self._offer_fastfetch_install)
+
+    def _offer_fastfetch_install(self):
+        if self._fastfetch_offer_shown:
+            return
+        self._fastfetch_offer_shown = True
+        dialog = Adw.AlertDialog(
+            heading="fastfetch не установлен",
+            body="fastfetch используется для отображения информации о системе.\n\nУстановить его сейчас?",
+        )
+        dialog.add_response("later", "Не сейчас")
+        dialog.add_response("install", "Установить")
+        dialog.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("install")
+        dialog.connect("response", self._on_fastfetch_install_response)
+        dialog.present(self.get_root())
+
+    def _on_fastfetch_install_response(self, _dialog, response):
+        if response != "install":
+            return
+        win = self.get_root()
+        self._log("\n▶  Установка fastfetch...\n")
+        if hasattr(win, "start_progress"):
+            win.start_progress("Установка fastfetch...")
+
+        def _done(ok):
+            self._log("✔  fastfetch установлен!\n" if ok else "✘  Ошибка установки fastfetch\n")
+            if hasattr(win, "stop_progress"):
+                GLib.idle_add(win.stop_progress, ok)
+            if ok:
+                threading.Thread(target=self._tm_load_sysinfo, daemon=True).start()
+
+        backend.run_epm(["epm", "-i", "fastfetch"], self._log, _done)
 
     @staticmethod
     def _tm_split_sysinfo(text: str) -> tuple[str, str]:
