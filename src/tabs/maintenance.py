@@ -201,6 +201,176 @@ class CacheTaskRow(Adw.ExpanderRow):
             self._on_progress()
 
 
+class FstabRow(Adw.ExpanderRow):
+    def __init__(self, log_fn):
+        super().__init__()
+        self._log = log_fn
+        self._running = False
+        self._new_mounts = []
+
+        self.set_title("Добавить точки монтирования")
+        self.set_subtitle("Вставьте строки fstab — директории будут созданы автоматически")
+        self.add_prefix(make_icon("drive-harddisk-symbolic"))
+
+        self._status = make_status_icon()
+        self._btn = make_button("Применить", width=110)
+        self._btn.set_valign(Gtk.Align.CENTER)
+        self._btn.connect("clicked", lambda _: self._apply())
+
+        suffix = Gtk.Box(spacing=10)
+        suffix.set_valign(Gtk.Align.CENTER)
+        suffix.append(self._status)
+        suffix.append(self._btn)
+        self.add_suffix(suffix)
+
+        self._buf = Gtk.TextBuffer()
+        tv = Gtk.TextView(buffer=self._buf)
+        tv.set_monospace(True)
+        tv.set_wrap_mode(Gtk.WrapMode.NONE)
+        tv.set_margin_top(8)
+        tv.set_margin_bottom(8)
+        tv.set_margin_start(12)
+        tv.set_margin_end(12)
+        tv.add_css_class("view")
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_min_content_height(120)
+        scroll.set_vexpand(False)
+        scroll.set_child(tv)
+
+        tv_row = Adw.PreferencesRow()
+        tv_row.set_activatable(False)
+        tv_row.set_focusable(False)
+        tv_row.set_child(scroll)
+        self.add_row(tv_row)
+
+    def _apply(self):
+        if self._running:
+            return
+
+        text = self._buf.get_text(
+            self._buf.get_start_iter(), self._buf.get_end_iter(), False
+        )
+        entries = self._parse_fstab_lines(text)
+
+        if not entries:
+            self._log("⚠  Нет корректных строк fstab\n")
+            return
+
+        existing = self._read_fstab_mountpoints()
+        new_entries = [e for e in entries if e["mountpoint"] not in existing]
+
+        if not new_entries:
+            self._log("ℹ  Все точки монтирования уже присутствуют в /etc/fstab\n")
+            return
+
+        self._new_mounts = [e["mountpoint"] for e in new_entries]
+        self._running = True
+        self._btn.set_sensitive(False)
+        self._btn.set_label("…")
+        clear_status(self._status)
+
+        mounts_args = " ".join(shlex.quote(e["mountpoint"]) for e in new_entries)
+        fstab_append = " ".join(shlex.quote(e["line"]) for e in new_entries)
+        script = (
+            f"mkdir -p {mounts_args} && "
+            f"printf '\\n# Добавлено ALT Booster\\n' >> /etc/fstab && "
+            f"printf '%s\\n' {fstab_append} >> /etc/fstab && "
+            f"mount -a"
+        )
+
+        self._log(f"\n▶  Добавление {len(new_entries)} записей в fstab...\n")
+        for e in new_entries:
+            self._log(f"   {e['line']}\n")
+        backend.run_privileged(["bash", "-c", script], self._log, self._done)
+
+    def _done(self, ok):
+        self._running = False
+        self._btn.set_label("Применить")
+        self._btn.set_sensitive(True)
+        if ok:
+            set_status_ok(self._status)
+            self._log("✔  fstab обновлён, диски подключены\n")
+            GLib.idle_add(self._show_nautilus_dialog)
+        else:
+            set_status_error(self._status)
+            self._log("✘  Ошибка при обновлении fstab\n")
+
+    def _show_nautilus_dialog(self):
+        win = self.get_root()
+        dialog = Adw.MessageDialog(transient_for=win)
+        dialog.set_heading("Добавить в боковую панель Nautilus?")
+        dialog.set_body("Выберите папки для добавления в закладки:")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.set_margin_top(4)
+        checks = []
+        for mp in self._new_mounts:
+            cb = Gtk.CheckButton(label=mp)
+            cb.set_active(True)
+            box.append(cb)
+            checks.append((mp, cb))
+
+        dialog.set_extra_child(box)
+        dialog.add_response("cancel", "Пропустить")
+        dialog.add_response("add", "Добавить")
+        dialog.set_default_response("add")
+        dialog.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
+
+        def on_response(d, response):
+            if response == "add":
+                selected = [mp for mp, cb in checks if cb.get_active()]
+                self._add_nautilus_bookmarks(selected)
+            d.destroy()
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
+    def _add_nautilus_bookmarks(self, mounts):
+        bookmarks_file = os.path.expanduser("~/.config/gtk-3.0/bookmarks")
+        os.makedirs(os.path.dirname(bookmarks_file), exist_ok=True)
+
+        existing = set()
+        if os.path.exists(bookmarks_file):
+            with open(bookmarks_file, encoding="utf-8") as f:
+                existing = {line.strip() for line in f}
+
+        new_lines = [f"file://{mp}" for mp in mounts if f"file://{mp}" not in existing]
+        if new_lines:
+            with open(bookmarks_file, "a", encoding="utf-8") as f:
+                for line in new_lines:
+                    f.write(line + "\n")
+            self._log(f"✔  Добавлено {len(new_lines)} закладок в Nautilus\n")
+
+    @staticmethod
+    def _parse_fstab_lines(text):
+        entries = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            parts = stripped.split()
+            if len(parts) >= 2:
+                entries.append({"line": stripped, "mountpoint": parts[1]})
+        return entries
+
+    @staticmethod
+    def _read_fstab_mountpoints():
+        try:
+            with open("/etc/fstab", encoding="utf-8") as f:
+                mps = set()
+                for line in f:
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("#"):
+                        continue
+                    parts = stripped.split()
+                    if len(parts) >= 2:
+                        mps.add(parts[1])
+                return mps
+        except OSError:
+            return set()
+
+
 class MaintenancePage(Gtk.Box):
     def __init__(self, log_fn):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -255,6 +425,11 @@ class MaintenancePage(Gtk.Box):
         self._cache_row = CacheTaskRow(self._log, self._update_progress)
         self._rows.append(self._cache_row)
         cache_group.add(self._cache_row)
+
+        fstab_group = Adw.PreferencesGroup()
+        fstab_group.set_title("Монтирование")
+        body.append(fstab_group)
+        fstab_group.add(FstabRow(self._log))
 
         tasks_group = Adw.PreferencesGroup()
         tasks_group.set_title("Задачи обслуживания")
