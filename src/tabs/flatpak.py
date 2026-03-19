@@ -582,11 +582,6 @@ class FlatpakPage(Gtk.Box):
         mirror_row.connect("notify::selected", self._on_mirror_selected)
         group.add(mirror_row)
 
-        expander = Adw.ExpanderRow()
-        expander.set_title("Обслуживание Flatpak")
-        expander.set_expanded(False)
-        group.add(expander)
-
         flathub_row = SettingRow(
             "application-x-addon-symbolic",
             "Подключить Flathub",
@@ -594,7 +589,12 @@ class FlatpakPage(Gtk.Box):
             "Включить", self._on_flathub, backend.is_flathub_enabled,
             "setting_flathub", "Активировано", self._on_flathub_undo, "Удалить",
         )
-        expander.add_row(flathub_row)
+        group.add(flathub_row)
+
+        expander = Adw.ExpanderRow()
+        expander.set_title("Обслуживание Flatpak")
+        expander.set_expanded(False)
+        group.add(expander)
 
         try:
             data = load_module("maintenance")
@@ -620,6 +620,14 @@ class FlatpakPage(Gtk.Box):
         if hasattr(win, "start_progress"):
             win.start_progress("Установка Flatpak...")
 
+        def _after_flathub(ok2):
+            row.set_done(ok2)
+            self._log("✔  Flathub готов!\n" if ok2 else "✘  Ошибка\n")
+            if hasattr(win, "stop_progress"):
+                win.stop_progress(ok2)
+            if ok2:
+                GLib.idle_add(self._ask_restart)
+
         def step2(ok):
             if not ok:
                 row.set_done(False)
@@ -627,14 +635,30 @@ class FlatpakPage(Gtk.Box):
             backend.run_privileged(
                 ["apt-get", "install", "-y", "flatpak-repo-flathub"],
                 self._log,
-                lambda ok2: (
-                    row.set_done(ok2),
-                    self._log("✔  Flathub готов!\n" if ok2 else "✘  Ошибка\n"),
-                    win.stop_progress(ok2) if hasattr(win, "stop_progress") else None,
-                ),
+                _after_flathub,
             )
 
         backend.run_privileged(["apt-get", "install", "-y", "flatpak"], self._log, step2)
+
+    def _ask_restart(self):
+        dialog = Adw.AlertDialog(
+            heading="Flathub подключён",
+            body="Для корректной работы Flatpak-приложений необходимо перезапустить сессию или перезагрузить компьютер.",
+        )
+        dialog.add_response("later", "Позже")
+        dialog.add_response("session", "Перезапустить сессию")
+        dialog.add_response("reboot", "Перезагрузить ПК")
+        dialog.set_response_appearance("session", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_response_appearance("reboot", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("session")
+        dialog.connect("response", self._on_restart_response)
+        dialog.present(self.get_root())
+
+    def _on_restart_response(self, _dialog, response):
+        if response == "session":
+            subprocess.Popen(["gnome-session-quit", "--logout", "--no-prompt"])
+        elif response == "reboot":
+            backend.run_privileged(["systemctl", "reboot"], self._log, lambda _: None)
 
     def _on_flathub_undo(self, row):
         row.set_working()
