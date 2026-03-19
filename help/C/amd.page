@@ -1,0 +1,50 @@
+<page xmlns="http://projectmallard.org/1.0/"
+      type="topic"
+      id="amd">
+  <info>
+    <link type="guide" xref="index" group="amd"/>
+    <desc>Настройка видеокарты AMD: разгон и управление через LACT.</desc>
+  </info>
+
+  <title>AMD Radeon</title>
+
+  <p>
+    Вкладка позволяет включить расширенное управление видеокартой AMD
+    и установить утилиту LACT для её настройки.
+  </p>
+
+  <section id="features">
+    <title>Возможности</title>
+    <terms>
+      <item>
+        <title>Разгон GPU</title>
+        <p>
+          Включение расширенного управления питанием через параметр ядра
+          <code>amdgpu.ppfeaturemask=0xffffffff</code> и пересборка конфигурации GRUB.
+        </p>
+      </item>
+      <item>
+        <title>LACT</title>
+        <p>
+          Linux AMDGPU Controller — графическая утилита управления
+          видеокартой AMD: частоты, напряжения, кривая вентилятора.
+        </p>
+      </item>
+      <item>
+        <title>Установка и сервис</title>
+        <p>
+          Установка LACT, включение демона <cmd>lactd</cmd>
+          и добавление пользователя в группу wheel для прав управления GPU.
+        </p>
+      </item>
+      <item>
+        <title>Конфигурация LACT</title>
+        <p>
+          Загрузка готового JSON-профиля с настройками частот,
+          напряжений и параметров вентилятора.
+        </p>
+      </item>
+    </terms>
+  </section>
+
+</page>

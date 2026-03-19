@@ -220,12 +220,10 @@ class MaintenancePage(Gtk.Box):
         flatpak_ids = {"flatpak", "flatpak_repair", "flatpak_home"}
         fix_ids = {"fix_gdm_usb", "fix_gsconnect", "disable_tracker"}
 
-        fix_tasks = [t for t in all_tasks if t["id"] in fix_ids]
         other_tasks = [t for t in all_tasks if t["id"] not in flatpak_ids and t["id"] not in fix_ids]
 
         self._build_header(body, len(other_tasks) + 1)
         self._build_tasks(body, other_tasks)
-        self._build_fixes_group(body, fix_tasks)
 
     def _build_header(self, body, total):
         container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
@@ -250,17 +248,6 @@ class MaintenancePage(Gtk.Box):
         self._btn_all.set_halign(Gtk.Align.CENTER)
         self._btn_all.connect("clicked", self._run_all)
         body.append(self._btn_all)
-
-    def _build_fixes_group(self, body, tasks):
-        if not tasks:
-            return
-        group = Adw.PreferencesGroup()
-        group.set_title("Различные баги и фиксы")
-        body.append(group)
-
-        for task in tasks:
-            row = TaskRow(task, self._log, None, btn_label="Применить")
-            group.add(row)
 
     def _build_tasks(self, body, tasks):
         cache_group = Adw.PreferencesGroup()
@@ -338,4 +325,5 @@ class MaintenancePage(Gtk.Box):
         total = len(self._rows)
         self._prog_bar.set_fraction(done / total if total else 0.0)
         self._prog_lbl.set_label(f"{done} / {total} задач")
+
 

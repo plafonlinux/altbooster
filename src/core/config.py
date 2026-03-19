@@ -14,6 +14,7 @@ SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
 VERSION = "5.6.9-alpha"
 
 DEBUG: bool = False
+INITIAL_TAB: str = ""
 
 PRESETS_DIR = CONFIG_DIR / "presets"
 

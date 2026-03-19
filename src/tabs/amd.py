@@ -1,9 +1,6 @@
 
 import os
 import subprocess
-import tempfile
-import shlex
-import threading
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -13,14 +10,12 @@ from gi.repository import Adw, GLib, Gtk
 from core import backend
 from ui.dynamic_page import DynamicPage
 from ui.common import load_module
-from ui.rows import SettingRow
 
 
 class AmdPage(DynamicPage):
     def __init__(self, log_fn):
         super().__init__(load_module("amd"), log_fn)
         self._log = log_fn
-        self._build_scx_ui()
 
     def check_overclock(self):
         try:
@@ -150,167 +145,3 @@ class AmdPage(DynamicPage):
         )
 
 
-    def _is_sisyphus(self):
-        for path in ["/etc/altlinux-release", "/etc/os-release"]:
-            if os.path.exists(path):
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        if "Sisyphus" in f.read():
-                            return True
-                except Exception:
-                    pass
-        return False
-
-    def _build_scx_ui(self):
-        is_sisyphus = self._is_sisyphus()
-        group = Adw.PreferencesGroup()
-        group.set_title("Планировщик CPU (SCX) — Экспериментально")
-        desc = "Экспериментальные планировщики sched-ext (LAVD) для игровых задач."
-        if not is_sisyphus:
-            desc += "\n⚠️ Пакет scx-scheds доступен только в репозитории Sisyphus."
-        group.set_description(desc)
-        
-        target = getattr(self, "_body", None)
-        if not target:
-            child = self.get_first_child()
-            while child:
-                if isinstance(child, Gtk.ScrolledWindow):
-                    target = child.get_child()
-                    if isinstance(target, Adw.Clamp):
-                        target = target.get_child()
-                    if isinstance(target, Gtk.Viewport):
-                        target = target.get_child()
-                    break
-                child = child.get_next_sibling()
-
-        (target if target else self).append(group)
-
-        self._row_lavd_std = SettingRow(
-            "utilities-terminal-symbolic", "LAVD (Performance)",
-            "Оптимизация для игр и десктопа", "Включить",
-            lambda r: self._enable_lavd(r, autopower=False),
-            lambda: self._check_lavd_active(autopower=False),
-            "amd_scx_lavd_std", "Активно",
-            self._disable_lavd, "Выключить",
-            help_text="LAVD (Latency-aware Virtual Deadline) — планировщик от Igalia/Valve. Снижает задержки в играх и улучшает отзывчивость системы."
-        )
-        group.add(self._row_lavd_std)
-        if not is_sisyphus:
-            self._row_lavd_std.set_sensitive(False)
-            self._row_lavd_std.set_tooltip_text("Требуется репозиторий Sisyphus")
-
-        self._row_lavd_auto = SettingRow(
-            "battery-symbolic", "LAVD (Autopower)",
-            "Режим для ноутбуков и мини-ПК", "Включить",
-            lambda r: self._enable_lavd(r, autopower=True),
-            lambda: self._check_lavd_active(autopower=True),
-            "amd_scx_lavd_auto", "Активно",
-            self._disable_lavd, "Выключить",
-            help_text="Версия с флагом --autopower. Адаптирует частоты для экономии энергии при работе от батареи."
-        )
-        group.add(self._row_lavd_auto)
-        if not is_sisyphus:
-            self._row_lavd_auto.set_sensitive(False)
-            self._row_lavd_auto.set_tooltip_text("Требуется репозиторий Sisyphus")
-
-    def _check_scx_installed(self):
-        return backend.check_app_installed({"check": ["rpm", "scx-scheds"]})
-
-    def _check_lavd_active(self, autopower):
-        if subprocess.run(["systemctl", "is-active", "scx_lavd"], capture_output=True).returncode != 0:
-            return False
-        try:
-            with open("/etc/systemd/system/scx_lavd.service", "r") as f:
-                content = f.read()
-            has_auto = "--autopower" in content
-            return has_auto == autopower
-        except Exception:
-            return False
-
-    def _enable_lavd(self, row, autopower):
-        row.set_working()
-        mode_str = "Autopower" if autopower else "Performance"
-        self._log(f"\n▶  Включение LAVD ({mode_str})...\n")
-        win = self.get_root()
-        if win and hasattr(win, "start_progress"):
-            win.start_progress(f"Включение LAVD ({mode_str})...")
-
-        def _thread_worker():
-            if not self._check_scx_installed():
-                GLib.idle_add(self._log, "▶  Установка пакета scx-scheds...\n")
-                ok_inst = backend.run_privileged_sync(["apt-get", "install", "-y", "scx-scheds"], self._log)
-                if not ok_inst:
-                    GLib.idle_add(self._log, "✘  Ошибка установки пакета scx-scheds\n")
-                    GLib.idle_add(row.set_done, False)
-                    if win and hasattr(win, "stop_progress"): GLib.idle_add(win.stop_progress, False)
-                    return
-
-            exec_start = "/usr/bin/scx_lavd --autopower" if autopower else "/usr/bin/scx_lavd"
-            service_content = f"""[Unit]
-Description=SCX LAVD CPU Scheduler
-Documentation=https://github.com/sched-ext/scx
-After=multi-user.target
-ConditionPathExists=/sys/kernel/sched_ext
-[Service]
-Type=simple
-ExecStart={exec_start}
-ExecStop=/bin/kill -SIGINT $MAINPID
-Restart=on-failure
-RestartSec=5
-KillMode=mixed
-[Install]
-WantedBy=multi-user.target
-"""
-            try:
-                with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp:
-                    tmp.write(service_content)
-                    tmp_path = tmp.name
-            except Exception as e:
-                GLib.idle_add(self._log, f"✘  Ошибка подготовки файла: {e}\n")
-                GLib.idle_add(row.set_done, False)
-                if win and hasattr(win, "stop_progress"): GLib.idle_add(win.stop_progress, False)
-                return
-
-            cmd = [
-                "bash", "-c",
-                f"mv {shlex.quote(tmp_path)} /etc/systemd/system/scx_lavd.service && "
-                "chmod 644 /etc/systemd/system/scx_lavd.service && "
-                "systemctl daemon-reload && "
-                "systemctl enable scx_lavd && "
-                "systemctl restart scx_lavd"
-            ]
-
-            ok_service = backend.run_privileged_sync(cmd, self._log)
-
-            def _finish_ui():
-                row.set_done(ok_service)
-                other_row = self._row_lavd_std if autopower else self._row_lavd_auto
-                other_row._refresh()
-
-                if ok_service:
-                    self._log(f"✔  LAVD ({mode_str}) активирован!\n")
-                else:
-                    self._log("✘  Ошибка включения LAVD\n")
-                if win and hasattr(win, "stop_progress"): win.stop_progress(ok_service)
-
-            GLib.idle_add(_finish_ui)
-
-        threading.Thread(target=_thread_worker, daemon=True).start()
-
-    def _disable_lavd(self, row):
-        row.set_working()
-        self._log("\n▶  Отключение LAVD...\n")
-        win = self.get_root()
-        if win and hasattr(win, "start_progress"): win.start_progress("Отключение LAVD...")
-        
-        backend.run_privileged(
-            ["systemctl", "disable", "--now", "scx_lavd"],
-            self._log,
-            lambda ok: (
-                row.set_undo_done(ok),
-                GLib.idle_add(self._row_lavd_std._refresh),
-                GLib.idle_add(self._row_lavd_auto._refresh),
-                self._log("✔  LAVD отключён\n" if ok else "✘  Ошибка отключения\n"),
-                win.stop_progress(ok) if win and hasattr(win, "stop_progress") else None
-            )
-        )

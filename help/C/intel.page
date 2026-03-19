@@ -1,0 +1,57 @@
+<page xmlns="http://projectmallard.org/1.0/"
+      type="topic"
+      id="intel">
+  <info>
+    <link type="guide" xref="index" group="intel"/>
+    <desc>Экспериментальная оптимизация планировщика задач для процессоров Intel.</desc>
+  </info>
+
+  <title>Intel</title>
+
+  <note style="warning">
+    <p>
+      Эта вкладка содержит экспериментальные функции.
+      Используйте с осторожностью.
+    </p>
+  </note>
+
+  <p>
+    Вкладка предназначена для оптимизации планировщика задач на процессорах
+    Intel с гибридной архитектурой (P-ядра + E-ядра).
+  </p>
+
+  <section id="features">
+    <title>Возможности</title>
+    <terms>
+      <item>
+        <title>Проверка совместимости</title>
+        <p>
+          Автоматически определяет модель процессора и проверяет
+          наличие поддержки <code>sched_ext</code> в текущем ядре Linux.
+        </p>
+      </item>
+      <item>
+        <title>scx_meteor</title>
+        <p>
+          LP-aware планировщик задач от Toxblh. Улучшает отзывчивость
+          системы на процессорах с E-ядрами (эффективными ядрами).
+        </p>
+      </item>
+      <item>
+        <title>Systemd-сервис</title>
+        <p>
+          Создание systemd-сервиса для автоматического запуска
+          планировщика при загрузке системы.
+        </p>
+      </item>
+      <item>
+        <title>Заголовки ядра</title>
+        <p>
+          Автоматическая установка <cmd>linux-headers</cmd>,
+          если они отсутствуют в системе.
+        </p>
+      </item>
+    </terms>
+  </section>
+
+</page>

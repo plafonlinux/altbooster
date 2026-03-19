@@ -68,6 +68,14 @@ ok
 step "Установка иконок"
 install -d "$ICON_DIR"
 install -m 644 "$SCRIPT_DIR/icons/altbooster.svg" "$ICON_DIR/altbooster.svg"
+install -d "/usr/local/share/icons/hicolor/scalable/apps"
+for _svg in "$SCRIPT_DIR/icons/hicolor/scalable/apps/"*.svg; do
+    install -m 644 "$_svg" "/usr/local/share/icons/hicolor/scalable/apps/"
+done
+install -d "/usr/local/share/icons/hicolor/scalable/devices"
+for _svg in "$SCRIPT_DIR/icons/hicolor/scalable/devices/"*.svg; do
+    install -m 644 "$_svg" "/usr/local/share/icons/hicolor/scalable/devices/"
+done
 gtk-update-icon-cache /usr/local/share/icons/hicolor 2>/dev/null || true
 ok
 
@@ -89,6 +97,12 @@ StartupNotify=true
 StartupWMClass=ru.altbooster.app
 DESKTOP
 update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+ok
+
+# Справка (Yelp / Mallard)
+step "Установка справки"
+install -d "/usr/local/share/help/C/altbooster"
+cp -r "$SCRIPT_DIR/help/C/"* "/usr/local/share/help/C/altbooster/"
 ok
 
 # Команда в PATH

@@ -6,6 +6,37 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+_TAB_FLAGS = {
+    "-s": "setup",
+    "-a": "apps",
+    "-e": "extensions",
+    "-f": "tweaks",
+    "-t": "borg",
+    "-m": "maintenance",
+}
+
+if "-h" in sys.argv or "--help" in sys.argv:
+    print(
+        "Использование: altbooster [ОПЦИЯ]\n\n"
+        "Опции:\n"
+        "  -s    Открыть вкладку «Начало»\n"
+        "  -a    Открыть вкладку «Приложения»\n"
+        "  -e    Открыть вкладку «Расширения»\n"
+        "  -f    Открыть вкладку «Твики и фиксы»\n"
+        "  -t    Открыть вкладку «TimeSync»\n"
+        "  -m    Открыть вкладку «Обслуживание»\n"
+        "  -h    Показать эту справку\n"
+        "  --debug  Режим отладки\n"
+    )
+    sys.exit(0)
+
+_initial_tab = ""
+for _flag, _tab in _TAB_FLAGS.items():
+    if _flag in sys.argv:
+        sys.argv.remove(_flag)
+        _initial_tab = _tab
+        break
+
 _DEBUG = "--debug" in sys.argv
 if _DEBUG:
     sys.argv.remove("--debug")
@@ -26,6 +57,7 @@ from gi.repository import Gio, Adw, GLib
 
 from core import config
 config.DEBUG = _DEBUG
+config.INITIAL_TAB = _initial_tab
 from ui import PlafonWindow
 
 class AltBoosterApp(Adw.Application):

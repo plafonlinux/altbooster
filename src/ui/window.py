@@ -26,6 +26,7 @@ from tabs.davinci import DaVinciPage
 from tabs.amd import AmdPage
 from tabs.intel import IntelPage
 from tabs.maintenance import MaintenancePage
+from tabs.tweaks import TweaksPage
 from tabs.flatpak import FlatpakPage
 from tabs.timesync import BorgPage
 
@@ -41,6 +42,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         ("intel",       "Intel",           "processor-symbolic",           IntelPage),
         ("davinci",     "DaVinci Resolve", "davinci-symbolic",             DaVinciPage),
         ("maintenance", "Обслуживание",    "emblem-system-symbolic",       MaintenancePage),
+        ("tweaks",      "Твики",           "applications-engineering-symbolic", TweaksPage),
     ]
     _BORG_TAB = ("borg", "TimeSync", "drive-harddisk-symbolic", BorgPage)
 
@@ -201,6 +203,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         section_about = Gio.Menu()
         section_about.append("Справка", "win.help")
+        section_about.append("Комбинации клавиш", "win.show-help-overlay")
         section_about.append("О приложении", "win.about")
         menu.append_section(None, section_about)
 
@@ -259,7 +262,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self.add_action(a_labels)
 
         app = self.get_application()
-        app.set_accels_for_action("win.about", ["F1"])
+        app.set_accels_for_action("win.help", ["F1"])
+        app.set_accels_for_action("win.about", ["<Ctrl>F1"])
+        app.set_accels_for_action("win.show-help-overlay", ["<Ctrl>question"])
+
+        self.set_help_overlay(self._build_shortcuts_window())
 
         return header
 
@@ -665,6 +672,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._maint.refresh_checks()
         self._log("👋 Добро пожаловать в ALT Booster. С чего начнём?\n")
         self._status_label.set_label("Готов к работе")
+        if config.INITIAL_TAB and config.INITIAL_TAB in self._pages:
+            GLib.idle_add(self._stack.set_visible_child_name, config.INITIAL_TAB)
 
 
     def _load_settings(self):
@@ -698,8 +707,44 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._setup.check_for_updates(manual=True, on_update_found=self._on_update_found_global)
 
     def _show_help(self, *_):
-        from ui.help_dialog import HelpDialog
-        HelpDialog(self)
+        try:
+            from ui.help_altbooster import show_help
+            show_help(self)
+        except Exception as e:
+            self._log(f"✗ Справка: {e}\n")
+
+    def _build_shortcuts_window(self):
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <object class="GtkShortcutsWindow" id="help_overlay">
+    <property name="modal">1</property>
+    <child>
+      <object class="GtkShortcutsSection">
+        <property name="title">ALT Booster</property>
+        <property name="section-name">general</property>
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="title">Приложение</property>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">О приложении</property>
+                <property name="accelerator">F1</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Комбинации клавиш</property>
+                <property name="accelerator">&lt;ctrl&gt;question</property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>"""
+        builder = Gtk.Builder.new_from_string(xml, -1)
+        return builder.get_object("help_overlay")
 
     def _show_about(self, *_):
         d = Adw.AboutDialog()
@@ -708,6 +753,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d.set_developer_name("PLAFON")
         d.set_version(config.VERSION)
         d.set_issue_url("https://github.com/plafonlinux/altbooster/issues")
+        d.set_support_url("https://plafon.gitbook.io/alt-zero")
         d.set_comments("ALT Booster — утилита-компаньон для настройки ALT Рабочая станция (GNOME)")
         d.set_license_type(Gtk.License.MIT_X11)
         d.set_developers(["PLAFON"])

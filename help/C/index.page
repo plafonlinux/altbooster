@@ -1,0 +1,18 @@
+<page xmlns="http://projectmallard.org/1.0/"
+      type="guide"
+      id="index">
+  <info>
+    <title type="link">ALT Booster</title>
+    <title type="text">ALT Booster</title>
+  </info>
+
+  <title>Справка ALT Booster</title>
+
+  <p>
+    ALT Booster — утилита-компаньон для настройки <em>ALT Рабочая станция (GNOME)</em>.
+    Выберите раздел ниже, чтобы узнать о возможностях соответствующей вкладки.
+  </p>
+
+  <links type="topic" groups="setup apps extensions flatpak terminal amd intel davinci maintenance timesync"/>
+
+</page>
