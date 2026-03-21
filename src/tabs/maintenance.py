@@ -8,7 +8,7 @@ import threading
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, Gdk, GLib, Gtk
 
 from core import backend
 from core import config
@@ -208,6 +208,9 @@ class FstabRow(Adw.ExpanderRow):
         self._log = log_fn
         self._running = False
         self._new_mounts = []
+        self._op_mounts = []
+        self._mount_summary = ""
+        self._op_context = ""
 
         self.set_title("Добавить точки монтирования")
         self.set_subtitle("Вставьте строки fstab — директории будут созданы автоматически")
@@ -278,6 +281,8 @@ class FstabRow(Adw.ExpanderRow):
 
     def _start_add(self, new_entries):
         self._new_mounts = [e["mountpoint"] for e in new_entries]
+        self._op_mounts = self._new_mounts[:]
+        self._op_context = "ℹ  Все точки монтирования успешно смонтированы в fstab"
         self._running = True
         self._btn.set_sensitive(False)
         self._btn.set_label("…")
@@ -300,6 +305,8 @@ class FstabRow(Adw.ExpanderRow):
 
     def _start_mount(self, entries, msg):
         self._new_mounts = []
+        self._op_mounts = [e["mountpoint"] for e in entries]
+        self._op_context = "ℹ  Все точки монтирования успешно смонтированы в fstab"
         self._running = True
         self._btn.set_sensitive(False)
         self._btn.set_label("…")
@@ -326,8 +333,17 @@ class FstabRow(Adw.ExpanderRow):
             "Synology: DSM → Общая папка → Разрешения NFS"
         )
         dlg = Adw.AlertDialog(heading="Обнаружены NFS записи", body=body)
+        if local_ip:
+            dlg.add_response("copy", f"Копировать {local_ip}")
         dlg.add_response("ok", "Понятно")
         dlg.set_default_response("ok")
+        dlg.set_close_response("ok")
+
+        def on_response(d, response):
+            if response == "copy":
+                Gdk.Display.get_default().get_clipboard().set(local_ip)
+
+        dlg.connect("response", on_response)
         dlg.present(self.get_root())
 
     def _show_remount_dialog(self, entries):
@@ -353,7 +369,9 @@ class FstabRow(Adw.ExpanderRow):
         dlg.present(self.get_root())
 
     def _do_remount(self, entries):
-        self._new_mounts = []
+        self._op_mounts = [e["mountpoint"] for e in entries]
+        self._new_mounts = self._op_mounts[:]
+        self._op_context = "ℹ  Все точки монтирования уже в fstab и смонтированы"
         self._running = True
         self._btn.set_sensitive(False)
         self._btn.set_label("…")
@@ -380,13 +398,17 @@ class FstabRow(Adw.ExpanderRow):
         self._running = False
         self._btn.set_label("Применить")
         self._btn.set_sensitive(True)
-        set_status_ok(self._status)
         if ok:
-            self._log("✔  Все диски подключены\n")
+            set_status_ok(self._status)
+            self._mount_summary = f"✔  Все диски подключены: {', '.join(self._op_mounts)}"
         else:
-            self._log("⚠  Некоторые диски не подключились (сервер недоступен?)\n")
+            set_status_error(self._status)
+            self._mount_summary = "⚠  Некоторые диски не подключились (сервер недоступен?)"
+        self._log(self._mount_summary + "\n")
         if self._new_mounts:
             GLib.idle_add(self._show_nautilus_dialog)
+        else:
+            GLib.idle_add(self._show_final_summary, "")
 
     def _show_nautilus_dialog(self):
         win = self.get_root()
@@ -410,10 +432,12 @@ class FstabRow(Adw.ExpanderRow):
         dialog.set_response_appearance("add", Adw.ResponseAppearance.SUGGESTED)
 
         def on_response(d, response):
+            nautilus_summary = ""
             if response == "add":
                 selected = [mp for mp, cb in checks if cb.get_active()]
-                self._add_nautilus_bookmarks(selected)
+                nautilus_summary = self._add_nautilus_bookmarks(selected)
             d.destroy()
+            self._show_final_summary(nautilus_summary)
 
         dialog.connect("response", on_response)
         dialog.present()
@@ -422,17 +446,38 @@ class FstabRow(Adw.ExpanderRow):
         bookmarks_file = os.path.expanduser("~/.config/gtk-3.0/bookmarks")
         os.makedirs(os.path.dirname(bookmarks_file), exist_ok=True)
 
-        existing = set()
+        existing_uris = set()
         if os.path.exists(bookmarks_file):
             with open(bookmarks_file, encoding="utf-8") as f:
-                existing = {line.strip() for line in f}
+                for line in f:
+                    parts = line.strip().split(maxsplit=1)
+                    if parts:
+                        existing_uris.add(parts[0])
 
-        new_lines = [f"file://{mp}" for mp in mounts if f"file://{mp}" not in existing]
-        if new_lines:
+        new_mounts = [mp for mp in mounts if f"file://{mp}" not in existing_uris]
+        skipped = [mp for mp in mounts if f"file://{mp}" in existing_uris]
+        if new_mounts:
             with open(bookmarks_file, "a", encoding="utf-8") as f:
-                for line in new_lines:
-                    f.write(line + "\n")
-            self._log(f"✔  Добавлено {len(new_lines)} закладок в Nautilus\n")
+                for mp in new_mounts:
+                    f.write(f"file://{mp}\n")
+            msg = f"✔  Добавлено {len(new_mounts)} закладок в Nautilus: {', '.join(new_mounts)}"
+            if skipped:
+                msg += f" (уже существуют: {', '.join(skipped)})"
+        else:
+            msg = f"ℹ  Закладки Nautilus уже существуют: {', '.join(skipped)}"
+        self._log(msg + "\n")
+        return msg
+
+    def _show_final_summary(self, nautilus_summary):
+        parts = [self._op_context, self._mount_summary]
+        if nautilus_summary:
+            parts.append(nautilus_summary)
+        body = "\n\n".join(p for p in parts if p)
+        dlg = Adw.AlertDialog(heading="Готово", body=body)
+        dlg.add_response("ok", "Закрыть")
+        dlg.set_default_response("ok")
+        dlg.set_close_response("ok")
+        dlg.present(self.get_root())
 
     @staticmethod
     def _parse_fstab_lines(text):
@@ -533,16 +578,16 @@ class MaintenancePage(Gtk.Box):
         body.append(self._btn_all)
 
     def _build_tasks(self, body, tasks):
+        fstab_group = Adw.PreferencesGroup()
+        fstab_group.set_title("Монтирование")
+        body.append(fstab_group)
+        fstab_group.add(FstabRow(self._log))
+
         cache_group = Adw.PreferencesGroup()
         body.append(cache_group)
         self._cache_row = CacheTaskRow(self._log, self._update_progress)
         self._rows.append(self._cache_row)
         cache_group.add(self._cache_row)
-
-        fstab_group = Adw.PreferencesGroup()
-        fstab_group.set_title("Монтирование")
-        body.append(fstab_group)
-        fstab_group.add(FstabRow(self._log))
 
         tasks_group = Adw.PreferencesGroup()
         tasks_group.set_title("Задачи обслуживания")

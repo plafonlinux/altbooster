@@ -48,8 +48,7 @@ def _get_pkexec_shell() -> subprocess.Popen | None:
 
 
 def cancel_current() -> None:
-    with _pkexec_shell_lock:
-        proc = _pkexec_shell_proc
+    proc = _pkexec_shell_proc
     if proc and proc.poll() is None:
         try:
             proc.terminate()

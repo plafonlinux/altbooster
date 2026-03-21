@@ -78,4 +78,22 @@ from core.btrfs import (
     is_btrfs_timer_active,
     get_btrfs_timer_next_run,
 )
+from core.mirror import (
+    get_root_filesystem,
+    get_root_device,
+    get_root_partition_disk,
+    list_btrfs_subvolumes,
+    is_uefi,
+    list_available_disks,
+    detect_mirror_type,
+    mirror_ext4_rsync,
+    mirror_ext4_tar,
+    mirror_btrfs_send,
+    save_partition_table,
+    save_efi_partition,
+    generate_newsync_ext4,
+    generate_newsync_btrfs,
+    restore_to_disk,
+    OPTIONAL_ITEMS,
+)
 

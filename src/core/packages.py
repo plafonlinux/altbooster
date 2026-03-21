@@ -158,7 +158,7 @@ def _get_flatpak_info(cmd: list[str]) -> InstallPreview:
         return InstallPreview(source_type="flatpak", package_names=args)
 
     remote, appid = args[0], args[1]
-    env = {"LC_ALL": "C", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
+    env = {"LC_ALL": "C.UTF-8", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
 
     output = ""
     for scope in ("--system", "--user"):

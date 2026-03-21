@@ -19,6 +19,9 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk
 
 from core import backend
+from core.config import CONFIG_DIR
+
+_SHELLVER_BACKUP = CONFIG_DIR / "ext_shellver_backup.json"
 from ui.widgets import (
     make_button, make_scrolled_page, make_icon,
     make_status_icon, set_status_ok, set_status_error, clear_status, make_suffix_box,
@@ -170,6 +173,133 @@ def _fix_float_versions_in_metadata(log_fn: Callable[[str], None] | None = None)
     return fixed, broken_system
 
 
+def _patch_shell_versions(gnome_ver: str, log_fn=None) -> tuple[list[str], list[str]]:
+    patched = []
+    failed_system = []
+    backup: dict[str, list] = {}
+
+    try:
+        existing_backup = json.loads(_SHELLVER_BACKUP.read_text(encoding="utf-8"))
+        backup.update(existing_backup)
+    except Exception:
+        pass
+
+    for meta_path in _USER_EXT_DIR.glob("*/metadata.json"):
+        try:
+            data = json.loads(meta_path.read_text(encoding="utf-8"))
+            versions = data.get("shell-version", [])
+            if gnome_ver not in versions:
+                uuid = meta_path.parent.name
+                if uuid not in backup:
+                    backup[uuid] = list(versions)
+                versions.append(gnome_ver)
+                data["shell-version"] = versions
+                meta_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                patched.append(uuid)
+                if log_fn:
+                    log_fn(f"✔  {uuid}: добавлена версия {gnome_ver}\n")
+        except Exception:
+            pass
+
+    for meta_path in _SYSTEM_EXT_DIR.glob("*/metadata.json"):
+        try:
+            data = json.loads(meta_path.read_text(encoding="utf-8"))
+            versions = data.get("shell-version", [])
+            if gnome_ver not in versions:
+                uuid = meta_path.parent.name
+                if uuid not in backup:
+                    backup[uuid] = list(versions)
+                versions.append(gnome_ver)
+                new_text = json.dumps(data, ensure_ascii=False, indent=2)
+                ok = False
+                try:
+                    fd, tmp = tempfile.mkstemp(suffix=".json")
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        f.write(new_text)
+                    ok = backend.run_privileged_sync(["cp", tmp, str(meta_path)], lambda _: None)
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        os.unlink(tmp)
+                    except Exception:
+                        pass
+                if ok:
+                    patched.append(uuid)
+                    if log_fn:
+                        log_fn(f"✔  (сист.) {uuid}: добавлена версия {gnome_ver}\n")
+                else:
+                    failed_system.append(uuid)
+                    if log_fn:
+                        log_fn(f"⚠  (сист.) {uuid}: нет прав для записи\n")
+        except Exception:
+            pass
+
+    if patched:
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            _SHELLVER_BACKUP.write_text(json.dumps(backup, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    return patched, failed_system
+
+
+def _revert_shell_versions(log_fn=None) -> int:
+    try:
+        backup = json.loads(_SHELLVER_BACKUP.read_text(encoding="utf-8"))
+    except Exception:
+        if log_fn:
+            log_fn("⚠  Файл бэкапа не найден — нечего откатывать\n")
+        return 0
+
+    reverted = 0
+    for uuid, orig_versions in backup.items():
+        for ext_dir in (_USER_EXT_DIR, _SYSTEM_EXT_DIR):
+            meta_path = ext_dir / uuid / "metadata.json"
+            if not meta_path.exists():
+                continue
+            try:
+                data = json.loads(meta_path.read_text(encoding="utf-8"))
+                data["shell-version"] = orig_versions
+                new_text = json.dumps(data, ensure_ascii=False, indent=2)
+                if ext_dir == _USER_EXT_DIR:
+                    meta_path.write_text(new_text, encoding="utf-8")
+                    reverted += 1
+                    if log_fn:
+                        log_fn(f"✔  {uuid}: восстановлен оригинальный shell-version\n")
+                else:
+                    ok = False
+                    try:
+                        fd, tmp = tempfile.mkstemp(suffix=".json")
+                        with os.fdopen(fd, "w", encoding="utf-8") as f:
+                            f.write(new_text)
+                        ok = backend.run_privileged_sync(["cp", tmp, str(meta_path)], lambda _: None)
+                    except Exception:
+                        pass
+                    finally:
+                        try:
+                            os.unlink(tmp)
+                        except Exception:
+                            pass
+                    if ok:
+                        reverted += 1
+                        if log_fn:
+                            log_fn(f"✔  (сист.) {uuid}: восстановлен оригинальный shell-version\n")
+                    else:
+                        if log_fn:
+                            log_fn(f"⚠  (сист.) {uuid}: нет прав для записи\n")
+            except Exception:
+                pass
+
+    try:
+        _SHELLVER_BACKUP.unlink()
+    except Exception:
+        pass
+
+    return reverted
+
+
 def _is_ext_installed(uuid: str) -> bool:
     try:
         r = subprocess.run(["gnome-extensions", "list"], capture_output=True, text=True)
@@ -224,6 +354,7 @@ class ExtensionsPage(Gtk.Box):
         self.append(scroll)
 
         self._build_search_group()
+        self._build_compat_group()
         self._search_results_group = None
         self._installed_group = None
         self._build_installed_group()
@@ -236,6 +367,138 @@ class ExtensionsPage(Gtk.Box):
             return m.group(1) if m else "47"
         except Exception:
             return "47"
+
+    def _count_incompatible(self, gnome_ver: str) -> int:
+        count = 0
+        for ext_dir in (_USER_EXT_DIR, _SYSTEM_EXT_DIR):
+            for meta_path in ext_dir.glob("*/metadata.json"):
+                try:
+                    data = json.loads(meta_path.read_text(encoding="utf-8"))
+                    if gnome_ver not in data.get("shell-version", []):
+                        count += 1
+                except Exception:
+                    pass
+        return count
+
+    def _build_compat_group(self):
+        gnome_ver = self._get_shell_version()
+        has_backup = _SHELLVER_BACKUP.exists()
+
+        self._compat_group = Adw.PreferencesGroup()
+        self._compat_group.set_title("Совместимость")
+        self._compat_group.set_visible(has_backup)
+        self._body.append(self._compat_group)
+
+        self._compat_row = Adw.ActionRow()
+        self._compat_row.set_title(f"Расширения и GNOME {gnome_ver}")
+
+        self._compat_patch_btn = make_button("Применить")
+        self._compat_patch_btn.set_valign(Gtk.Align.CENTER)
+        self._compat_patch_btn.set_sensitive(False)
+        self._compat_patch_btn.connect("clicked", self._on_patch_compat)
+
+        self._compat_revert_btn = make_button("Откатить")
+        self._compat_revert_btn.set_valign(Gtk.Align.CENTER)
+        self._compat_revert_btn.add_css_class("destructive-action")
+        self._compat_revert_btn.set_sensitive(has_backup)
+        self._compat_revert_btn.connect("clicked", self._on_revert_compat)
+
+        self._compat_row.add_suffix(make_suffix_box(self._compat_revert_btn, self._compat_patch_btn))
+        self._compat_group.add(self._compat_row)
+
+        if has_backup:
+            self._compat_row.set_subtitle("Исправления применены — доступен откат")
+            return
+
+        def _check():
+            count = self._count_incompatible(gnome_ver)
+
+            def _update():
+                if count == 0:
+                    self._compat_group.set_visible(False)
+                else:
+                    self._compat_row.set_subtitle(
+                        f"Экспериментально: {count} расш. не поддерживают GNOME {gnome_ver}"
+                    )
+                    self._compat_patch_btn.set_sensitive(True)
+                    self._compat_group.set_visible(True)
+
+            GLib.idle_add(_update)
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _offer_shell_restart(self):
+        is_wayland = bool(os.environ.get("WAYLAND_DISPLAY"))
+        dialog = Adw.AlertDialog()
+        dialog.set_heading("Перезапустить GNOME Shell?")
+        if is_wayland:
+            dialog.set_body("На Wayland перезапуск Shell недоступен.\nВыйдите из сессии и войдите снова.")
+            dialog.add_response("ok", "Понятно")
+        else:
+            dialog.set_body("Чтобы изменения вступили в силу, перезапустите GNOME Shell (X11).")
+            dialog.add_response("cancel", "Позже")
+            dialog.add_response("restart", "Перезапустить")
+            dialog.set_response_appearance("restart", Adw.ResponseAppearance.SUGGESTED)
+
+            def on_response(_d, r):
+                if r == "restart":
+                    subprocess.Popen(["gnome-shell", "--replace"])
+
+            dialog.connect("response", on_response)
+        dialog.present(self.get_root())
+
+    def _on_patch_compat(self, _btn):
+        gnome_ver = self._get_shell_version()
+        self._compat_patch_btn.set_sensitive(False)
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress(f"Обновление metadata.json для GNOME {gnome_ver}...")
+
+        def _do():
+            patched, failed = _patch_shell_versions(gnome_ver, self._log)
+
+            def _finish():
+                if patched:
+                    self._log(f"✔  Обновлено расширений: {len(patched)}\n")
+                    self._compat_revert_btn.set_sensitive(True)
+                    self._compat_row.set_subtitle("Исправления применены — доступен откат")
+                    self._offer_shell_restart()
+                else:
+                    self._log(f"ℹ  Все расширения уже поддерживают GNOME {gnome_ver}\n")
+                    self._compat_group.set_visible(False)
+                if failed:
+                    self._log(f"⚠  Системные расширения без прав ({len(failed)}): {', '.join(failed)}\n")
+                if hasattr(win, "stop_progress"):
+                    win.stop_progress(True)
+
+            GLib.idle_add(_finish)
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _on_revert_compat(self, _btn):
+        self._compat_revert_btn.set_sensitive(False)
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress("Откат shell-version в metadata.json...")
+
+        def _do():
+            count = _revert_shell_versions(self._log)
+
+            def _finish():
+                if count:
+                    self._log(f"✔  Откат выполнен для {count} расширений\n")
+                    self._compat_revert_btn.set_sensitive(False)
+                    self._compat_group.set_visible(False)
+                    self._offer_shell_restart()
+                else:
+                    self._log("ℹ  Нечего откатывать\n")
+                    self._compat_revert_btn.set_sensitive(_SHELLVER_BACKUP.exists())
+                if hasattr(win, "stop_progress"):
+                    win.stop_progress(True)
+
+            GLib.idle_add(_finish)
+
+        threading.Thread(target=_do, daemon=True).start()
 
     def _install_native_fallback(self, target_id: str, uuid_hint: str = None) -> tuple[bool, str | None]:
         GLib.idle_add(self._log, "⚠  gext дал сбой. Пробую нативный метод установки...\n")

@@ -7,7 +7,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, GLib, Gdk, Gtk
 
 from core.packages import InstallPreview, get_install_preview
 
@@ -304,10 +304,10 @@ class InstallPreviewDialog(Adw.Window):
         card.add_css_class("card")
 
         flow = Gtk.FlowBox()
-        flow.set_max_children_per_line(2)
-        flow.set_min_children_per_line(2)
+        flow.set_max_children_per_line(1)
+        flow.set_min_children_per_line(1)
         flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        flow.set_homogeneous(True)
+        flow.set_homogeneous(False)
         flow.set_row_spacing(0)
         flow.set_column_spacing(0)
         flow.set_margin_top(4)
@@ -321,11 +321,14 @@ class InstallPreviewDialog(Adw.Window):
             item.set_margin_bottom(4)
             item.set_margin_start(8)
             item.set_margin_end(8)
+            item.set_tooltip_text("Нажмите, чтобы скопировать")
 
             try:
                 icon = Gtk.Image.new_from_icon_name(icon_name)
                 icon.set_pixel_size(14)
                 icon.add_css_class("dim-label")
+                icon.set_valign(Gtk.Align.START)
+                icon.set_margin_top(2)
                 item.append(icon)
             except Exception:
                 pass
@@ -333,8 +336,13 @@ class InstallPreviewDialog(Adw.Window):
             lbl = Gtk.Label(label=pkg)
             lbl.set_halign(Gtk.Align.START)
             lbl.set_hexpand(True)
-            lbl.set_ellipsize(3)
+            lbl.set_wrap(True)
+            lbl.set_xalign(0)
             item.append(lbl)
+
+            gesture = Gtk.GestureClick.new()
+            gesture.connect("released", lambda _g, _n, _x, _y, p=pkg: self._copy_to_clipboard(p))
+            item.add_controller(gesture)
 
             flow.append(item)
 
@@ -364,10 +372,10 @@ class InstallPreviewDialog(Adw.Window):
         flow_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
         flow = Gtk.FlowBox()
-        flow.set_max_children_per_line(2)
-        flow.set_min_children_per_line(2)
+        flow.set_max_children_per_line(1)
+        flow.set_min_children_per_line(1)
         flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        flow.set_homogeneous(True)
+        flow.set_homogeneous(False)
         flow.set_row_spacing(0)
         flow.set_column_spacing(0)
         flow.set_margin_top(4)
@@ -379,11 +387,14 @@ class InstallPreviewDialog(Adw.Window):
             item = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
             item.set_margin_top(4)
             item.set_margin_bottom(4)
+            item.set_tooltip_text("Нажмите, чтобы скопировать")
 
             try:
                 icon = Gtk.Image.new_from_icon_name("changes-prevent-symbolic")
                 icon.set_pixel_size(14)
                 icon.add_css_class("dim-label")
+                icon.set_valign(Gtk.Align.START)
+                icon.set_margin_top(2)
                 item.append(icon)
             except Exception:
                 pass
@@ -391,8 +402,13 @@ class InstallPreviewDialog(Adw.Window):
             lbl = Gtk.Label(label=pkg)
             lbl.set_halign(Gtk.Align.START)
             lbl.set_hexpand(True)
-            lbl.set_ellipsize(3)
+            lbl.set_wrap(True)
+            lbl.set_xalign(0)
             item.append(lbl)
+
+            gesture = Gtk.GestureClick.new()
+            gesture.connect("released", lambda _g, _n, _x, _y, p=pkg: self._copy_to_clipboard(p))
+            item.add_controller(gesture)
 
             flow.append(item)
 
@@ -483,6 +499,13 @@ class InstallPreviewDialog(Adw.Window):
 
         return box
 
+
+    def _copy_to_clipboard(self, text: str):
+        display = Gdk.Display.get_default()
+        if display:
+            display.get_clipboard().set_content(
+                Gdk.ContentProvider.new_for_value(text)
+            )
 
     def _on_confirm_clicked(self, _):
         if self._confirmed:

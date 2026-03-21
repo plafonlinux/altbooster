@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -97,6 +98,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._elapsed_timer_id = None
         self._progress_start_time = 0.0
         self._progress_message = ""
+        self._op_card_pct: float | None = None
         self._log_queue = queue.SimpleQueue()
         self._log_widget = self._build_log_panel()
 
@@ -113,14 +115,21 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         header_widget = self._build_header()
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        root.add_css_class("ab-main-content")
         root.append(self._build_update_banner())
 
         self._pages = {}
-        for name, title, icon, PageClass in [*self._MAIN_TABS, self._BORG_TAB]:
+        for name, title, icon, PageClass in self._MAIN_TABS:
             page = PageClass(self._log)
             self._pages[name] = page
             p = self._stack.add_titled(page, name, title)
             p.set_icon_name(icon)
+
+        borg_name, borg_title, borg_icon, BorgClass = self._BORG_TAB
+        borg_page = BorgClass(self._log, self.start_progress, self.stop_progress)
+        self._pages[borg_name] = borg_page
+        p = self._stack.add_titled(borg_page, borg_name, borg_title)
+        p.set_icon_name(borg_icon)
 
         self._setup = self._pages["setup"]
         self._maint = self._pages["maintenance"]
@@ -131,6 +140,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         stack_overlay = Gtk.Overlay()
         stack_overlay.set_child(self._stack)
         stack_overlay.set_vexpand(True)
+        self._op_card = self._build_op_card()
+        stack_overlay.add_overlay(self._op_card)
+        stack_overlay.set_measure_overlay(self._op_card, False)
 
         root.append(stack_overlay)
 
@@ -233,6 +245,12 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             }
             .ab-float-banner label {
                 font-size: 0.82em;
+            }
+            .ab-main-content {
+                box-shadow: inset 6px 0 10px -6px alpha(black, 0.3);
+            }
+            headerbar {
+                box-shadow: 0 1px 6px alpha(black, 0.18);
             }
         """)
         Gtk.StyleContext.add_provider_for_display(
@@ -684,6 +702,26 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             return {}
 
     def _on_close(self, _):
+        if self._elapsed_timer_id:
+            dialog = Adw.AlertDialog(
+                heading="Операция выполняется",
+                body=f"«{self._progress_message}» ещё не завершена. Закрытие сейчас может привести к незавершённым изменениям.",
+            )
+            dialog.add_response("cancel", "Отмена")
+            dialog.add_response("close", "Всё равно закрыть")
+            dialog.set_response_appearance("close", Adw.ResponseAppearance.DESTRUCTIVE)
+            dialog.set_default_response("cancel")
+            dialog.set_close_response("cancel")
+
+            def _on_response(_d, response):
+                if response == "close":
+                    self._log_queue.put(None)
+                    self.destroy()
+
+            dialog.connect("response", _on_response)
+            dialog.present(self)
+            return True
+
         try:
             os.makedirs(config.CONFIG_DIR, exist_ok=True)
             with open(config.CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -847,6 +885,68 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._toast_overlay.add_toast(toast)
 
 
+    def _build_op_card(self) -> Gtk.Widget:
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        card.add_css_class("card")
+        card.set_margin_bottom(16)
+        card.set_margin_end(16)
+        card.set_halign(Gtk.Align.END)
+        card.set_valign(Gtk.Align.END)
+        card.set_size_request(260, -1)
+        card.set_visible(False)
+        card.set_can_target(False)
+
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        top.set_margin_top(10)
+        top.set_margin_start(12)
+        top.set_margin_end(12)
+
+        spinner = Gtk.Spinner()
+        spinner.set_spinning(True)
+        spinner.set_size_request(16, 16)
+        top.append(spinner)
+
+        self._op_card_title = Gtk.Label()
+        self._op_card_title.add_css_class("heading")
+        self._op_card_title.set_halign(Gtk.Align.START)
+        self._op_card_title.set_hexpand(True)
+        self._op_card_title.set_ellipsize(Pango.EllipsizeMode.END)
+        top.append(self._op_card_title)
+
+        stop_btn = Gtk.Button()
+        stop_btn.set_icon_name("media-playback-stop-symbolic")
+        stop_btn.add_css_class("flat")
+        stop_btn.add_css_class("circular")
+        stop_btn.set_tooltip_text("Отменить")
+        stop_btn.set_size_request(24, 24)
+        stop_btn.connect("clicked", self._on_stop_clicked)
+        top.append(stop_btn)
+        card.append(top)
+
+        self._op_card_bar = Gtk.ProgressBar()
+        self._op_card_bar.set_margin_start(12)
+        self._op_card_bar.set_margin_end(12)
+        card.append(self._op_card_bar)
+
+        self._op_card_detail = Gtk.Label()
+        self._op_card_detail.add_css_class("caption")
+        self._op_card_detail.set_halign(Gtk.Align.START)
+        self._op_card_detail.set_margin_start(12)
+        self._op_card_detail.set_margin_end(12)
+        self._op_card_detail.set_margin_bottom(10)
+        self._op_card_detail.set_ellipsize(Pango.EllipsizeMode.END)
+        self._op_card_detail.set_label("Запуск...")
+        card.append(self._op_card_detail)
+
+        return card
+
+    def _update_op_card(self, pct: float | None, detail: str):
+        if pct is not None:
+            self._op_card_bar.set_fraction(max(0.0, min(1.0, pct)))
+        else:
+            self._op_card_bar.pulse()
+        self._op_card_detail.set_label(detail)
+
     def start_progress(self, message: str, on_cancel=None):
         _cb = on_cancel if on_cancel is not None else backend.cancel_current
 
@@ -858,10 +958,16 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             self._on_cancel_cb = _cb
             self._progress_message = message
             self._progress_start_time = time.monotonic()
+            self._op_card_pct = None
             self._status_label.set_label(message)
             self._progressbar.set_fraction(0.0)
             self._stop_btn.set_sensitive(True)
             self._stop_btn.set_visible(True)
+            self._op_card_title.set_label(message)
+            self._op_card_bar.set_fraction(0.0)
+            self._op_card_detail.set_label("Запуск...")
+            self._op_card.set_visible(True)
+            self._op_card.set_can_target(True)
             if self._pulse_timer_id:
                 GLib.source_remove(self._pulse_timer_id)
             self._pulse_timer_id = GLib.timeout_add(100, self._pulse_progress)
@@ -899,6 +1005,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
     def _pulse_progress(self):
         self._progressbar.pulse()
+        if self._op_card_pct is None and self._op_card.get_visible():
+            self._op_card_bar.pulse()
         return True
 
     def _update_elapsed_label(self):
@@ -927,6 +1035,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 self._stop_btn.set_sensitive(False)
                 self._stop_btn.set_visible(False)
                 self._on_cancel_cb = None
+                self._op_card.set_visible(False)
+                self._op_card.set_can_target(False)
                 if self._reset_status_timer_id:
                     GLib.source_remove(self._reset_status_timer_id)
                 self._reset_status_timer_id = GLib.timeout_add(4000, self._reset_status_label)
@@ -946,6 +1056,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         stripped = text.strip()
         if stripped:
             self._last_log_line = stripped
+            if self._op_card.get_visible():
+                self._parse_progress_line(stripped)
 
         self._log_queue.put(text)
 
@@ -958,6 +1070,30 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         else:
             self._buf.move_mark(mark, end)
         self._tv.scroll_mark_onscreen(mark)
+
+    def _parse_progress_line(self, line: str):
+        # rsync --info=progress2:  "  1,234,567  67%  45.20MB/s    0:01:23 ..."
+        m = re.search(r'(\d+)%\s+([\d.]+\s*[KMGTkm]?B/s)\s+(\d+:\d+:\d+)', line)
+        if m:
+            pct = int(m.group(1)) / 100.0
+            speed = m.group(2)
+            eta = m.group(3)
+            self._op_card_pct = pct
+            self._op_card_bar.set_fraction(pct)
+            self._op_card_detail.set_label(f"{int(pct*100)}%  ·  {speed}  ·  осталось {eta}")
+            return
+        # borg create --progress: "2.34 GB O 1.23 GB C 456.78 MB D 78.9% N ..."
+        m2 = re.search(r'(\d+(?:\.\d+)?)\s*%', line)
+        if m2:
+            pct = float(m2.group(1)) / 100.0
+            self._op_card_pct = pct
+            self._op_card_bar.set_fraction(max(0.0, min(1.0, pct)))
+            elapsed = int(time.monotonic() - self._progress_start_time)
+            self._op_card_detail.set_label(f"{int(pct*100)}%  ·  {elapsed} с")
+            return
+        # btrfs send / generic: just show last log line in detail
+        if line and len(line) < 80:
+            self._op_card_detail.set_label(line)
 
     def _log_writer_loop(self):
         self._setup_logging()

@@ -22,6 +22,8 @@ from ui.widgets import (
 from .restore import BtrfsRestoreDialog, BorgArchiveBrowserDialog, BorgRestoreDialog
 from .pickers import HomeDirPickerDialog, FlatpakDataPickerDialog, FolderPickerDialog
 from .summary import BorgBackupSummaryDialog
+from .mirror import MirrorPage
+from .manual import build_terminal_page
 
 _INTERVALS = [
     (1,   "Каждый час"),
@@ -39,33 +41,44 @@ _BTRFS_INTERVALS = [
 
 class BorgPage(Gtk.Box):
 
-    def __init__(self, log_fn):
+    def __init__(self, log_fn, start_progress_fn=None, stop_progress_fn=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._log = log_fn
+        self._start_progress = start_progress_fn or (lambda msg, **kw: None)
+        self._stop_progress = stop_progress_fn or (lambda ok=True: None)
         self._archives_group: Adw.PreferencesGroup | None = None
         self._archive_rows: list = []
         self._compact_row = None
+        self._passphrase_dialog_open = False
 
         self._stack = Adw.ViewStack()
+        self._stack.set_vexpand(True)
 
         switcher = Adw.ViewSwitcher()
         switcher.set_stack(self._stack)
         switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
-        switcher.set_margin_top(4)
-        switcher.set_margin_bottom(4)
-        switcher.set_hexpand(False)
         switcher.set_halign(Gtk.Align.CENTER)
 
-        clamp = Adw.Clamp()
-        clamp.set_maximum_size(640)
-        clamp.set_child(switcher)
-        self._tm_clamp = clamp
+        top_header = Adw.HeaderBar()
+        top_header.set_title_widget(switcher)
+        top_header.set_show_start_title_buttons(False)
+        top_header.set_show_end_title_buttons(False)
+        top_header.set_decoration_layout("")
 
-        self.append(clamp)
-        self.append(self._stack)
+        toolbar_view = Adw.ToolbarView()
+        toolbar_view.add_top_bar(top_header)
+        toolbar_view.set_content(self._stack)
+        toolbar_view.set_vexpand(True)
+        self.append(toolbar_view)
 
         tm_tab = self._build_timesync_tab()
         self._stack.add_titled_with_icon(tm_tab, "timesync", "TimeSync", "document-revert-symbolic")
+
+        mirror_page = MirrorPage(self._log, self._start_progress, self._stop_progress)
+        self._stack.add_titled_with_icon(mirror_page, "mirror", "Зеркало", "edit-copy-symbolic")
+
+        manual_container, self._manual_stack = self._build_manual_container()
+        self._stack.add_titled_with_icon(manual_container, "manual", "Ручной режим", "utilities-terminal-symbolic")
 
         self._build_info_page()
         self._build_settings_page()
@@ -73,19 +86,40 @@ class BorgPage(Gtk.Box):
 
         if backend.is_home_on_btrfs():
             btrfs_tab, self._btrfs_body = self._build_btrfs_tab()
-            self._stack.add_titled_with_icon(btrfs_tab, "btrfs", "Снимки", "camera-photo-symbolic")
+            self._manual_stack.add_titled_with_icon(btrfs_tab, "btrfs", "Снимки", "camera-photo-symbolic")
 
-        self._page_tm = self._stack.get_page(self._stack.get_child_by_name("timesync"))
-        self._page_info = self._stack.get_page(self._stack.get_child_by_name("info"))
-        self._page_settings = self._stack.get_page(self._stack.get_child_by_name("settings"))
-        self._page_schedule = self._stack.get_page(self._stack.get_child_by_name("schedule"))
-        btrfs_w = self._stack.get_child_by_name("btrfs")
-        self._page_btrfs = self._stack.get_page(btrfs_w) if btrfs_w else None
+        term_page = build_terminal_page(self._log)
+        self._manual_stack.add_titled_with_icon(term_page, "terminal", "Терминал", "utilities-terminal-symbolic")
+
+        self._page_info = self._manual_stack.get_page(self._manual_stack.get_child_by_name("info"))
+        self._page_settings = self._manual_stack.get_page(self._manual_stack.get_child_by_name("settings"))
+        self._page_schedule = self._manual_stack.get_page(self._manual_stack.get_child_by_name("schedule"))
+        btrfs_w = self._manual_stack.get_child_by_name("btrfs")
+        self._page_btrfs = self._manual_stack.get_page(btrfs_w) if btrfs_w else None
 
         self._fastfetch_offer_shown = False
         self._update_sections_visibility()
         threading.Thread(target=self._refresh_status_thread, daemon=True).start()
-        self._apply_mode(config.state_get("borg_expert_mode", False))
+
+    @property
+    def view_stack(self) -> Adw.ViewStack:
+        return self._stack
+
+    def _build_manual_container(self) -> tuple[Gtk.Box, Adw.ViewStack]:
+        container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        inner_stack = Adw.ViewStack()
+        inner_stack.set_vexpand(True)
+
+        inner_switcher = Adw.ViewSwitcher()
+        inner_switcher.set_stack(inner_stack)
+        inner_switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+        inner_switcher.set_halign(Gtk.Align.CENTER)
+        inner_switcher.set_margin_top(12)
+        inner_switcher.set_margin_bottom(12)
+
+        container.append(inner_switcher)
+        container.append(inner_stack)
+        return container, inner_stack
 
     def _build_info_page(self):
         scroll, self._body = make_scrolled_page()
@@ -97,18 +131,18 @@ class BorgPage(Gtk.Box):
         self._build_archives_group()
         self._build_actions_group()
         scroll.connect("map", lambda _: self._move_repo_group_to(self._info_repo_slot))
-        self._stack.add_titled_with_icon(scroll, "info", "Хранилище", "drive-harddisk-symbolic")
+        self._manual_stack.add_titled_with_icon(scroll, "info", "Хранилище", "drive-harddisk-symbolic")
 
     def _build_settings_page(self):
         scroll, self._body = make_scrolled_page()
         self._build_sources_group()
-        self._stack.add_titled_with_icon(scroll, "settings", "Источники", "preferences-system-symbolic")
+        self._manual_stack.add_titled_with_icon(scroll, "settings", "Источники", "preferences-system-symbolic")
 
     def _build_schedule_page(self):
         scroll, self._body = make_scrolled_page()
         self._build_schedule_group()
         self._build_prune_group()
-        self._stack.add_titled_with_icon(scroll, "schedule", "График", "alarm-symbolic")
+        self._manual_stack.add_titled_with_icon(scroll, "schedule", "График", "alarm-symbolic")
 
     def _build_timesync_tab(self) -> Gtk.Widget:
         self._tm_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
@@ -128,18 +162,11 @@ class BorgPage(Gtk.Box):
         scroll.set_vexpand(True)
         scroll.set_child(clamp)
 
-        # ── строка: заголовок + эксперт-кнопка ──────────────────────────
-        top_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        # ── заголовок ────────────────────────────────────────────────────
         page_title = Gtk.Label(label="TimeSync")
         page_title.add_css_class("heading")
         page_title.set_halign(Gtk.Align.START)
-        page_title.set_hexpand(True)
-        self._tm_expert_btn = Gtk.Button()
-        self._tm_expert_btn.add_css_class("flat")
-        self._tm_expert_btn.connect("clicked", self._tm_toggle_expert)
-        top_bar.append(page_title)
-        top_bar.append(self._tm_expert_btn)
-        self._tm_box.append(top_bar)
+        self._tm_box.append(page_title)
 
         # ── блок «Этот компьютер» (fastfetch) ────────────────────────────
         sysinfo_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -494,6 +521,9 @@ class BorgPage(Gtk.Box):
             self._tm_carousel.remove(self._tm_carousel.get_nth_page(0))
 
         if not archives:
+            if error and "incorrect" in error.lower():
+                GLib.idle_add(self._ask_correct_passphrase, self._tm_refresh_archives)
+                return
             self._tm_show_placeholder("empty", error)
             return
 
@@ -593,51 +623,24 @@ class BorgPage(Gtk.Box):
         self._tm_spinner.set_visible(False)
         self._tm_placeholder.set_visible(True)
 
-        expert = config.state_get("borg_expert_mode", False)
         if state == "not_configured":
             self._tm_create_btn.set_visible(False)
             self._tm_delete_btn.set_visible(False)
             self._tm_placeholder.set_icon_name("drive-harddisk-symbolic")
-            if expert:
-                self._tm_placeholder.set_title("Хранилище не настроено")
-                self._tm_placeholder.set_description("Настройте Borg-хранилище на вкладке «Хранилище»")
-                btn = Gtk.Button(label="Перейти к настройке")
-                btn.add_css_class("pill")
-                btn.connect("clicked", lambda _: self._stack.set_visible_child_name("info"))
-                self._tm_placeholder.set_child(btn)
-            else:
-                self._tm_placeholder.set_title("Резервных копий пока нет")
-                self._tm_placeholder.set_description("Создайте первый бэкап или откройте существующий архив")
-                btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-                btns.set_halign(Gtk.Align.CENTER)
-                btn_create = Gtk.Button(label="Создать первый бэкап")
-                btn_create.add_css_class("pill")
-                btn_create.add_css_class("suggested-action")
-                btn_create.connect("clicked", lambda _: self._tm_on_create())
-                btn_open = Gtk.Button(label="У меня есть архив")
-                btn_open.add_css_class("pill")
-                btn_open.add_css_class("flat")
-                btn_open.connect("clicked", lambda _: self._tm_open_existing_dialog())
-                btns.append(btn_create)
-                btns.append(btn_open)
-                self._tm_placeholder.set_child(btns)
+            self._tm_placeholder.set_title("Хранилище не настроено")
+            self._tm_placeholder.set_description("Настройте Borg-хранилище в разделе «Ручной режим»")
+            btn = Gtk.Button(label="Перейти к настройке")
+            btn.add_css_class("pill")
+            btn.connect("clicked", lambda _: self._go_to_storage())
+            self._tm_placeholder.set_child(btn)
         else:
             self._tm_placeholder.set_icon_name("document-revert-symbolic")
             self._tm_placeholder.set_title("Архивов пока нет")
-            if expert:
-                self._tm_create_btn.set_visible(False)
-                self._tm_delete_btn.set_visible(False)
-                self._tm_placeholder.set_description("Создайте первый архив на вкладке «Хранилище»")
-                btn = Gtk.Button(label="Создать архив")
-                btn.add_css_class("pill")
-                btn.connect("clicked", lambda _: self._stack.set_visible_child_name("info"))
-                self._tm_placeholder.set_child(btn)
-            else:
-                self._tm_placeholder.set_visible(False)
-                self._tm_create_btn.set_visible(True)
-                self._tm_delete_btn.set_visible(False)
-                if error:
-                    self._log(f"borg list: {error}\n")
+            self._tm_placeholder.set_visible(False)
+            self._tm_create_btn.set_visible(True)
+            self._tm_delete_btn.set_visible(False)
+            if error:
+                self._log(f"borg list: {error}\n")
 
     def _tm_update_nav_buttons(self):
         n = self._tm_carousel.get_n_pages()
@@ -655,31 +658,9 @@ class BorgPage(Gtk.Box):
         if idx < n - 1:
             self._tm_carousel.scroll_to(self._tm_carousel.get_nth_page(idx + 1), True)
 
-    def _apply_mode(self, expert: bool):
-        if expert:
-            for page in [self._page_info, self._page_settings, self._page_schedule]:
-                page.set_visible(True)
-            if self._page_btrfs:
-                self._page_btrfs.set_visible(True)
-            self._tm_clamp.set_visible(True)
-            self._stack.set_visible_child_name("info")
-            self._page_tm.set_visible(False)
-        else:
-            self._page_tm.set_visible(True)
-            self._stack.set_visible_child_name("timesync")
-            self._tm_clamp.set_visible(False)
-            for page in [self._page_info, self._page_settings, self._page_schedule]:
-                page.set_visible(False)
-            if self._page_btrfs:
-                self._page_btrfs.set_visible(False)
-        self._tm_expert_btn.set_label("Экспертный режим")
-        self._btn_simple_mode.set_visible(expert)
-        self._btn_init_repo.set_visible(expert)
-
-    def _tm_toggle_expert(self, _btn):
-        expert = not config.state_get("borg_expert_mode", False)
-        config.state_set("borg_expert_mode", expert)
-        self._apply_mode(expert)
+    def _go_to_storage(self):
+        self._stack.set_visible_child_name("manual")
+        self._manual_stack.set_visible_child_name("info")
 
     def _tm_open_existing_dialog(self):
         dialog = Adw.AlertDialog(
@@ -812,6 +793,34 @@ class BorgPage(Gtk.Box):
         dialog.connect("response", _on_response)
         dialog.present(self.get_root())
 
+    def _ask_correct_passphrase(self, retry_fn):
+        if self._passphrase_dialog_open:
+            return
+        self._passphrase_dialog_open = True
+        dialog = Adw.AlertDialog(
+            heading="Неверный пароль хранилища",
+            body="Введите пароль для доступа к Borg-хранилищу.",
+        )
+        pw_row = Adw.PasswordEntryRow()
+        pw_row.set_title("Пароль")
+        pw_row.set_margin_top(8)
+        dialog.set_extra_child(pw_row)
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("ok", "Применить")
+        dialog.set_default_response("ok")
+        dialog.set_close_response("cancel")
+
+        def _on_response(d, response):
+            self._passphrase_dialog_open = False
+            if response != "ok":
+                return
+            config.state_set("borg_passphrase", pw_row.get_text())
+            self._row_passphrase.set_text(pw_row.get_text())
+            retry_fn()
+
+        dialog.connect("response", _on_response)
+        dialog.present(self.get_root())
+
     def _tm_ask_password_and_init(self, repo_path: str, extra_includes: set = None):
         dialog = Adw.AlertDialog(
             heading="Защитите резервную копию",
@@ -905,10 +914,6 @@ class BorgPage(Gtk.Box):
     def _build_status_group(self):
         group = Adw.PreferencesGroup()
         group.set_title("Статус")
-        self._btn_simple_mode = Gtk.Button(label="Простой режим")
-        self._btn_simple_mode.add_css_class("flat")
-        self._btn_simple_mode.connect("clicked", self._tm_toggle_expert)
-        group.set_header_suffix(self._btn_simple_mode)
         self._body.append(group)
 
         self._row_borg = Adw.ActionRow()
@@ -1535,12 +1540,12 @@ class BorgPage(Gtk.Box):
     def _load_archives_thread(self):
         repo_path = config.state_get("borg_repo_path", "") or ""
         if not repo_path:
-            GLib.idle_add(self._populate_archives, [])
+            GLib.idle_add(self._populate_archives, [], "")
             return
-        archives, _ = backend.borg_list(repo_path)
-        GLib.idle_add(self._populate_archives, list(reversed(archives)))
+        archives, error = backend.borg_list(repo_path)
+        GLib.idle_add(self._populate_archives, list(reversed(archives)), error)
 
-    def _populate_archives(self, archives: list[dict]):
+    def _populate_archives(self, archives: list[dict], error: str = ""):
         try:
             self._archives_group.remove(self._archives_placeholder)
         except Exception:
@@ -1554,6 +1559,9 @@ class BorgPage(Gtk.Box):
         self._archive_rows.clear()
 
         if not archives:
+            if error and "incorrect" in error.lower():
+                self._ask_correct_passphrase(self._refresh_archives)
+                return
             self._archives_placeholder.set_title("Архивов не найдено")
             spinner_suffix = self._archives_placeholder.get_last_child()
             if spinner_suffix:
@@ -1760,18 +1768,21 @@ class BorgPage(Gtk.Box):
         if not repo_path:
             return
         self._save_repo_settings()
+        if backend.is_repo_initialized(repo_path):
+            self._log(f"✔ Хранилище уже инициализировано: {repo_path}\n")
+            GLib.idle_add(self._refresh_status_thread)
+            return
         win = self.get_root()
         if hasattr(win, "start_progress"):
             win.start_progress("Инициализация хранилища...")
         self._log(f"\n▶  Инициализация хранилища в {repo_path}...\n")
-        backend.borg_init(
-            repo_path, self._log,
-            lambda ok: (
-                self._log("✔ Готово\n" if ok else "✘ Ошибка\n"),
-                hasattr(win, "stop_progress") and win.stop_progress(ok),
-                self._refresh_status_thread() if ok else None,
-            )
-        )
+        def _on_init_done(ok):
+            self._log("✔ Готово\n" if ok else "✘ Ошибка инициализации\n")
+            if hasattr(win, "stop_progress"):
+                win.stop_progress(ok)
+            self._refresh_status_thread()
+
+        backend.borg_init(repo_path, self._log, _on_init_done)
 
     def _get_backup_opts(self) -> dict:
         opts = {}

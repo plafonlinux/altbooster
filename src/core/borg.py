@@ -237,6 +237,9 @@ def _borg_env(repo_path: str) -> dict:
 def is_repo_initialized(repo_path: str) -> bool:
     if not repo_path:
         return False
+    p = Path(repo_path)
+    if p.is_dir() and (p / "README").exists() and (p / "config").exists():
+        return True
     try:
         r = subprocess.run(
             [_borg_exe(), "info", "--json", repo_path],

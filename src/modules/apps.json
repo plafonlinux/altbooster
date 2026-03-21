@@ -545,6 +545,39 @@
           }
         },
         {
+          "id": "kitsune",
+          "label": "Kitsune",
+          "desc": "Клиент для просмотра аниме с озвучкой AniLiberty (Libadwaita)",
+          "sources": [
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "kitsune-adw"
+              ],
+              "check": [
+                "rpm",
+                "kitsune-adw"
+              ]
+            },
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "net.armatik.Kitsune"
+              ],
+              "check": [
+                "flatpak",
+                "net.armatik.Kitsune"
+              ]
+            }
+          ]
+        },
+        {
           "id": "spotify",
           "label": "Spotify",
           "desc": "Музыкальный стриминг",
@@ -1103,6 +1136,25 @@
               ]
             }
           ]
+        },
+        {
+          "id": "synology_drive",
+          "label": "Synology Drive",
+          "desc": "Клиент синхронизации файлов с Synology NAS",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.synology.SynologyDrive"
+            ],
+            "check": [
+              "flatpak",
+              "com.synology.SynologyDrive"
+            ]
+          }
         },
         {
           "id": "monic",
