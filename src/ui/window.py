@@ -19,6 +19,8 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango
 
 from core import config
 from core import backend
+
+_ALT_ZERO_GUIDE_URL = "https://plafon.gitbook.io/alt-zero"
 from tabs.setup import SetupPage
 from tabs.apps import AppsPage
 from tabs.extensions import ExtensionsPage
@@ -414,9 +416,24 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         borg_list.connect("row-selected", _on_borg_selected)
         nav_list.connect("row-selected", _on_nav_deselects_borg)
 
+        guide_list = Gtk.ListBox()
+        guide_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        guide_list.add_css_class("navigation-sidebar")
+        g_row, g_img, g_lbl = self._make_nav_row(
+            "alt_zero_guide",
+            "ALT Zero",
+            "alt-zero-book-symbolic",
+        )
+        g_row.set_activatable(True)
+        guide_list.append(g_row)
+        self._nav_images.append(g_img)
+        self._nav_labels.append(g_lbl)
+        guide_list.connect("row-activated", self._on_alt_zero_guide_sidebar_activated)
+
         self._sidebar_widget = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self._sidebar_widget.append(scroll)
         self._sidebar_widget.append(borg_list)
+        self._sidebar_widget.append(guide_list)
         return self._sidebar_widget
 
     def _build_sidebar_bottom(self) -> Gtk.Widget:
@@ -505,6 +522,14 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             self._check_for_updates()
         elif name == "settings":
             self._settings_popover.popup()
+
+    def _on_alt_zero_guide_sidebar_activated(self, _list, row):
+        if row is None:
+            return
+        try:
+            Gio.AppInfo.launch_default_for_uri(_ALT_ZERO_GUIDE_URL, None)
+        except GLib.Error:
+            pass
 
     def _on_window_is_active(self, _win, _pspec):
         if not self.get_property("is-active"):

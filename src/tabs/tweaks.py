@@ -11,7 +11,7 @@ import threading
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
 from core import backend
 from ui.common import load_module
@@ -24,6 +24,7 @@ from tabs.system76_scheduler import System76SchedulerTweaksSection
 
 _ANANICY_RULES_REPO = "https://github.com/CachyOS/ananicy-rules"
 _ANANICY_RULES_DIR  = "/etc/ananicy.d/cachyos-rules"
+_ALT_ZERO_GUIDE_URL = "https://plafon.gitbook.io/alt-zero"
 
 _KERNEL_SCHED_SEARCH_IDS = frozenset({"sched_ext", "scx", "intel_scx_meteor"})
 _USERSPACE_SCHED_SEARCH_IDS = frozenset({"ananicy", "system76_scheduler"})
@@ -84,6 +85,18 @@ _tweak_page_css.load_from_data(b"""
         border-radius: 999px;
         color: @error_color;
         background-color: alpha(@error_color, 0.18);
+    }
+    button.ab-alt-zero-guide-badge {
+        font-size: 0.75em;
+        font-weight: 600;
+        min-height: 0;
+        padding: 4px 12px;
+        border-radius: 999px;
+        color: @accent_color;
+        background-color: alpha(@accent_color, 0.15);
+    }
+    button.ab-alt-zero-guide-badge:hover {
+        background-color: alpha(@accent_color, 0.25);
     }
 """)
 
@@ -148,6 +161,7 @@ class TweaksPage(Gtk.Box):
 
         scroll_general, body_general = make_scrolled_page()
         self._scroll_general = scroll_general
+        self._build_platform_sisyphus_intro(body_general)
         self._build_sisyphus_group(body_general)
         self._build_fixes_group(body_general)
         self._sub_stack.add_titled_with_icon(
@@ -214,6 +228,47 @@ class TweaksPage(Gtk.Box):
                 )
             else:
                 row.set_tooltip_text("")
+
+    def _on_alt_zero_guide_clicked(self, _btn):
+        try:
+            Gio.AppInfo.launch_default_for_uri(_ALT_ZERO_GUIDE_URL, None)
+        except GLib.Error:
+            pass
+
+    def _build_platform_sisyphus_intro(self, body):
+        group = Adw.PreferencesGroup()
+        row = Adw.ActionRow()
+        row.set_title("Платформа (p10, p11, …) и Сизиф (Sisyphus)")
+        row.set_subtitle(
+            "Ветки вида p10, p11 — это стабильная платформа ALT: согласованный набор пакетов и обновлений "
+            "в духе LTS, предсказуемый цикл обслуживания, ориентир на рабочие станции и корпоративное "
+            "применение (буква p — «платформа»).\n\n"
+            "Sisyphus (в обиходе — Сизиф) — основной rolling-репозиторий разработки: пакеты обновляются "
+            "постоянно, в нём появляются новейшие версии ПО. От него собирают Regular и другие «живые» "
+            "сборки; база свежее, но изменения и регрессии возможны чаще, чем на стабильной платформе.\n\n"
+            "Переход с ветки p* на репозиторий Sisyphus (блок ниже) — это смена стабильной платформы на "
+            "rolling: откат к прежней ветке без переустановки системы обычно невозможен."
+        )
+        row.set_activatable(False)
+        row.add_prefix(Gtk.Image.new_from_icon_name("dialog-information-symbolic"))
+
+        link_btn = Gtk.Button()
+        link_btn.add_css_class("ab-alt-zero-guide-badge")
+        link_btn.add_css_class("flat")
+        link_btn.set_valign(Gtk.Align.CENTER)
+        link_btn.set_tooltip_text("ALT Zero")
+        link_inner = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        link_inner.set_valign(Gtk.Align.CENTER)
+        ext_icon = Gtk.Image.new_from_icon_name("adw-external-link-symbolic")
+        ext_icon.set_pixel_size(14)
+        link_inner.append(ext_icon)
+        link_inner.append(Gtk.Label(label="ALT Zero"))
+        link_btn.set_child(link_inner)
+        link_btn.connect("clicked", self._on_alt_zero_guide_clicked)
+        row.add_suffix(link_btn)
+
+        group.add(row)
+        body.append(group)
 
     def _build_userspace_priorities_tab_intro(self, body):
         group = Adw.PreferencesGroup()
