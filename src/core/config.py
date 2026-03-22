@@ -11,7 +11,7 @@ CONFIG_FILE = CONFIG_DIR / "window.json"
 STATE_FILE  = CONFIG_DIR / "state.json"
 SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
 
-VERSION = "5.6.9-alpha"
+VERSION = "5.6.9-beta"
 
 DEBUG: bool = False
 INITIAL_TAB: str = ""
