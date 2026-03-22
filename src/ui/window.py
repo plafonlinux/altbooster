@@ -93,10 +93,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         _it = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
         _it.add_search_path(str(_icons_base))
 
-        self._pulse_timer_id = None
         self._reset_status_timer_id = None
-        self._elapsed_timer_id = None
-        self._progress_start_time = 0.0
         self._progress_message = ""
         self._op_card_pct: float | None = None
         self._log_queue = queue.SimpleQueue()
@@ -110,6 +107,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         self.set_default_size(settings.get("width", 740), settings.get("height", 880))
         self.connect("close-request", self._on_close)
+        self.connect("notify::is-active", self._on_window_is_active)
 
 
         header_widget = self._build_header()
@@ -140,11 +138,32 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         stack_overlay = Gtk.Overlay()
         stack_overlay.set_child(self._stack)
         stack_overlay.set_vexpand(True)
+
+        self._global_search_btn = Gtk.Button()
+        self._global_search_btn.set_icon_name("system-search-symbolic")
+        self._global_search_btn.set_hexpand(False)
+        self._global_search_btn.set_vexpand(False)
+        self._global_search_btn.set_halign(Gtk.Align.END)
+        self._global_search_btn.set_valign(Gtk.Align.END)
+        self._global_search_btn.set_margin_end(16)
+        self._global_search_btn.set_margin_bottom(16)
+        self._global_search_btn.add_css_class("circular")
+        self._global_search_btn.add_css_class("ab-global-search-btn")
+        self._global_search_btn.set_tooltip_text("По утилите Ctrl + K")
+        self._global_search_btn.connect("clicked", self._present_global_search)
+
         self._op_card = self._build_op_card()
+        stack_overlay.add_overlay(self._global_search_btn)
+        stack_overlay.set_measure_overlay(self._global_search_btn, False)
         stack_overlay.add_overlay(self._op_card)
         stack_overlay.set_measure_overlay(self._op_card, False)
 
-        root.append(stack_overlay)
+        self._content_host_overlay = Gtk.Overlay()
+        self._content_host_overlay.set_child(stack_overlay)
+        self._content_host_overlay.set_vexpand(True)
+        self._global_search_panel = None
+
+        root.append(self._content_host_overlay)
 
         self._split_view = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         self._split_view.set_start_child(self._build_sidebar())
@@ -155,7 +174,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._split_view.set_shrink_end_child(False)
 
         self._bottom_paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self._bottom_paned.set_vexpand(False)
         self._bottom_paned.set_start_child(self._bottom_list_widget)
+        self._log_widget.set_vexpand(False)
+        self._log_widget.set_valign(Gtk.Align.START)
         self._bottom_paned.set_end_child(self._log_widget)
         self._bottom_paned.set_shrink_start_child(False)
         self._bottom_paned.set_resize_start_child(False)
@@ -204,6 +226,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         menu = Gio.Menu()
 
         section_diag = Gio.Menu()
+        section_diag.append("Поиск по вкладкам", "win.global_search")
         section_diag.append("Посмотреть логи", "win.open_log")
         section_diag.append("Очистить лог", "win.clear_log")
         section_diag.append("Очистить кэш", "win.reset_state")
@@ -252,6 +275,39 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             headerbar {
                 box-shadow: 0 1px 6px alpha(black, 0.18);
             }
+            /* Same column width as op card stretched the search button - fixed square */
+            button.ab-global-search-btn {
+                min-width: 42px;
+                max-width: 42px;
+                min-height: 42px;
+                max-height: 42px;
+                padding: 0;
+            }
+            button.ab-global-search-btn image {
+                -gtk-icon-size: 22px;
+            }
+            .ab-log-terminal-panel {
+                padding: 0;
+            }
+            expander.ab-log-expander-compact {
+                margin: 0;
+                padding: 0;
+            }
+            expander.ab-log-expander-compact > box > label {
+                padding-top: 2px;
+                padding-bottom: 2px;
+            }
+            .ab-icon-green { color: @success_color; }
+            .ab-icon-red   { color: @error_color;   }
+            .ab-op-floating-card {
+                background-image: none;
+                background-color: @theme_bg_color;
+                border: 1px solid @borders;
+                border-radius: 12px;
+                box-shadow: 0 4px 16px alpha(black, 0.28);
+                opacity: 1;
+                padding: 12px 20px 14px 20px;
+            }
         """)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), _dot_css,
@@ -266,6 +322,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             ("reset_state",       self._reset_state),
             ("reset_config",      self._reset_config),
             ("open_log",          self._open_log_file),
+            ("global_search",     self._present_global_search),
         ]
         for name, cb in actions:
             a = Gio.SimpleAction.new(name, None)
@@ -283,6 +340,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         app.set_accels_for_action("win.help", ["F1"])
         app.set_accels_for_action("win.about", ["<Ctrl>F1"])
         app.set_accels_for_action("win.show-help-overlay", ["<Ctrl>question"])
+        app.set_accels_for_action("win.global_search", ["<Ctrl>k"])
 
         self.set_help_overlay(self._build_shortcuts_window())
 
@@ -451,6 +509,15 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         elif name == "settings":
             self._settings_popover.popup()
 
+    def _on_window_is_active(self, _win, _pspec):
+        if not self.get_property("is-active"):
+            return
+        if self._stack.get_visible_child_name() != "flatpak":
+            return
+        page = self._pages.get("flatpak")
+        if page is not None and hasattr(page, "on_window_is_active"):
+            page.on_window_is_active()
+
     def _on_stack_child_changed(self, stack, _pspec):
         name = stack.get_visible_child_name()
         if name == "borg":
@@ -461,7 +528,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             for row in self._nav_rows:
                 if row.get_name() == name:
                     self._nav_list.select_row(row)
-                    return
+                    break
+        page = self._pages.get(name) if name else None
+        if page is not None and hasattr(page, "on_tab_visible"):
+            page.on_tab_visible()
 
     def _on_nav_row_selected(self, _, row):
         if row is not None:
@@ -580,50 +650,26 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._progress_nesting = 0
         self._on_cancel_cb = None
         self._log_container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-
-        self._status_label = Gtk.Label(label="Ожидание авторизации...")
-        self._status_label.set_halign(Gtk.Align.START)
-        self._status_label.set_margin_start(12)
-        self._status_label.set_margin_top(12)
-        self._status_label.set_margin_bottom(6)
-        self._status_label.add_css_class("heading")
-        self._log_container.append(self._status_label)
-
-        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        hbox.set_margin_start(12)
-        hbox.set_margin_end(12)
-        hbox.set_margin_bottom(12)
-
-        self._progressbar = Gtk.ProgressBar()
-        self._progressbar.set_hexpand(True)
-        self._progressbar.set_valign(Gtk.Align.CENTER)
-        hbox.append(self._progressbar)
-
-        self._stop_btn = Gtk.Button(icon_name="media-playback-stop-symbolic")
-        self._stop_btn.add_css_class("flat")
-        self._stop_btn.add_css_class("circular")
-        self._stop_btn.set_tooltip_text("Отменить")
-        self._stop_btn.set_sensitive(False)
-        self._stop_btn.set_visible(False)
-        self._stop_btn.connect("clicked", self._on_stop_clicked)
-        hbox.append(self._stop_btn)
-
-        self._log_container.append(hbox)
+        self._log_container.set_vexpand(False)
+        self._log_container.add_css_class("ab-log-terminal-panel")
 
         self._log_expander = Gtk.Expander(label="Лог терминала")
-        self._log_expander.set_margin_start(12)
-        self._log_expander.set_margin_end(12)
-        self._log_expander.set_margin_bottom(12)
+        self._log_expander.add_css_class("ab-log-expander-compact")
+        self._log_expander.set_margin_start(8)
+        self._log_expander.set_margin_top(2)
+        self._log_expander.set_margin_end(8)
+        self._log_expander.set_margin_bottom(2)
 
         self._log_scroll = Gtk.ScrolledWindow()
         self._log_scroll.set_vexpand(False)
-        self._log_scroll.set_size_request(-1, 250)
-        self._log_scroll.set_min_content_height(50)
+        self._log_scroll.set_min_content_height(0)
+        self._log_scroll.set_propagate_natural_height(True)
 
         self._tv = Gtk.TextView()
         self._tv.set_editable(False)
         self._tv.set_monospace(True)
         self._tv.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._tv.set_vexpand(False)
         self._tv.set_left_margin(10)
         self._tv.set_right_margin(10)
         self._tv.set_top_margin(10)
@@ -631,10 +677,22 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._buf = self._tv.get_buffer()
         self._log_scroll.set_child(self._tv)
         self._log_expander.set_child(self._log_scroll)
+        self._log_expander.set_expanded(False)
+        self._log_expander.connect("notify::expanded", self._on_log_expander_expanded)
         self._log_container.append(self._log_expander)
 
         return self._log_container
 
+    def _on_log_expander_expanded(self, *_):
+        if self._log_expander.get_expanded():
+            self._log_scroll.set_min_content_height(140)
+        else:
+            self._log_scroll.set_min_content_height(0)
+
+    def _hide_op_card_if_idle(self) -> None:
+        if self._progress_nesting == 0:
+            self._op_card.set_visible(False)
+            self._op_card.set_can_target(False)
 
     def _setup_logging(self):
         try:
@@ -663,6 +721,17 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def ask_password(self):
         self._maint.set_sensitive_all(False)
 
+        def _show_auth_overlay():
+            self._op_card_title.set_label("Ожидание авторизации...")
+            self._op_card_spinner.set_visible(True)
+            self._op_card_spinner.set_spinning(True)
+            self._op_card_stop_btn.set_visible(False)
+            self._op_card_detail.set_visible(False)
+            self._op_card.set_visible(True)
+            self._op_card.set_can_target(False)
+
+        GLib.idle_add(_show_auth_overlay)
+
         def _check():
             GLib.idle_add(self._log, "ℹ Инициализация pkexec...\n")
             ok, is_cancel = backend.start_pkexec_shell()
@@ -689,7 +758,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._maint.set_sensitive_all(True)
         self._maint.refresh_checks()
         self._log("👋 Добро пожаловать в ALT Booster. С чего начнём?\n")
-        self._status_label.set_label("Готов к работе")
+        self._hide_op_card_if_idle()
         if config.INITIAL_TAB and config.INITIAL_TAB in self._pages:
             GLib.idle_add(self._stack.set_visible_child_name, config.INITIAL_TAB)
 
@@ -702,7 +771,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             return {}
 
     def _on_close(self, _):
-        if self._elapsed_timer_id:
+        if self._progress_nesting > 0:
             dialog = Adw.AlertDialog(
                 heading="Операция выполняется",
                 body=f"«{self._progress_message}» ещё не завершена. Закрытие сейчас может привести к незавершённым изменениям.",
@@ -744,6 +813,43 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._update_badge_dot.set_visible(False)
         self._setup.check_for_updates(manual=True, on_update_found=self._on_update_found_global)
 
+    def _present_global_search(self, *_):
+        from ui.global_search import GlobalSearchPanel, build_all_search_items
+
+        items = build_all_search_items(self._MAIN_TABS, self._BORG_TAB)
+        if self._global_search_panel is None:
+            self._global_search_panel = GlobalSearchPanel()
+            self._content_host_overlay.add_overlay(self._global_search_panel)
+            self._content_host_overlay.set_measure_overlay(self._global_search_panel, False)
+        self._global_search_panel.open(items, self._on_global_search_pick)
+
+    def _on_global_search_pick(self, tab_id: str, focus_spec: str | None = None):
+        self._stack.set_visible_child_name(tab_id)
+        if focus_spec:
+            GLib.idle_add(lambda: self._apply_search_focus(tab_id, focus_spec))
+
+    def _apply_search_focus(self, tab_id: str, focus_spec: str) -> None:
+        if focus_spec.startswith("setup:"):
+            self._setup.focus_search_target(focus_spec[6:])
+        elif focus_spec.startswith("m:"):
+            self._maint.focus_search_target(focus_spec[2:])
+        elif focus_spec.startswith("d:"):
+            page = self._pages.get(tab_id)
+            if page is not None and hasattr(page, "focus_row_by_id"):
+                page.focus_row_by_id(focus_spec[2:])
+        elif focus_spec.startswith("app:"):
+            page = self._pages.get("apps")
+            if page is not None and hasattr(page, "focus_app_by_id"):
+                page.focus_app_by_id(focus_spec[4:])
+        elif focus_spec.startswith("ext:"):
+            page = self._pages.get("extensions")
+            if page is not None and hasattr(page, "focus_extension_by_uuid"):
+                page.focus_extension_by_uuid(focus_spec[4:])
+        elif focus_spec.startswith("fp:"):
+            page = self._pages.get("flatpak")
+            if page is not None and hasattr(page, "focus_search_target"):
+                page.focus_search_target(focus_spec[3:])
+
     def _show_help(self, *_):
         try:
             from ui.help_altbooster import show_help
@@ -773,6 +879,12 @@ class AltBoosterWindow(Adw.ApplicationWindow):
               <object class="GtkShortcutsShortcut">
                 <property name="title">Комбинации клавиш</property>
                 <property name="accelerator">&lt;ctrl&gt;question</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Поиск по вкладкам</property>
+                <property name="accelerator">&lt;ctrl&gt;k</property>
               </object>
             </child>
           </object>
@@ -887,65 +999,50 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
     def _build_op_card(self) -> Gtk.Widget:
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        card.add_css_class("card")
-        card.set_margin_bottom(16)
+        card.add_css_class("ab-op-floating-card")
+        card.set_margin_bottom(72)
         card.set_margin_end(16)
         card.set_halign(Gtk.Align.END)
         card.set_valign(Gtk.Align.END)
-        card.set_size_request(260, -1)
+        card.set_size_request(300, -1)
         card.set_visible(False)
         card.set_can_target(False)
 
-        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        top.set_margin_top(10)
-        top.set_margin_start(12)
-        top.set_margin_end(12)
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
 
-        spinner = Gtk.Spinner()
-        spinner.set_spinning(True)
-        spinner.set_size_request(16, 16)
-        top.append(spinner)
+        self._op_card_spinner = Gtk.Spinner()
+        self._op_card_spinner.set_spinning(True)
+        self._op_card_spinner.set_size_request(16, 16)
+        top.append(self._op_card_spinner)
 
         self._op_card_title = Gtk.Label()
         self._op_card_title.add_css_class("heading")
         self._op_card_title.set_halign(Gtk.Align.START)
         self._op_card_title.set_hexpand(True)
-        self._op_card_title.set_ellipsize(Pango.EllipsizeMode.END)
+        self._op_card_title.set_wrap(True)
+        self._op_card_title.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._op_card_title.set_xalign(0.0)
         top.append(self._op_card_title)
 
-        stop_btn = Gtk.Button()
-        stop_btn.set_icon_name("media-playback-stop-symbolic")
-        stop_btn.add_css_class("flat")
-        stop_btn.add_css_class("circular")
-        stop_btn.set_tooltip_text("Отменить")
-        stop_btn.set_size_request(24, 24)
-        stop_btn.connect("clicked", self._on_stop_clicked)
-        top.append(stop_btn)
+        self._op_card_stop_btn = Gtk.Button()
+        self._op_card_stop_btn.set_icon_name("media-playback-stop-symbolic")
+        self._op_card_stop_btn.add_css_class("flat")
+        self._op_card_stop_btn.add_css_class("circular")
+        self._op_card_stop_btn.set_tooltip_text("Отменить")
+        self._op_card_stop_btn.set_size_request(24, 24)
+        self._op_card_stop_btn.connect("clicked", self._on_stop_clicked)
+        top.append(self._op_card_stop_btn)
         card.append(top)
-
-        self._op_card_bar = Gtk.ProgressBar()
-        self._op_card_bar.set_margin_start(12)
-        self._op_card_bar.set_margin_end(12)
-        card.append(self._op_card_bar)
 
         self._op_card_detail = Gtk.Label()
         self._op_card_detail.add_css_class("caption")
         self._op_card_detail.set_halign(Gtk.Align.START)
-        self._op_card_detail.set_margin_start(12)
-        self._op_card_detail.set_margin_end(12)
-        self._op_card_detail.set_margin_bottom(10)
+        self._op_card_detail.set_margin_bottom(2)
         self._op_card_detail.set_ellipsize(Pango.EllipsizeMode.END)
         self._op_card_detail.set_label("Запуск...")
         card.append(self._op_card_detail)
 
         return card
-
-    def _update_op_card(self, pct: float | None, detail: str):
-        if pct is not None:
-            self._op_card_bar.set_fraction(max(0.0, min(1.0, pct)))
-        else:
-            self._op_card_bar.pulse()
-        self._op_card_detail.set_label(detail)
 
     def start_progress(self, message: str, on_cancel=None):
         _cb = on_cancel if on_cancel is not None else backend.cancel_current
@@ -957,26 +1054,19 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 self._progress_nesting += 1
             self._on_cancel_cb = _cb
             self._progress_message = message
-            self._progress_start_time = time.monotonic()
             self._op_card_pct = None
-            self._status_label.set_label(message)
-            self._progressbar.set_fraction(0.0)
-            self._stop_btn.set_sensitive(True)
-            self._stop_btn.set_visible(True)
             self._op_card_title.set_label(message)
-            self._op_card_bar.set_fraction(0.0)
+            self._op_card_spinner.set_visible(True)
+            self._op_card_spinner.set_spinning(True)
+            self._op_card_stop_btn.set_visible(True)
+            self._op_card_stop_btn.set_sensitive(True)
+            self._op_card_detail.set_visible(True)
             self._op_card_detail.set_label("Запуск...")
             self._op_card.set_visible(True)
             self._op_card.set_can_target(True)
-            if self._pulse_timer_id:
-                GLib.source_remove(self._pulse_timer_id)
-            self._pulse_timer_id = GLib.timeout_add(100, self._pulse_progress)
             if self._reset_status_timer_id:
                 GLib.source_remove(self._reset_status_timer_id)
                 self._reset_status_timer_id = None
-            if self._elapsed_timer_id:
-                GLib.source_remove(self._elapsed_timer_id)
-            self._elapsed_timer_id = GLib.timeout_add(1000, self._update_elapsed_label)
 
         GLib.idle_add(_do)
 
@@ -996,46 +1086,26 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         def _on_response(_d, response):
             if response == "stop" and self._on_cancel_cb:
-                self._status_label.set_label("Отмена...")
-                self._stop_btn.set_sensitive(False)
+                self._op_card_title.set_label("Отмена...")
+                self._op_card_stop_btn.set_sensitive(False)
                 self._on_cancel_cb()
 
         dialog.connect("response", _on_response)
         dialog.present(self)
 
-    def _pulse_progress(self):
-        self._progressbar.pulse()
-        if self._op_card_pct is None and self._op_card.get_visible():
-            self._op_card_bar.pulse()
-        return True
-
-    def _update_elapsed_label(self):
-        elapsed = int(time.monotonic() - self._progress_start_time)
-        if elapsed < 60:
-            suffix = f"{elapsed} с"
-        else:
-            m, s = divmod(elapsed, 60)
-            suffix = f"{m}:{s:02d}"
-        self._status_label.set_label(f"{self._progress_message} — {suffix}")
-        return True
-
     def stop_progress(self, success: bool = True):
         def _do():
-            if self._elapsed_timer_id:
-                GLib.source_remove(self._elapsed_timer_id)
-                self._elapsed_timer_id = None
-            if self._pulse_timer_id:
-                GLib.source_remove(self._pulse_timer_id)
-                self._pulse_timer_id = None
             self._progress_nesting = max(0, self._progress_nesting - 1)
-            self._progressbar.set_fraction(1.0)
             label = self._last_log_line or ("✔ Готово" if success else "✘ Ошибка")
-            self._status_label.set_label(label)
             if self._progress_nesting == 0:
-                self._stop_btn.set_sensitive(False)
-                self._stop_btn.set_visible(False)
                 self._on_cancel_cb = None
-                self._op_card.set_visible(False)
+                self._op_card_title.set_label(label)
+                self._op_card_spinner.set_spinning(False)
+                self._op_card_spinner.set_visible(False)
+                self._op_card_stop_btn.set_visible(False)
+                self._op_card_stop_btn.set_sensitive(True)
+                self._op_card_detail.set_visible(False)
+                self._op_card.set_visible(True)
                 self._op_card.set_can_target(False)
                 if self._reset_status_timer_id:
                     GLib.source_remove(self._reset_status_timer_id)
@@ -1045,9 +1115,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
     def _reset_status_label(self):
         self._reset_status_timer_id = None
-        self._status_label.set_label("Готов к работе")
+        self._hide_op_card_if_idle()
         return False
-
 
     def _log(self, text):
         GLib.idle_add(self._log_internal, text)
@@ -1056,7 +1125,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         stripped = text.strip()
         if stripped:
             self._last_log_line = stripped
-            if self._op_card.get_visible():
+            if self._op_card.get_visible() and self._progress_nesting > 0:
                 self._parse_progress_line(stripped)
 
         self._log_queue.put(text)
@@ -1079,7 +1148,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             speed = m.group(2)
             eta = m.group(3)
             self._op_card_pct = pct
-            self._op_card_bar.set_fraction(pct)
             self._op_card_detail.set_label(f"{int(pct*100)}%  ·  {speed}  ·  осталось {eta}")
             return
         # borg create --progress: "2.34 GB O 1.23 GB C 456.78 MB D 78.9% N ..."
@@ -1087,9 +1155,15 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         if m2:
             pct = float(m2.group(1)) / 100.0
             self._op_card_pct = pct
-            self._op_card_bar.set_fraction(max(0.0, min(1.0, pct)))
-            elapsed = int(time.monotonic() - self._progress_start_time)
-            self._op_card_detail.set_label(f"{int(pct*100)}%  ·  {elapsed} с")
+            eta_hint = ""
+            meta = re.search(
+                r"\b(?:ETA|осталось|remaining)\s*[:.]?\s*([^\n\r]{1,48})",
+                line,
+                re.IGNORECASE,
+            )
+            if meta:
+                eta_hint = f"  ·  осталось ~{meta.group(1).strip()}"
+            self._op_card_detail.set_label(f"{int(pct*100)}%{eta_hint}")
             return
         # btrfs send / generic: just show last log line in detail
         if line and len(line) < 80:

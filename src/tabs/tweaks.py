@@ -15,25 +15,52 @@ from gi.repository import Adw, Gdk, GLib, Gtk
 
 from core import backend
 from ui.common import load_module
-from ui.widgets import make_button, make_icon, make_scrolled_page
+from ui.widgets import make_button, make_icon, make_scrolled_page, scroll_child_into_view
 from ui.rows import SettingRow, TaskRow
 
 _ANANICY_RULES_REPO = "https://github.com/CachyOS/ananicy-rules"
 _ANANICY_RULES_DIR  = "/etc/ananicy.d/cachyos-rules"
 
-_warning_css = Gtk.CssProvider()
-_warning_css.load_from_data(b"""
-    .ab-tweak-warning {
-        background-color: alpha(@error_color, 0.12);
-        border: 1px solid alpha(@error_color, 0.35);
-        border-radius: 12px;
-        padding: 12px 16px;
-        margin: 0 4px;
+# Pill badge (Sisyphus-only packages) + red emphasis for irreversible migration warning row.
+_tweak_page_css = Gtk.CssProvider()
+_tweak_page_css.load_from_data(b"""
+    .ab-tweak-sisyphus-badge {
+        font-size: 0.72em;
+        font-weight: 600;
+        min-height: 0;
+        padding: 2px 8px;
+        border-radius: 999px;
+        color: @error_color;
+        background-color: alpha(@error_color, 0.18);
     }
-    .ab-tweak-warning label { color: @error_color; }
-    .ab-tweak-warning image { color: @error_color; }
+    .ab-tweak-irreversible-row image,
+    .ab-tweak-irreversible-row label {
+        color: @error_color;
+    }
+    .ab-tweak-irreversible-row .dim-label {
+        color: @error_color;
+        opacity: 1;
+    }
+    .ab-tweak-branch-badge {
+        font-size: 0.72em;
+        font-weight: 600;
+        min-height: 0;
+        padding: 2px 8px;
+        border-radius: 999px;
+    }
+    .ab-tweak-branch-badge-stable {
+        color: @success_color;
+        background-color: alpha(@success_color, 0.15);
+    }
+    .ab-tweak-branch-badge-rolling {
+        color: @warning_color;
+        background-color: alpha(@warning_color, 0.20);
+    }
+    .ab-tweak-branch-badge-unknown {
+        color: alpha(currentColor, 0.55);
+        background-color: alpha(currentColor, 0.08);
+    }
 """)
-
 
 def _is_sisyphus():
     for path in ["/etc/altlinux-release", "/etc/os-release"]:
@@ -72,37 +99,85 @@ class TweaksPage(Gtk.Box):
         self._log = log_fn
 
         Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), _warning_css,
+            Gdk.Display.get_default(), _tweak_page_css,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
         scroll, body = make_scrolled_page()
         self._body = body
         self.append(scroll)
+        self._search_focus_widgets: dict[str, Gtk.Widget] = {}
 
         self._build_sisyphus_group(body)
         self._build_scx_ui(body)
         self._build_ananicy_group(body)
         self._build_fixes_group(body)
 
-    def _make_warning_box(self, text):
-        box = Gtk.Box(spacing=10)
-        box.add_css_class("ab-tweak-warning")
-        icon = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
-        icon.set_icon_size(Gtk.IconSize.NORMAL)
-        box.append(icon)
-        label = Gtk.Label(label=text)
-        label.set_wrap(True)
-        label.set_xalign(0.0)
-        label.set_hexpand(True)
-        box.append(label)
-        return box
+    def focus_row_by_id(self, row_id: str) -> bool:
+        w = self._search_focus_widgets.get(row_id)
+        if w is None:
+            return False
+        scroll = self.get_first_child()
+        if isinstance(scroll, Gtk.ScrolledWindow):
+            scroll_child_into_view(scroll, w)
+        GLib.idle_add(w.grab_focus)
+        return True
+
+    def _add_info_row(
+        self,
+        group: Adw.PreferencesGroup,
+        icon_name: str,
+        title: str,
+        subtitle: str,
+        *,
+        sisyphus_only_badge: bool = False,
+        sisyphus_only_tooltip: str = "",
+        error_emphasis: bool = False,
+    ) -> Adw.ActionRow:
+        row = Adw.ActionRow()
+        row.set_title(title)
+        row.set_subtitle(subtitle)
+        row.set_activatable(False)
+        if error_emphasis:
+            row.add_css_class("ab-tweak-irreversible-row")
+        icon = Gtk.Image.new_from_icon_name(icon_name)
+        icon.set_valign(Gtk.Align.CENTER)
+        row.add_prefix(icon)
+        if sisyphus_only_badge:
+            badge = Gtk.Label(label="Только Sisyphus")
+            badge.add_css_class("ab-tweak-sisyphus-badge")
+            badge.set_valign(Gtk.Align.CENTER)
+            if sisyphus_only_tooltip:
+                badge.set_tooltip_text(sisyphus_only_tooltip)
+            row.add_suffix(badge)
+        group.add(row)
+        return row
+
+    def _make_branch_badge_label(self, branch: str) -> Gtk.Widget:
+        if branch == "sisyphus":
+            text = "Текущая ветка: Sisyphus"
+            variant = "ab-tweak-branch-badge-rolling"
+        elif re.match(r"^p\d+$", branch):
+            text = f"Текущая ветка: {branch}"
+            variant = "ab-tweak-branch-badge-stable"
+        elif branch == "unknown":
+            text = "Текущая ветка: неизвестно"
+            variant = "ab-tweak-branch-badge-unknown"
+        else:
+            text = f"Текущая ветка: {branch}"
+            variant = "ab-tweak-branch-badge-unknown"
+        lbl = Gtk.Label(label=text)
+        lbl.add_css_class("ab-tweak-branch-badge")
+        lbl.add_css_class(variant)
+        lbl.set_valign(Gtk.Align.CENTER)
+        return lbl
 
     def _build_sisyphus_group(self, body):
         self._branch = _detect_branch()
 
         group = Adw.PreferencesGroup()
         group.set_title("Переход на Sisyphus")
+        group.set_header_suffix(self._make_branch_badge_label(self._branch))
         body.append(group)
 
         if self._branch == "sisyphus":
@@ -113,13 +188,14 @@ class TweaksPage(Gtk.Box):
             group.add(row)
             return
 
-        group.set_description(f"Текущая ветка: {self._branch}")
-
-        self._warn1 = self._make_warning_box(
-            "Переход необратим. Sisyphus — rolling release, пакеты обновляются каждый день. "
-            "Откат к стабильной ветке без переустановки системы невозможен."
+        self._add_info_row(
+            group,
+            "dialog-warning-symbolic",
+            "Переход необратим",
+            "Sisyphus — rolling release, пакеты обновляются каждый день. "
+            "Откат к стабильной ветке без переустановки системы невозможен.",
+            error_emphasis=True,
         )
-        body.append(self._warn1)
 
         check_row = Adw.ActionRow()
         check_row.set_title("Анализ обновлений")
@@ -136,21 +212,24 @@ class TweaksPage(Gtk.Box):
         self._result_row.set_visible(False)
         group.add(self._result_row)
 
-        self._warn2 = self._make_warning_box(
-            "Это изменит всю систему. После обновления все пакеты перейдут на rolling release версии. "
+        self._row_sisy_warn2 = Adw.ActionRow()
+        self._row_sisy_warn2.set_title("Это изменит всю систему")
+        self._row_sisy_warn2.set_subtitle(
+            "После обновления все пакеты перейдут на rolling release версии. "
             "Убедись, что сделал резервную копию важных данных."
         )
-        self._warn2.set_visible(False)
-        body.append(self._warn2)
-
-        self._upgrade_group = Adw.PreferencesGroup()
-        self._upgrade_group.set_visible(False)
-        body.append(self._upgrade_group)
+        self._row_sisy_warn2.set_activatable(False)
+        w2 = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
+        w2.set_valign(Gtk.Align.CENTER)
+        self._row_sisy_warn2.add_prefix(w2)
+        self._row_sisy_warn2.set_visible(False)
+        group.add(self._row_sisy_warn2)
 
         upgrade_row = Adw.ActionRow()
         upgrade_row.set_title("Обновление до Sisyphus")
         upgrade_row.set_subtitle("apt-get dist-upgrade по репозиторию Sisyphus")
         upgrade_row.add_prefix(make_icon("system-software-update-symbolic"))
+        upgrade_row.set_visible(False)
 
         btn_box = Gtk.Box(spacing=8)
         btn_box.set_valign(Gtk.Align.CENTER)
@@ -165,7 +244,8 @@ class TweaksPage(Gtk.Box):
         btn_box.append(self._btn_upgrade)
 
         upgrade_row.add_suffix(btn_box)
-        self._upgrade_group.add(upgrade_row)
+        group.add(upgrade_row)
+        self._upgrade_row = upgrade_row
 
     def _on_check_clicked(self, btn):
         btn.set_sensitive(False)
@@ -232,8 +312,8 @@ class TweaksPage(Gtk.Box):
         self._result_row.set_title(f"{pkg_count} пакетов к обновлению{size_str}")
         self._result_row.set_subtitle("Репозитории переключены на Sisyphus. Подтверди или откати.")
         self._result_row.set_visible(True)
-        self._warn2.set_visible(True)
-        self._upgrade_group.set_visible(True)
+        self._row_sisy_warn2.set_visible(True)
+        self._upgrade_row.set_visible(True)
         self._btn_check.set_label("Обновлено")
         self._log(f"✔  Анализ завершён: {pkg_count} пакетов{size_str}\n")
         win = self.get_root()
@@ -255,8 +335,8 @@ class TweaksPage(Gtk.Box):
 
         def _on_done(ok):
             self._log("✔  Репозитории откачены\n" if ok else "✘  Ошибка отката\n")
-            self._upgrade_group.set_visible(False)
-            self._warn2.set_visible(False)
+            self._upgrade_row.set_visible(False)
+            self._row_sisy_warn2.set_visible(False)
             self._result_row.set_visible(False)
             self._btn_check.set_label("Проверить")
             self._btn_check.set_sensitive(True)
@@ -293,11 +373,17 @@ class TweaksPage(Gtk.Box):
         is_sis = _is_sisyphus()
         group = Adw.PreferencesGroup()
         group.set_title("Планировщик CPU (SCX) — Экспериментально")
-        desc = "Экспериментальные планировщики sched-ext (LAVD) для игровых задач."
-        if not is_sis:
-            desc += "\n⚠️ Пакет scx-scheds доступен только в репозитории Sisyphus."
-        group.set_description(desc)
         body.append(group)
+
+        scx_intro = self._add_info_row(
+            group,
+            "dialog-information-symbolic",
+            "scx-scheds",
+            "Экспериментальные планировщики sched-ext (LAVD) для игровых задач.",
+            sisyphus_only_badge=not is_sis,
+            sisyphus_only_tooltip="Пакет scx-scheds доступен только в репозитории Sisyphus.",
+        )
+        self._search_focus_widgets["scx"] = scx_intro
 
         self._row_lavd_std = SettingRow(
             "utilities-terminal-symbolic", "LAVD (Performance)",
@@ -435,15 +521,19 @@ WantedBy=multi-user.target
         is_sis = _is_sisyphus()
         group = Adw.PreferencesGroup()
         group.set_title("Приоритеты процессов")
-        desc = (
-            "ananicy-cpp автоматически управляет приоритетами процессов по правилам. "
-            "Правила CachyOS охватывают браузеры, Steam и игровые процессы — "
-            "системный планировщик получает подсказки о важности каждого процесса."
-        )
-        if not is_sis:
-            desc += "\n⚠️ ananicy-cpp доступен только в репозитории Sisyphus."
-        group.set_description(desc)
         body.append(group)
+
+        an_intro = self._add_info_row(
+            group,
+            "dialog-information-symbolic",
+            "ananicy-cpp",
+            "Автоматически управляет приоритетами процессов по правилам. "
+            "Правила CachyOS охватывают браузеры, Steam и игровые процессы — "
+            "системный планировщик получает подсказки о важности каждого процесса.",
+            sisyphus_only_badge=not is_sis,
+            sisyphus_only_tooltip="Пакет ananicy-cpp доступен только в репозитории Sisyphus.",
+        )
+        self._search_focus_widgets["ananicy"] = an_intro
 
         self._row_ananicy_install = SettingRow(
             "system-run-symbolic",

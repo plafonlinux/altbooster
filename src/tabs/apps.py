@@ -20,6 +20,7 @@ from core import config
 from ui.widgets import (
     make_button, make_scrolled_page,
     make_status_icon, set_status_ok, set_status_error, clear_status, make_suffix_box,
+    scroll_child_into_view,
 )
 from ui.common import load_module, _MODULES_DIR
 from ui.dialogs import AppEditDialog
@@ -33,12 +34,14 @@ class AppsPage(Gtk.Box):
         self._log = log_fn
         self._rows = []
         self._group_checkboxes = []
+        self._app_row_by_id: dict[str, AppRow] = {}
         self._busy = False
         self._system_json_path = _MODULES_DIR / "apps.json"
         self._json_path = config.CONFIG_DIR / "apps.json"
         self._data = {}
 
         scroll, self._body = make_scrolled_page()
+        self._scroll = scroll
         self.append(scroll)
 
         self._btns_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=32)
@@ -496,6 +499,7 @@ class AppsPage(Gtk.Box):
             child = nxt
         self._rows.clear()
         self._group_checkboxes.clear()
+        self._app_row_by_id.clear()
         self._pkg_search_groups = []
 
     def _load_and_build(self):
@@ -630,6 +634,7 @@ class AppsPage(Gtk.Box):
             app_n = dict(app, sources=sources)
             row = AppRow(app_n, self._log, self._refresh_btn_all)
             self._rows.append(row)
+            self._app_row_by_id[app_n["id"]] = row
             group_rows.append(row)
             exp.add_row(row)
 
@@ -650,6 +655,19 @@ class AppsPage(Gtk.Box):
             del_btn.add_css_class("circular")
             del_btn.connect("clicked", lambda _b, a=app, g=gid: self._on_delete(a, g))
             row.add_suffix(del_btn)
+
+    def focus_app_by_id(self, app_id: str) -> bool:
+        row = self._app_row_by_id.get(app_id)
+        if row is None:
+            return False
+        w = row
+        while w is not None:
+            if isinstance(w, Adw.ExpanderRow):
+                w.set_expanded(True)
+            w = w.get_parent()
+        scroll_child_into_view(self._scroll, row)
+        row.grab_focus()
+        return True
 
     def _add_error_widgets(self):
         group = Adw.PreferencesGroup()

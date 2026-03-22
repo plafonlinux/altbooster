@@ -41,10 +41,8 @@ altbooster/
 │   │   ├── amd.py / amd_actions.py
 │   │   ├── terminal.py / terminal_actions.py
 │   │   └── timesync/          # Вкладка «Резервная копия» (BorgBackup)
-│   │       ├── page.py        # Главная страница вкладки
-│   │       ├── schedule.py    # Расписание (systemd-таймеры)
-│   │       ├── snapshots.py   # Управление снэпшотами
-│   │       └── restore.py     # Восстановление из архива
+│   │       ├── page.py        # Главная страница; логика Borg/Btrfs — в core/borg.py, core/btrfs.py
+│   │       ├── mirror.py, manual.py, restore.py, pickers.py, summary.py
 │   └── ui/                    # Переиспользуемые UI-компоненты
 │       ├── window.py          # Главное окно приложения
 │       ├── dynamic_page.py    # Движок, генерирующий UI на основе JSON

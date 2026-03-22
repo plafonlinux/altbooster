@@ -7,7 +7,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Adw, Gdk, GLib, Gtk
+from gi.repository import Adw, Gdk, GLib, Gtk, Pango
 
 _badge_css = Gtk.CssProvider()
 _badge_css.load_from_data(b"""
@@ -39,7 +39,24 @@ from ui.widgets import (
 
 class SettingRow(Adw.ActionRow):
 
-    def __init__(self, icon, title, subtitle, btn_label, on_activate, check_fn, state_key, done_label="Активировано", on_undo=None, undo_label="Отменить", undo_icon="edit-undo-symbolic", help_text=None):
+    def __init__(
+        self,
+        icon,
+        title,
+        subtitle,
+        btn_label,
+        on_activate,
+        check_fn,
+        state_key,
+        done_label="Активировано",
+        on_undo=None,
+        undo_label="Отменить",
+        undo_icon="edit-undo-symbolic",
+        help_text=None,
+        *,
+        flush_suffix_end=False,
+        suffix_btn_before_status=False,
+    ):
         super().__init__()
         self.set_title(title)
         self.set_subtitle(subtitle)
@@ -53,7 +70,8 @@ class SettingRow(Adw.ActionRow):
         self._undo_icon = undo_icon
         self._is_active = False
 
-        self.add_prefix(make_icon(icon))
+        if icon is not None:
+            self.add_prefix(make_icon(icon))
         self._status = make_status_icon()
         self._btn = make_button(btn_label)
         self._btn.connect("clicked", self._on_btn_clicked)
@@ -70,10 +88,23 @@ class SettingRow(Adw.ActionRow):
             help_btn.set_tooltip_text(help_text)
             suffix_box.append(help_btn)
 
-        suffix_box.append(self._status)
-        suffix_box.append(self._btn)
+        if suffix_btn_before_status:
+            suffix_box.append(self._btn)
+            suffix_box.append(self._status)
+        else:
+            suffix_box.append(self._status)
+            suffix_box.append(self._btn)
         self._suffix_box = suffix_box
-        self.add_suffix(suffix_box)
+        if flush_suffix_end:
+            trail = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+            trail.set_valign(Gtk.Align.CENTER)
+            spacer = Gtk.Box()
+            spacer.set_hexpand(True)
+            trail.append(spacer)
+            trail.append(suffix_box)
+            self.add_suffix(trail)
+        else:
+            self.add_suffix(suffix_box)
 
         if config.state_get(state_key) is True:
             self._set_ui(True)
@@ -166,6 +197,8 @@ class SettingRow(Adw.ActionRow):
             self._set_ui(True)
 
 class AppRow(Adw.ActionRow):
+    """Вкладка «Приложения»: одинаковая ширина кнопки источника и «Установить»."""
+    _SUFFIX_ACTION_WIDTH = 120
 
     def __init__(self, app, log_fn, on_change_cb):
         super().__init__()
@@ -203,7 +236,7 @@ class AppRow(Adw.ActionRow):
         _prefix_box.append(self._status)
         self.add_prefix(_prefix_box)
 
-        self._btn = make_button("Установить", width=120)
+        self._btn = make_button("Установить", width=self._SUFFIX_ACTION_WIDTH)
         self._btn.connect("clicked", self._on_install)
         self._btn.set_sensitive(False)
 
@@ -222,10 +255,11 @@ class AppRow(Adw.ActionRow):
         self._source_label = Gtk.Label()
         self._source_label.add_css_class("ab-source-badge")
         self._source_label.set_valign(Gtk.Align.CENTER)
-        self._source_label.set_halign(Gtk.Align.START)
+        self._source_label.set_halign(Gtk.Align.CENTER)
+        self._source_label.set_ellipsize(Pango.EllipsizeMode.END)
         self._source_label.set_visible(False)
         _badge_wrapper = Gtk.Box()
-        _badge_wrapper.set_size_request(72, -1)
+        _badge_wrapper.set_size_request(self._SUFFIX_ACTION_WIDTH, -1)
         _badge_wrapper.set_valign(Gtk.Align.CENTER)
         _badge_wrapper.append(self._source_label)
 
@@ -309,6 +343,7 @@ class AppRow(Adw.ActionRow):
         btn.add_css_class("flat")
         btn.add_css_class("ab-source-badge")
         btn.set_valign(Gtk.Align.CENTER)
+        btn.set_size_request(AppRow._SUFFIX_ACTION_WIDTH, -1)
         btn.set_tooltip_text("Выбрать источник установки")
         self._sync_src_menu_label(btn)
         return btn

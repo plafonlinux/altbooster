@@ -67,3 +67,13 @@ def make_scrolled_page() -> tuple[Gtk.ScrolledWindow, Gtk.Box]:
     clamp.set_child(body)
     scroll.set_child(clamp)
     return scroll, body
+
+
+def scroll_child_into_view(scrolled: Gtk.ScrolledWindow, child: Gtk.Widget) -> None:
+    """Прокрутить так, чтобы виджет оказался в зоне видимости (GTK ≥ 4.12)."""
+    if scrolled is None or child is None:
+        return
+    try:
+        scrolled.scroll_child(child, Gtk.ScrollChildScrollFlags.FOCUS)
+    except (AttributeError, TypeError):
+        child.grab_focus()

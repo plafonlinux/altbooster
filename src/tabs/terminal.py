@@ -13,7 +13,7 @@ from gi.repository import Adw, GLib, Gtk
 
 from core import backend
 from core import config
-from ui.widgets import make_scrolled_page
+from ui.widgets import make_scrolled_page, scroll_child_into_view
 from ui.rows import SettingRow
 
 
@@ -200,7 +200,33 @@ class TerminalPage(Gtk.Box):
         self._build_zsh_group(body)
         self._build_fastfetch_group(body)
         self._build_aliases_group(body)
+        self._register_terminal_search_rows()
 
+    def _register_terminal_search_rows(self):
+        self._terminal_row_by_id = {
+            "ptyxis_install": self._row_ptyxis_install,
+            "ptyxis_default": self._row_ptyxis_default,
+            "shortcut_1": self._row_shortcut_1,
+            "shortcut_2": self._row_shortcut_2,
+            "zsh_install": self._row_zsh_install,
+            "zplug_install": self._row_zplug_install,
+            "zsh_default": self._row_zsh_default,
+            "fastfetch_install": self._row_fastfetch_install,
+            "firacode_install": self._row_font_install,
+            "font_apply": self._row_font_apply,
+            "ffcfg_install": self._row_ff_config,
+            "aliases_add": self._row_aliases,
+        }
+
+    def focus_row_by_id(self, row_id: str) -> bool:
+        w = self._terminal_row_by_id.get(row_id)
+        if w is None:
+            return False
+        scroll = self.get_first_child()
+        if isinstance(scroll, Gtk.ScrolledWindow):
+            scroll_child_into_view(scroll, w)
+        GLib.idle_add(w.grab_focus)
+        return True
 
     def _build_ptyxis_group(self, body):
         group = Adw.PreferencesGroup()

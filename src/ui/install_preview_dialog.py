@@ -127,6 +127,9 @@ class InstallPreviewDialog(Adw.Window):
             preview.removed_packages, preview.flatpak_updates,
             preview.dry_run_failed,
         ])
+        # Скрипты (bash -c …) не дают списка пакетов в превью, но установку выполнять нужно.
+        if preview.source_type == "script":
+            no_active = False
         if no_active:
             self._confirm_btn.set_label("Закрыть")
             self._confirm_btn.remove_css_class("suggested-action")

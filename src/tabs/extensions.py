@@ -25,6 +25,7 @@ _SHELLVER_BACKUP = CONFIG_DIR / "ext_shellver_backup.json"
 from ui.widgets import (
     make_button, make_scrolled_page, make_icon,
     make_status_icon, set_status_ok, set_status_error, clear_status, make_suffix_box,
+    scroll_child_into_view,
 )
 
 
@@ -349,8 +350,10 @@ class ExtensionsPage(Gtk.Box):
     def __init__(self, log_fn):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._log = log_fn
+        self._ext_row_by_uuid: dict[str, Adw.ActionRow] = {}
 
         scroll, self._body = make_scrolled_page()
+        self._scroll = scroll
         self.append(scroll)
 
         self._build_search_group()
@@ -714,7 +717,8 @@ class ExtensionsPage(Gtk.Box):
                 ext.get("name", "Без названия"),
                 ext.get("description", ""),
                 str(ext.get("pk", "")),
-                installed=is_installed
+                installed=is_installed,
+                register_uuid=False,
             )
             group.add(row)
 
@@ -745,6 +749,7 @@ class ExtensionsPage(Gtk.Box):
         GLib.idle_add(self._populate_installed, user_exts, system_exts, enabled)
 
     def _populate_installed(self, user_exts, system_exts, enabled):
+        self._ext_row_by_uuid.clear()
         self._body.remove(self._installed_group)
         self._installed_group = self._make_installed_group_widget()
         self._body.append(self._installed_group)
@@ -791,7 +796,9 @@ class ExtensionsPage(Gtk.Box):
                 exp.add_row(self._make_installed_row(uuid, name, display_desc, uuid in enabled, is_user=False))
             self._installed_group.add(exp)
 
-    def _make_installed_row(self, uuid: str, name: str, desc: str, enabled: bool, is_user: bool = False) -> Adw.ActionRow:
+    def _make_installed_row(
+        self, uuid: str, name: str, desc: str, enabled: bool, is_user: bool = False, *, register_uuid: bool = True
+    ) -> Adw.ActionRow:
         row = Adw.ActionRow()
         row.set_title(name)
         row.set_subtitle(uuid)
@@ -836,9 +843,13 @@ class ExtensionsPage(Gtk.Box):
         del_btn.connect("clicked", lambda _, u=uuid, usr=is_user: self._on_delete_ext(u, usr))
 
         row.add_suffix(make_suffix_box(info_btn, prefs_btn, switch, del_btn))
+        if register_uuid:
+            self._ext_row_by_uuid[uuid] = row
         return row
 
-    def _make_recommended_row(self, uuid, name, desc, install_id=None, installed=False):
+    def _make_recommended_row(
+        self, uuid, name, desc, install_id=None, installed=False, *, register_uuid: bool = True
+    ):
         row = Adw.ActionRow()
         row.set_title(name)
         row.set_subtitle(uuid)
@@ -857,7 +868,22 @@ class ExtensionsPage(Gtk.Box):
             btn = make_button("Установить")
             btn.connect("clicked", lambda _, u=uuid, b=btn, s=status, iid=install_id: self._on_install_ext(u, b, s, iid))
             row.add_suffix(make_suffix_box(info_btn, status, btn))
+        if register_uuid:
+            self._ext_row_by_uuid[uuid] = row
         return row
+
+    def focus_extension_by_uuid(self, uuid: str) -> bool:
+        row = self._ext_row_by_uuid.get(uuid)
+        if row is None:
+            return False
+        w = row
+        while w is not None:
+            if isinstance(w, Adw.ExpanderRow):
+                w.set_expanded(True)
+            w = w.get_parent()
+        scroll_child_into_view(self._scroll, row)
+        row.grab_focus()
+        return True
 
     def _on_install_ext(self, uuid, btn, status, install_id=None):
         btn.set_sensitive(False)

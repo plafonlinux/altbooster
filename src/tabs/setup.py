@@ -11,12 +11,12 @@ from pathlib import Path
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, Gtk
+from gi.repository import Adw, GLib, Gtk
 
 from core import backend
 from core import config
 from ui.install_preview_dialog import InstallPreviewDialog
-from ui.widgets import make_button, make_icon, make_scrolled_page
+from ui.widgets import make_button, make_icon, make_scrolled_page, scroll_child_into_view
 from ui.rows import SettingRow
 
 _SOURCES_DIR = Path("/etc/apt/sources.list.d")
@@ -57,22 +57,13 @@ class SetupPage(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._log = log_fn
 
-        _css = Gtk.CssProvider()
-        _css.load_from_data(b"""
-            .ab-icon-green { color: @success_color; }
-            .ab-icon-red   { color: @error_color;   }
-        """)
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), _css,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-        )
-
         scroll, body = make_scrolled_page()
         self._body = body
         self.append(scroll)
         self._build_system_group(body)
         self._build_filemanager_group(body)
         self._build_keyboard_group(body)
+        self._register_setup_search_targets()
 
     def _is_sisyphus(self):
         for path in ["/etc/altlinux-release", "/etc/os-release"]:
@@ -539,7 +530,7 @@ class SetupPage(Gtk.Box):
             
     def _build_filemanager_group(self, body):
         group = Adw.PreferencesGroup()
-        group.set_title("Файловый менеджер Nautilus")
+        group.set_title("Файловый менеджер Nautilus и иконки")
         body.append(group)
         
         def _check_nautilus():
@@ -819,6 +810,35 @@ class SetupPage(Gtk.Box):
         group.add(self._r_ctrl)
         threading.Thread(target=self._detect_kbd_mode, daemon=True).start()
 
+    def _register_setup_search_targets(self):
+        self._setup_search_targets = {
+            "epm_install": self._r_epm_install,
+            "epm_update": self._r_epm,
+            "sudo": self._r_sudo,
+            "gnome_sw": self._r_gnome_sw,
+            "trim": self._r_trim,
+            "journal": self._r_journal,
+            "scale": self._r_scale,
+            "papirus": self._papirus_row,
+            "nautilus": self._r_naut,
+            "vm_dirty": self._r_dirty,
+            "nautilus_admin": self._r_naut_admin,
+            "sushi": self._r_sushi,
+            "f3d": self._r_f3d,
+            "kbd_altshift": self._r_alt,
+            "kbd_caps": self._r_caps,
+            "kbd_ctrlshift": self._r_ctrl,
+        }
+
+    def focus_search_target(self, key: str) -> bool:
+        w = self._setup_search_targets.get(key)
+        if w is None:
+            return False
+        scroll = self.get_first_child()
+        if isinstance(scroll, Gtk.ScrolledWindow):
+            scroll_child_into_view(scroll, w)
+        GLib.idle_add(w.grab_focus)
+        return True
 
     def _on_sudo(self, row):
         row.set_working()

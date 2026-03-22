@@ -1198,6 +1198,24 @@
           }
         },
         {
+          "id": "xray",
+          "label": "Xray (xray-core)",
+          "desc": "Ядро Project X (форк v2ray): XTLS, REALITY — используется с v2rayN, Nekoray и др.",
+          "source": {
+            "label": "EPM",
+            "cmd": [
+              "epm",
+              "-i",
+              "-y",
+              "xray-core"
+            ],
+            "check": [
+              "rpm",
+              "xray-core"
+            ]
+          }
+        },
+        {
           "id": "v2rayn",
           "label": "v2rayN",
           "desc": "Графический клиент v2ray/xray",
@@ -1215,9 +1233,43 @@
           }
         },
         {
+          "id": "nekoray",
+          "label": "Nekoray",
+          "desc": "Qt-клиент для Xray и sing-box: маршруты, подписки, TUN",
+          "source": {
+            "label": "EPM Play",
+            "cmd": [
+              "epm",
+              "play",
+              "nekoray"
+            ],
+            "check": [
+              "rpm",
+              "nekoray"
+            ]
+          }
+        },
+        {
+          "id": "hiddify",
+          "label": "Hiddify",
+          "desc": "Прокси-клиент на ядре Sing-box (VLESS, Reality и др.)",
+          "source": {
+            "label": "EPM Play",
+            "cmd": [
+              "epm",
+              "play",
+              "hiddify"
+            ],
+            "check": [
+              "rpm",
+              "hiddify"
+            ]
+          }
+        },
+        {
           "id": "amneziavpn",
           "label": "Amnezia VPN",
-          "desc": "VPN с защитой от DPI — последняя версия с GitHub",
+          "desc": "AmneziaVPN из исходников: Premium, Free (ограниченный список сайтов) и свой сервер — AppImage с GitHub",
           "source": {
             "label": "GitHub",
             "cmd": [

@@ -52,6 +52,7 @@ BUILTIN_REGISTRY: dict[str, Callable] = {
 from ui.widgets import (
     make_icon, make_button, make_status_icon,
     set_status_ok, set_status_error, clear_status, make_suffix_box,
+    scroll_child_into_view,
 )
 
 
@@ -380,6 +381,7 @@ class DynamicPage(Gtk.Box):
         self.log = log_fn
         self._page_data = page_data
         self._rows_with_checks: list[Adw.ActionRow] = []
+        self._rows_by_id: dict[str, Adw.ActionRow] = {}
         self._btn_size_group = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         self._factory = RowFactory(self)
         self._poll_running = False
@@ -407,6 +409,16 @@ class DynamicPage(Gtk.Box):
 
         threading.Thread(target=self._poll_checks, daemon=True).start()
 
+    def focus_row_by_id(self, row_id: str) -> bool:
+        row = self._rows_by_id.get(row_id)
+        if row is None:
+            return False
+        scroll = self.get_first_child()
+        if isinstance(scroll, Gtk.ScrolledWindow):
+            scroll_child_into_view(scroll, row)
+        GLib.idle_add(row.grab_focus)
+        return True
+
     def _build(self, body: Gtk.Box) -> None:
         for group_data in self._page_data.get("groups", []):
             if "requires" in group_data and shutil.which(group_data["requires"]) is None:
@@ -423,6 +435,9 @@ class DynamicPage(Gtk.Box):
                     continue
                 row = self._factory.build(row_data)
                 group.add(row)
+                rid = row_data.get("id")
+                if rid:
+                    self._rows_by_id[str(rid)] = row
                 if hasattr(row, "_dp_check"):
                     self._rows_with_checks.append(row)
 

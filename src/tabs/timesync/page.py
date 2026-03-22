@@ -25,13 +25,6 @@ from .summary import BorgBackupSummaryDialog
 from .mirror import MirrorPage
 from .manual import build_terminal_page
 
-_INTERVALS = [
-    (1,   "Каждый час"),
-    (6,   "Каждые 6 часов"),
-    (24,  "Раз в сутки"),
-    (168, "Раз в неделю"),
-]
-
 _BTRFS_INTERVALS = [
     (1, "Каждый час"),
     (6, "Каждые 6 часов"),
@@ -430,8 +423,9 @@ class BorgPage(Gtk.Box):
         self._repo_group.set_title("Куда сохранять" if simple else "Расположение")
         self._row_repo_path.set_title("Папка для резервных копий" if simple else "Путь к хранилищу")
         self._row_passphrase.set_visible(True)
-        self._ssh_section.set_visible(not simple)
         slot.append(self._repo_group)
+        # SSH / Google Drive — только по типу назначения, не «всегда на вкладке Borg»
+        self._on_dest_type_changed(self._dd_dest_type, None)
 
     def _tm_on_delete_archives(self):
         repo_path = config.state_get("borg_repo_path", "") or ""
@@ -988,8 +982,6 @@ class BorgPage(Gtk.Box):
         self._row_passphrase.connect("apply", lambda _: self._save_repo_settings())
         self._repo_group.add(self._row_passphrase)
 
-        self._ssh_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-
         self._row_pubkey = Adw.ActionRow()
         self._row_pubkey.set_title("Публичный SSH-ключ")
         self._row_pubkey.set_subtitle("Ключ не создан")
@@ -1007,20 +999,18 @@ class BorgPage(Gtk.Box):
         self._btn_gen_key.set_valign(Gtk.Align.CENTER)
         self._btn_gen_key.connect("clicked", self._on_gen_key)
         self._row_pubkey.add_suffix(self._btn_gen_key)
-        self._ssh_section.append(self._row_pubkey)
+        self._repo_group.add(self._row_pubkey)
 
-        row_hint = Adw.ActionRow()
-        row_hint.set_title("Добавьте ключ на сервер")
-        row_hint.set_subtitle("~/.ssh/authorized_keys на удалённом хосте")
-        row_hint.add_prefix(make_icon("dialog-information-symbolic"))
-        self._ssh_section.append(row_hint)
+        self._row_ssh_hint = Adw.ActionRow()
+        self._row_ssh_hint.set_title("Добавьте ключ на сервер")
+        self._row_ssh_hint.set_subtitle("~/.ssh/authorized_keys на удалённом хосте")
+        self._row_ssh_hint.add_prefix(make_icon("dialog-information-symbolic"))
+        self._repo_group.add(self._row_ssh_hint)
 
-        self._gd_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-
-        gd_row = Adw.ActionRow()
-        gd_row.set_title("Google Drive через GNOME Аккаунты")
-        gd_row.set_subtitle("Подключите аккаунт в настройках GNOME Online Accounts")
-        gd_row.add_prefix(make_icon("user-home-symbolic"))
+        self._gd_row = Adw.ActionRow()
+        self._gd_row.set_title("Google Drive через GNOME Аккаунты")
+        self._gd_row.set_subtitle("Подключите аккаунт в настройках GNOME Online Accounts")
+        self._gd_row.add_prefix(make_icon("user-home-symbolic"))
         self._btn_detect_gd = Gtk.Button(label="Определить")
         self._btn_detect_gd.add_css_class("pill")
         self._btn_detect_gd.set_valign(Gtk.Align.CENTER)
@@ -1030,17 +1020,15 @@ class BorgPage(Gtk.Box):
         self._btn_open_goa.add_css_class("pill")
         self._btn_open_goa.set_valign(Gtk.Align.CENTER)
         self._btn_open_goa.connect("clicked", lambda _: self._open_goa())
-        gd_row.add_suffix(self._btn_open_goa)
-        gd_row.add_suffix(self._btn_detect_gd)
-        self._gd_section.append(gd_row)
+        self._gd_row.add_suffix(self._btn_open_goa)
+        self._gd_row.add_suffix(self._btn_detect_gd)
+        self._repo_group.add(self._gd_row)
 
         self._btn_init_repo = make_button("Инициализировать хранилище", width=200)
         self._btn_init_repo.set_halign(Gtk.Align.CENTER)
         self._btn_init_repo.set_margin_top(16)
         self._btn_init_repo.connect("clicked", self._on_init_repo)
 
-        self._repo_group.add(self._ssh_section)
-        self._repo_group.add(self._gd_section)
         self._repo_group.add(self._btn_init_repo)
 
         pubkey = backend.borg_get_pubkey()
@@ -1666,8 +1654,9 @@ class BorgPage(Gtk.Box):
     def _on_dest_type_changed(self, widget, _):
         idx = self._dd_dest_type.get_selected()
         config.state_set("borg_dest_type", idx)
-        self._ssh_section.set_visible(idx == 1)
-        self._gd_section.set_visible(idx == 2)
+        self._row_pubkey.set_visible(idx == 1)
+        self._row_ssh_hint.set_visible(idx == 1)
+        self._gd_row.set_visible(idx == 2)
         pick_folder_visible = idx in (0, 2)
         for child in self._row_repo_path.observe_children():
             if hasattr(child, "get_icon_name") and child.get_icon_name() == "folder-open-symbolic":

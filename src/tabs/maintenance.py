@@ -14,7 +14,7 @@ from core import backend
 from core import config
 from ui.widgets import (
     make_button, make_scrolled_page, make_icon, make_status_icon,
-    set_status_ok, set_status_error, clear_status
+    set_status_ok, set_status_error, clear_status, scroll_child_into_view,
 )
 from ui.common import load_module
 from ui.rows import TaskRow
@@ -247,6 +247,7 @@ class FstabRow(Adw.ExpanderRow):
         tv_row.set_focusable(False)
         tv_row.set_child(scroll)
         self.add_row(tv_row)
+        self.set_expanded(True)
 
     def _apply(self):
         if self._running:
@@ -535,6 +536,7 @@ class MaintenancePage(Gtk.Box):
         self._log = log_fn
         self._rows = []
         self._busy = False
+        self._maint_search_targets: dict[str, Gtk.Widget] = {}
 
         scroll, body = make_scrolled_page()
         self.append(scroll)
@@ -581,13 +583,16 @@ class MaintenancePage(Gtk.Box):
         fstab_group = Adw.PreferencesGroup()
         fstab_group.set_title("Монтирование")
         body.append(fstab_group)
-        fstab_group.add(FstabRow(self._log))
+        self._fstab_row = FstabRow(self._log)
+        fstab_group.add(self._fstab_row)
+        self._maint_search_targets["fstab"] = self._fstab_row
 
         cache_group = Adw.PreferencesGroup()
         body.append(cache_group)
         self._cache_row = CacheTaskRow(self._log, self._update_progress)
         self._rows.append(self._cache_row)
         cache_group.add(self._cache_row)
+        self._maint_search_targets["cache"] = self._cache_row
 
         tasks_group = Adw.PreferencesGroup()
         tasks_group.set_title("Задачи обслуживания")
@@ -603,6 +608,17 @@ class MaintenancePage(Gtk.Box):
                 row.set_tooltip_text("Недоступно: не Btrfs")
             self._rows.append(row)
             tasks_group.add(row)
+            self._maint_search_targets[task["id"]] = row
+
+    def focus_search_target(self, key: str) -> bool:
+        w = self._maint_search_targets.get(key)
+        if w is None:
+            return False
+        scroll = self.get_first_child()
+        if isinstance(scroll, Gtk.ScrolledWindow):
+            scroll_child_into_view(scroll, w)
+        GLib.idle_add(w.grab_focus)
+        return True
 
     def set_sensitive_all(self, sensitive):
         self._btn_all.set_sensitive(sensitive)

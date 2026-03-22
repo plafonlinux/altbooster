@@ -4,6 +4,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from core import backend
 from core import config
 from ui.common import load_module
 from ui.rows import TaskRow, SettingRow
-from ui.widgets import make_icon, make_scrolled_page, make_suffix_box
+from ui.widgets import make_icon, make_scrolled_page, make_suffix_box, scroll_child_into_view
 
 
 @dataclass
@@ -205,14 +206,28 @@ class FlatpakPage(Gtk.Box):
         self._apps_group: Adw.PreferencesGroup | None = None
         self._refresh_btn: Gtk.Button | None = None
         self._update_all_btn: Gtk.Button | None = None
+        self._fp_section_rows: dict[str, Gtk.Widget] = {}
+        self._fp_app_rows: dict[str, Adw.ActionRow] = {}
+        self._last_flatpak_list_refresh_mono: float = 0.0
 
         scroll, self._body = make_scrolled_page()
+        self._scroll = scroll
         self.append(scroll)
 
         self._build_header_group()
         self._build_apps_group()
         self._build_manage_group()
 
+    def on_tab_visible(self):
+        """Перечитать список при открытии вкладки (изменения из терминала и т.п.)."""
+        self._refresh()
+
+    def on_window_is_active(self):
+        """Окно снова в фокусе на вкладке Flatpak — обновить список без лишнего спама."""
+        now = time.monotonic()
+        if now - self._last_flatpak_list_refresh_mono < 2.0:
+            return
+        self._refresh()
 
     def _build_header_group(self):
         group = Adw.PreferencesGroup()
@@ -251,6 +266,8 @@ class FlatpakPage(Gtk.Box):
 
 
     def _refresh(self):
+        self._last_flatpak_list_refresh_mono = time.monotonic()
+        self._fp_app_rows.clear()
         self._clear_apps_group()
         if self._refresh_btn:
             self._refresh_btn.set_sensitive(False)
@@ -288,8 +305,26 @@ class FlatpakPage(Gtk.Box):
             app.icon_path = icons.get(app.app_id)
         GLib.idle_add(self._populate_apps, apps)
 
+    def focus_search_target(self, key: str) -> bool:
+        row: Gtk.Widget | None = None
+        if key.startswith("app:"):
+            row = self._fp_app_rows.get(key[4:])
+        else:
+            row = self._fp_section_rows.get(key)
+        if row is None:
+            return False
+        w = row
+        while w is not None:
+            if isinstance(w, Adw.ExpanderRow):
+                w.set_expanded(True)
+            w = w.get_parent()
+        scroll_child_into_view(self._scroll, row)
+        row.grab_focus()
+        return True
+
     def _populate_apps(self, apps: list[FlatpakApp]):
         self._clear_apps_group()
+        self._fp_app_rows.clear()
         if self._refresh_btn:
             self._refresh_btn.set_sensitive(True)
         if self._update_all_btn:
@@ -313,7 +348,9 @@ class FlatpakPage(Gtk.Box):
             exp_u.set_subtitle(f"{len(user_apps)} прил.")
             exp_u.set_expanded(True)
             for app in user_apps:
-                exp_u.add_row(self._make_app_row(app))
+                r = self._make_app_row(app)
+                self._fp_app_rows[app.app_id] = r
+                exp_u.add_row(r)
             self._apps_group.add(exp_u)
 
             exp_s = Adw.ExpanderRow()
@@ -321,17 +358,24 @@ class FlatpakPage(Gtk.Box):
             exp_s.set_subtitle(f"{len(system_apps)} прил.")
             exp_s.set_expanded(True)
             for app in system_apps:
-                exp_s.add_row(self._make_app_row(app))
+                r = self._make_app_row(app)
+                self._fp_app_rows[app.app_id] = r
+                exp_s.add_row(r)
             self._apps_group.add(exp_s)
 
             for app in other_apps:
-                self._apps_group.add(self._make_app_row(app))
+                r = self._make_app_row(app)
+                self._fp_app_rows[app.app_id] = r
+                self._apps_group.add(r)
         else:
             for app in user_apps + system_apps + other_apps:
-                self._apps_group.add(self._make_app_row(app))
+                r = self._make_app_row(app)
+                self._fp_app_rows[app.app_id] = r
+                self._apps_group.add(r)
 
     def _show_unavailable_state(self):
         self._clear_apps_group()
+        self._fp_app_rows.clear()
         row = Adw.ActionRow()
         row.set_title("flatpak не установлен")
         row.set_subtitle("Установите пакет «flatpak» для управления Flatpak-приложениями")
@@ -344,6 +388,7 @@ class FlatpakPage(Gtk.Box):
 
     def _show_no_flathub_dialog(self):
         self._clear_apps_group()
+        self._fp_app_rows.clear()
         row = Adw.ActionRow()
         row.set_title("Flathub не подключён")
         row.set_subtitle("Добавьте репозиторий Flathub для установки и управления приложениями")
@@ -581,15 +626,19 @@ class FlatpakPage(Gtk.Box):
         mirror_row.set_selected(selected)
         mirror_row.connect("notify::selected", self._on_mirror_selected)
         group.add(mirror_row)
+        self._fp_section_rows["mirror"] = mirror_row
 
         flathub_row = SettingRow(
-            "application-x-addon-symbolic",
+            None,
             "Подключить Flathub",
             "Устанавливает flatpak и flathub",
             "Включить", self._on_flathub, backend.is_flathub_enabled,
             "setting_flathub", "Активировано", self._on_flathub_undo, "Удалить",
+            flush_suffix_end=True,
+            suffix_btn_before_status=True,
         )
         group.add(flathub_row)
+        self._fp_section_rows["connect"] = flathub_row
 
         expander = Adw.ExpanderRow()
         expander.set_title("Обслуживание Flatpak")
