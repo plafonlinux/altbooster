@@ -189,20 +189,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._split_view.set_resize_start_child(False)
         self._split_view.set_shrink_end_child(False)
 
-        self._bottom_paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        self._bottom_paned.set_vexpand(False)
-        self._bottom_paned.set_start_child(self._bottom_list_widget)
-        self._log_widget.set_vexpand(False)
-        self._log_widget.set_valign(Gtk.Align.START)
-        self._bottom_paned.set_end_child(self._log_widget)
-        self._bottom_paned.set_shrink_start_child(False)
-        self._bottom_paned.set_resize_start_child(False)
-        self._bottom_paned.set_shrink_end_child(False)
-
         outer_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         outer_vbox.append(self._split_view)
-        outer_vbox.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-        outer_vbox.append(self._bottom_paned)
 
         sidebar_width = settings.get("sidebar_width")
         self._sidebar_saved_width = sidebar_width
@@ -338,19 +326,14 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 border-bottom: 1px solid alpha(@borders, 0.4);
             }
             .ab-log-overlay-card scrolledwindow {
-                background: transparent;
-                border-radius: 0 0 15px 15px;
-            }
-            .ab-log-overlay-card scrolledwindow > undershoot,
-            .ab-log-overlay-card scrolledwindow > overshoot {
                 border-radius: 0 0 15px 15px;
             }
             .ab-log-overlay-card textview {
-                background: transparent;
+                background-color: @view_bg_color;
                 border-radius: 0 0 15px 15px;
             }
             .ab-log-overlay-card textview > text {
-                background: transparent;
+                background-color: @view_bg_color;
                 border-radius: 0 0 15px 15px;
             }
         """)
@@ -480,6 +463,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._sidebar_widget.append(scroll)
         self._sidebar_widget.append(borg_list)
         self._sidebar_widget.append(guide_list)
+        self._sidebar_widget.append(self._bottom_list_widget)
         return self._sidebar_widget
 
     def _build_sidebar_bottom(self) -> Gtk.Widget:
@@ -631,18 +615,15 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 saved = getattr(self, "_sidebar_saved_width", None)
                 if saved:
                     GLib.idle_add(self._split_view.set_position, saved)
-                    GLib.idle_add(self._bottom_paned.set_position, saved)
         else:
             if not from_drag:
                 self._sidebar_saved_width = self._split_view.get_position()
             self._sidebar_widget.set_size_request(self._SIDEBAR_ICONS_ONLY_WIDTH, -1)
             self._bottom_list_widget.set_size_request(self._SIDEBAR_ICONS_ONLY_WIDTH, -1)
             GLib.idle_add(self._split_view.set_position, self._SIDEBAR_ICONS_ONLY_WIDTH)
-            GLib.idle_add(self._bottom_paned.set_position, self._SIDEBAR_ICONS_ONLY_WIDTH)
 
     def _on_sidebar_position_changed(self, paned, *_):
         pos = paned.get_position()
-        self._bottom_paned.set_position(pos)
         currently_showing = bool(self._nav_labels and self._nav_labels[0].get_visible())
         should_show = pos > self._SIDEBAR_LABELS_THRESHOLD
 
@@ -776,9 +757,14 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         card.add_css_class("ab-log-overlay-card")
-        card.set_size_request(800, 520)
-        card.set_halign(Gtk.Align.CENTER)
-        card.set_valign(Gtk.Align.CENTER)
+        card.set_hexpand(True)
+        card.set_vexpand(True)
+        card.set_halign(Gtk.Align.FILL)
+        card.set_valign(Gtk.Align.FILL)
+        card.set_margin_start(12)
+        card.set_margin_end(12)
+        card.set_margin_top(52)
+        card.set_margin_bottom(52)
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.add_css_class("ab-log-overlay-header")
@@ -1190,7 +1176,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def _build_op_card(self) -> Gtk.Widget:
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         card.add_css_class("ab-op-floating-card")
-        card.set_margin_bottom(72)
+        card.set_margin_bottom(120)
         card.set_margin_end(16)
         card.set_halign(Gtk.Align.END)
         card.set_valign(Gtk.Align.END)
@@ -1304,7 +1290,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 self._op_card_stop_btn.set_sensitive(True)
                 self._op_card_detail.set_visible(False)
                 self._op_card.set_visible(True)
-                self._op_card.set_can_target(False)
+                self._op_card.set_can_target(True)
                 if self._reset_status_timer_id:
                     GLib.source_remove(self._reset_status_timer_id)
                 self._reset_status_timer_id = GLib.timeout_add(4000, self._reset_status_label)
