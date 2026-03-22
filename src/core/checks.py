@@ -10,6 +10,85 @@ from .privileges import run_privileged_sync
 from .gsettings import gsettings_get
 from core import config
 
+
+_desktop_files_cache: list[Path] | None = None
+_desktop_files_lock = threading.Lock()
+
+
+def _iter_xdg_desktop_files() -> list[Path]:
+    global _desktop_files_cache
+    with _desktop_files_lock:
+        if _desktop_files_cache is not None:
+            return _desktop_files_cache
+    home = Path.home()
+    dirs = [
+        home / ".local/share/applications",
+        home / ".local/share/flatpak/exports/share/applications",
+        Path("/usr/share/applications"),
+        Path("/usr/local/share/applications"),
+        Path("/var/lib/flatpak/exports/share/applications"),
+    ]
+    out: list[Path] = []
+    for d in dirs:
+        try:
+            if not d.is_dir():
+                continue
+            for p in d.iterdir():
+                if p.is_file() and p.suffix.lower() == ".desktop":
+                    out.append(p)
+        except OSError:
+            continue
+    with _desktop_files_lock:
+        _desktop_files_cache = out
+    return out
+
+
+def _desktop_keyword_installed(keyword: str) -> bool:
+    """True if a .desktop in XDG dirs mentions keyword in filename or header (e.g. PhotoGIMP)."""
+    if not keyword or not isinstance(keyword, str):
+        return False
+    sub = keyword.lower()
+    for p in _iter_xdg_desktop_files():
+        if sub in p.name.lower():
+            return True
+        try:
+            head = p.read_text(encoding="utf-8", errors="ignore")[:8192].lower()
+        except OSError:
+            continue
+        if sub not in head:
+            continue
+        if "[desktop entry]" not in head:
+            continue
+        return True
+    return False
+
+
+def _eval_check_pair(kind: str, value) -> bool:
+    if kind == "any_of":
+        if not isinstance(value, (list, tuple)):
+            return False
+        return any(
+            isinstance(pair, (list, tuple)) and len(pair) >= 2 and _eval_check_pair(pair[0], pair[1])
+            for pair in value
+        )
+    try:
+        if kind == "flatpak":
+            return value in _get_flatpak_installed()
+        if kind == "rpm":
+            if subprocess.run(["rpm", "-q", value], capture_output=True, timeout=10).returncode == 0:
+                return True
+            return shutil.which(value) is not None
+        if kind == "path":
+            return os.path.exists(os.path.expanduser(value))
+        if kind == "which":
+            return shutil.which(value) is not None
+        if kind == "desktop_keyword":
+            return _desktop_keyword_installed(str(value))
+    except (subprocess.TimeoutExpired, OSError, TypeError):
+        return False
+    return False
+
+
 def is_sudo_enabled() -> bool:
     control = shutil.which("control") or "/usr/sbin/control"
     lines: list[str] = []
@@ -82,21 +161,13 @@ def invalidate_flatpak_cache() -> None:
 
 
 def check_app_installed(source: dict) -> bool:
-    kind, value = source["check"]
-    try:
-        if kind == "flatpak":
-            return value in _get_flatpak_installed()
-        if kind == "rpm":
-            if subprocess.run(["rpm", "-q", value], capture_output=True, timeout=10).returncode == 0:
-                return True
-            return shutil.which(value) is not None
-        if kind == "path":
-            return os.path.exists(os.path.expanduser(value))
-        if kind == "which":
-            return shutil.which(value) is not None
-    except (subprocess.TimeoutExpired, OSError):
+    chk = source.get("check")
+    if not chk or len(chk) < 2:
         return False
-    return False
+    try:
+        return _eval_check_pair(chk[0], chk[1])
+    except (TypeError, KeyError, IndexError):
+        return False
 
 
 def is_vm_dirty_optimized() -> bool:

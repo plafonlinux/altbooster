@@ -548,9 +548,6 @@ class AppsPage(Gtk.Box):
             self._update_reset_button_ui(False)
 
     def _build(self):
-        # Same vertical size for install btn, source badge slot, and MenuButton across all rows.
-        self._install_suffix_v_sg = Gtk.SizeGroup.new(Gtk.SizeGroupMode.VERTICAL)
-
         USER_GID = "user_apps"
         groups_all = self._data.get("groups", [])
         user_gdata = next((g for g in groups_all if g.get("id") == USER_GID), None)
@@ -636,10 +633,6 @@ class AppsPage(Gtk.Box):
 
             app_n = dict(app, sources=sources)
             row = AppRow(app_n, self._log, self._refresh_btn_all)
-            self._install_suffix_v_sg.add_widget(row._btn)
-            self._install_suffix_v_sg.add_widget(row._badge_wrapper)
-            if row._src_menu_btn:
-                self._install_suffix_v_sg.add_widget(row._src_menu_btn)
             self._rows.append(row)
             self._app_row_by_id[app_n["id"]] = row
             group_rows.append(row)
@@ -652,7 +645,6 @@ class AppsPage(Gtk.Box):
             edit_btn.add_css_class("flat")
             edit_btn.add_css_class("circular")
             edit_btn.connect("clicked", lambda _b, a=app, g=gid: self._on_edit(a, g))
-            row.add_suffix(edit_btn)
 
             del_btn = Gtk.Button()
             del_btn.set_icon_name("list-remove-symbolic")
@@ -661,7 +653,7 @@ class AppsPage(Gtk.Box):
             del_btn.add_css_class("flat")
             del_btn.add_css_class("circular")
             del_btn.connect("clicked", lambda _b, a=app, g=gid: self._on_delete(a, g))
-            row.add_suffix(del_btn)
+            row.attach_trailing_editor_actions(edit_btn, del_btn)
 
     def focus_app_by_id(self, app_id: str) -> bool:
         row = self._app_row_by_id.get(app_id)

@@ -9,6 +9,35 @@ gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango
 
+# Fixed layout for AppRow trailing area (CSS max-width alone does not cap Gtk measure).
+_APP_ACTIONS_COL_W = 560
+_APP_TRAILING_CLUSTER_W = _APP_ACTIONS_COL_W
+
+
+
+
+class _ActionsColumn(Gtk.Box):
+    """Red column: progress, install, trash, editor actions — fixed width, actions end-aligned."""
+
+    def measure(self, orientation, for_size):
+        min_b, nat_b, min_base, nat_base = Gtk.Box.measure(self, orientation, for_size)
+        if orientation == Gtk.Orientation.HORIZONTAL:
+            w = _APP_ACTIONS_COL_W
+            return (w, w, min_base, nat_base)
+        return (min_b, nat_b, min_base, nat_base)
+
+
+class _AppTrailingCluster(Gtk.Box):
+    """Single ActionRow suffix: [green sources | red actions] with one stable horizontal size."""
+
+    def measure(self, orientation, for_size):
+        min_b, nat_b, min_base, nat_base = Gtk.Box.measure(self, orientation, for_size)
+        if orientation == Gtk.Orientation.HORIZONTAL:
+            w = _APP_TRAILING_CLUSTER_W
+            return (w, w, min_base, nat_base)
+        return (min_b, nat_b, min_base, nat_base)
+
+
 _badge_css = Gtk.CssProvider()
 _badge_css.load_from_data(b"""
     .ab-source-badge {
@@ -29,9 +58,27 @@ _badge_css.load_from_data(b"""
     button.ab-app-row-install.suggested-action {
         font-size: 0.72em;
         font-weight: 600;
-        min-height: 0;
+        min-height: 26px;
         padding: 2px 8px;
         border-radius: 999px;
+        max-width: 118px;
+    }
+    /* Trailing cluster wraps only the actions column now. */
+    box.ab-app-row-trailing-cluster {
+        min-width: 560px;
+        max-width: 560px;
+    }
+    box.ab-app-row-actions-column {
+        min-width: 560px;
+        max-width: 560px;
+    }
+    menubutton.ab-app-row-src-menu {
+        min-width: 0;
+        max-width: 140px;
+    }
+    menubutton.ab-app-row-src-menu button {
+        padding-left: 6px;
+        padding-right: 6px;
     }
 """)
 
@@ -206,7 +253,6 @@ class SettingRow(Adw.ActionRow):
 
 class AppRow(Adw.ActionRow):
     """Вкладка «Приложения»: кнопка «Установить» визуально как выбор источника (ab-source-badge)."""
-    _SUFFIX_ACTION_WIDTH = 120
 
     def __init__(self, app, log_fn, on_change_cb):
         super().__init__()
@@ -230,6 +276,10 @@ class AppRow(Adw.ActionRow):
 
         self.set_title(app["label"])
         self.set_subtitle(app["desc"])
+        try:
+            self.set_subtitle_lines(1)
+        except (AttributeError, TypeError):
+            pass
 
         self._checkbox = Gtk.CheckButton()
         self._checkbox.set_valign(Gtk.Align.CENTER)
@@ -258,7 +308,8 @@ class AppRow(Adw.ActionRow):
         self._trash_btn.set_visible(False)
 
         self._prog = Gtk.ProgressBar()
-        self._prog.set_hexpand(True)
+        self._prog.set_hexpand(False)
+        self._prog.set_size_request(100, -1)
         self._prog.set_valign(Gtk.Align.CENTER)
         self._prog.set_visible(False)
 
@@ -266,26 +317,45 @@ class AppRow(Adw.ActionRow):
         self._source_label.add_css_class("ab-source-badge")
         self._source_label.set_valign(Gtk.Align.CENTER)
         self._source_label.set_halign(Gtk.Align.CENTER)
+        self._source_label.set_xalign(0.5)
+        self._source_label.set_hexpand(False)
         self._source_label.set_ellipsize(Pango.EllipsizeMode.END)
         self._source_label.set_visible(False)
-        self._badge_wrapper = Gtk.Box()
-        self._badge_wrapper.set_size_request(self._SUFFIX_ACTION_WIDTH, -1)
-        self._badge_wrapper.set_valign(Gtk.Align.CENTER)
-        self._badge_wrapper.append(self._source_label)
 
-        suffix = Gtk.Box(spacing=8)
-        suffix.set_valign(Gtk.Align.CENTER)
-        suffix.append(self._badge_wrapper)
-        suffix.append(self._prog)
+        self._source_stack = Gtk.Stack()
+        self._source_stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        self._source_stack.set_halign(Gtk.Align.CENTER)
+        self._source_stack.set_hexpand(False)
+        self._source_stack.set_valign(Gtk.Align.CENTER)
+        self._source_stack.add_named(self._source_label, "label")
 
         self._src_menu_btn = None
         if len(self._sources) > 1:
             self._src_menu_btn = self._build_source_menu()
-            suffix.append(self._src_menu_btn)
+            self._src_menu_btn.set_hexpand(False)
+            self._src_menu_btn.set_halign(Gtk.Align.CENTER)
+            self._source_stack.add_named(self._src_menu_btn, "menu")
 
-        suffix.append(self._btn)
-        suffix.append(self._trash_btn)
-        self.add_suffix(suffix)
+        self._actions_lead_spacer = Gtk.Box()
+        self._actions_lead_spacer.set_hexpand(True)
+
+        self._actions_strip = _ActionsColumn()
+        self._actions_strip.set_orientation(Gtk.Orientation.HORIZONTAL)
+        self._actions_strip.set_spacing(8)
+        self._actions_strip.add_css_class("ab-app-row-actions-column")
+        self._actions_strip.set_valign(Gtk.Align.CENTER)
+        self._actions_strip.append(self._actions_lead_spacer)
+        self._actions_strip.append(self._source_stack)
+        self._actions_strip.append(self._prog)
+        self._actions_strip.append(self._btn)
+        self._actions_strip.append(self._trash_btn)
+
+        self._trailing_cluster = _AppTrailingCluster()
+        self._trailing_cluster.set_orientation(Gtk.Orientation.HORIZONTAL)
+        self._trailing_cluster.add_css_class("ab-app-row-trailing-cluster")
+        self._trailing_cluster.set_valign(Gtk.Align.CENTER)
+        self._trailing_cluster.append(self._actions_strip)
+        self.add_suffix(self._trailing_cluster)
 
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), _badge_css,
@@ -294,6 +364,11 @@ class AppRow(Adw.ActionRow):
 
         self._update_source_label()
         threading.Thread(target=self._check, daemon=True).start()
+
+    def attach_trailing_editor_actions(self, edit_btn: Gtk.Widget, del_btn: Gtk.Widget):
+        """Append edit and list-remove into the actions (red) column."""
+        self._actions_strip.append(edit_btn)
+        self._actions_strip.append(del_btn)
 
     def is_installed(self):
         return config.state_get(self._state_key) is True
@@ -352,6 +427,7 @@ class AppRow(Adw.ActionRow):
         btn.set_popover(popover)
         btn.add_css_class("flat")
         btn.add_css_class("ab-source-badge")
+        btn.add_css_class("ab-app-row-src-menu")
         btn.set_valign(Gtk.Align.CENTER)
         btn.set_tooltip_text("Выбрать источник установки")
         self._sync_src_menu_label(btn)
@@ -393,11 +469,13 @@ class AppRow(Adw.ActionRow):
             tooltip = self._source_tooltip(self._sources[idx]) if 0 <= idx < len(self._sources) else ""
             self._source_label.set_tooltip_text(tooltip)
             self._source_label.set_visible(True)
+            self._source_stack.set_visible_child(self._source_label)
             if self._src_menu_btn:
                 self._src_menu_btn.set_visible(False)
         elif self._src_menu_btn:
             self._source_label.set_visible(False)
             self._src_menu_btn.set_visible(True)
+            self._source_stack.set_visible_child(self._src_menu_btn)
         else:
             idx = self._selected_source_index
             text = self._sources[idx].get("label", "") if 0 <= idx < len(self._sources) else ""
@@ -405,6 +483,7 @@ class AppRow(Adw.ActionRow):
             self._source_label.remove_css_class("success")
             self._source_label.add_css_class("dim-label")
             self._source_label.set_visible(bool(text))
+            self._source_stack.set_visible_child(self._source_label)
 
     def _set_installed_ui(self, installed):
         self._update_source_label()
