@@ -13,7 +13,8 @@ def make_icon(name: str, size: int = 22, fallback: str = "application-x-executab
 
 def make_button(label: str, width: int = 130, style: str = "suggested-action") -> Gtk.Button:
     btn = Gtk.Button(label=label)
-    btn.set_size_request(width, -1)
+    if width > 0:
+        btn.set_size_request(width, -1)
     btn.add_css_class(style)
     btn.add_css_class("pill")
     return btn

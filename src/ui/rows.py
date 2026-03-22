@@ -25,6 +25,14 @@ _badge_css.load_from_data(b"""
     .ab-source-badge.dim-label {
         opacity: 0.55;
     }
+    /* Match .ab-source-badge MenuButton height and padding. */
+    button.ab-app-row-install.suggested-action {
+        font-size: 0.72em;
+        font-weight: 600;
+        min-height: 0;
+        padding: 2px 8px;
+        border-radius: 999px;
+    }
 """)
 
 from core import backend
@@ -197,7 +205,7 @@ class SettingRow(Adw.ActionRow):
             self._set_ui(True)
 
 class AppRow(Adw.ActionRow):
-    """Вкладка «Приложения»: одинаковая ширина кнопки источника и «Установить»."""
+    """Вкладка «Приложения»: кнопка «Установить» визуально как выбор источника (ab-source-badge)."""
     _SUFFIX_ACTION_WIDTH = 120
 
     def __init__(self, app, log_fn, on_change_cb):
@@ -236,7 +244,9 @@ class AppRow(Adw.ActionRow):
         _prefix_box.append(self._status)
         self.add_prefix(_prefix_box)
 
-        self._btn = make_button("Установить", width=self._SUFFIX_ACTION_WIDTH)
+        self._btn = make_button("Установить", width=-1)
+        self._btn.remove_css_class("pill")
+        self._btn.add_css_class("ab-app-row-install")
         self._btn.connect("clicked", self._on_install)
         self._btn.set_sensitive(False)
 
@@ -258,14 +268,14 @@ class AppRow(Adw.ActionRow):
         self._source_label.set_halign(Gtk.Align.CENTER)
         self._source_label.set_ellipsize(Pango.EllipsizeMode.END)
         self._source_label.set_visible(False)
-        _badge_wrapper = Gtk.Box()
-        _badge_wrapper.set_size_request(self._SUFFIX_ACTION_WIDTH, -1)
-        _badge_wrapper.set_valign(Gtk.Align.CENTER)
-        _badge_wrapper.append(self._source_label)
+        self._badge_wrapper = Gtk.Box()
+        self._badge_wrapper.set_size_request(self._SUFFIX_ACTION_WIDTH, -1)
+        self._badge_wrapper.set_valign(Gtk.Align.CENTER)
+        self._badge_wrapper.append(self._source_label)
 
         suffix = Gtk.Box(spacing=8)
         suffix.set_valign(Gtk.Align.CENTER)
-        suffix.append(_badge_wrapper)
+        suffix.append(self._badge_wrapper)
         suffix.append(self._prog)
 
         self._src_menu_btn = None
@@ -343,7 +353,6 @@ class AppRow(Adw.ActionRow):
         btn.add_css_class("flat")
         btn.add_css_class("ab-source-badge")
         btn.set_valign(Gtk.Align.CENTER)
-        btn.set_size_request(AppRow._SUFFIX_ACTION_WIDTH, -1)
         btn.set_tooltip_text("Выбрать источник установки")
         self._sync_src_menu_label(btn)
         return btn

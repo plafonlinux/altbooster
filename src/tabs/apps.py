@@ -548,6 +548,9 @@ class AppsPage(Gtk.Box):
             self._update_reset_button_ui(False)
 
     def _build(self):
+        # Same vertical size for install btn, source badge slot, and MenuButton across all rows.
+        self._install_suffix_v_sg = Gtk.SizeGroup.new(Gtk.SizeGroupMode.VERTICAL)
+
         USER_GID = "user_apps"
         groups_all = self._data.get("groups", [])
         user_gdata = next((g for g in groups_all if g.get("id") == USER_GID), None)
@@ -633,6 +636,10 @@ class AppsPage(Gtk.Box):
 
             app_n = dict(app, sources=sources)
             row = AppRow(app_n, self._log, self._refresh_btn_all)
+            self._install_suffix_v_sg.add_widget(row._btn)
+            self._install_suffix_v_sg.add_widget(row._badge_wrapper)
+            if row._src_menu_btn:
+                self._install_suffix_v_sg.add_widget(row._src_menu_btn)
             self._rows.append(row)
             self._app_row_by_id[app_n["id"]] = row
             group_rows.append(row)
