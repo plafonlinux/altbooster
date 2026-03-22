@@ -51,6 +51,14 @@ _badge_css.load_from_data(b"""
         color: @success_color;
         background-color: alpha(@success_color, 0.15);
     }
+    .ab-source-badge.warning {
+        color: @warning_color;
+        background-color: alpha(@warning_color, 0.15);
+    }
+    .ab-source-badge.error {
+        color: @error_color;
+        background-color: alpha(@error_color, 0.15);
+    }
     .ab-source-badge.dim-label {
         opacity: 0.55;
     }

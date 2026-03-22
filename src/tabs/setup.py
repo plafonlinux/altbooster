@@ -11,7 +11,7 @@ from pathlib import Path
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, Gtk
+from gi.repository import Adw, GLib, Gtk
 
 from core import backend
 from core import config
@@ -27,35 +27,15 @@ _MIRRORS = [
     ("IPSL",      "ipsl.list",   "IPSL (distrib-coffee.ipsl.jussieu.fr) — Франция"),
 ]
 
-_BADGE_CSS_LOADED = False
-
-def _ensure_badge_css():
-    global _BADGE_CSS_LOADED
-    if _BADGE_CSS_LOADED:
-        return
-    css = Gtk.CssProvider()
-    css.load_from_data(b"""
-        .ab-channel-badge {
-            border-radius: 999px;
-            padding: 2px 10px;
-            font-size: 0.78em;
-            font-weight: bold;
-        }
-        .ab-channel-stable { background-color: @success_color; color: white; }
-        .ab-channel-beta   { background-color: @warning_color; color: white; }
-        .ab-channel-alpha  { background-color: @error_color;   color: white; }
-    """)
-    Gtk.StyleContext.add_provider_for_display(
-        Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-    )
-    _BADGE_CSS_LOADED = True
-
-
 def _make_channel_badge(channel: str) -> Gtk.Label:
-    _ensure_badge_css()
     lbl = Gtk.Label(label=channel)
-    lbl.add_css_class("ab-channel-badge")
-    lbl.add_css_class(f"ab-channel-{channel}")
+    lbl.add_css_class("ab-source-badge")
+    if channel == "stable":
+        lbl.add_css_class("success")
+    elif channel == "beta":
+        lbl.add_css_class("warning")
+    elif channel == "alpha":
+        lbl.add_css_class("error")
     lbl.set_valign(Gtk.Align.CENTER)
     return lbl
 
