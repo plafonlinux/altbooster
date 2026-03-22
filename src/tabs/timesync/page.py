@@ -1014,6 +1014,10 @@ class BorgPage(Gtk.Box):
         self._btn_detect_gd = Gtk.Button(label="Определить")
         self._btn_detect_gd.add_css_class("pill")
         self._btn_detect_gd.set_valign(Gtk.Align.CENTER)
+        self._btn_detect_gd.set_tooltip_text(
+            "Подставить путь к смонтированному Google Drive (GVFS). "
+            "Если пусто — один раз откройте диск в приложении «Файлы» и нажмите снова."
+        )
         self._btn_detect_gd.connect("clicked", self._on_detect_gd)
         self._btn_open_goa = Gtk.Button(label="Открыть настройки")
         self._btn_open_goa.add_css_class("flat")
@@ -1913,8 +1917,23 @@ class BorgPage(Gtk.Box):
     def _on_detect_gd(self, btn):
         btn.set_sensitive(False)
         path = backend.find_gvfs_google_drive()
+        win = self.get_root()
         if path:
-            self._row_repo_path.set_text(path + "/ALTBoosterBackup")
+            dest = path.rstrip("/") + "/ALTBoosterBackup"
+            self._row_repo_path.set_text(dest)
+            self._save_repo_settings()
+            self._log(f"✔  Путь к Google Drive: {path}\n")
+            if hasattr(win, "add_toast"):
+                win.add_toast(Adw.Toast(title="Папка для бэкапа подставлена", timeout=5))
+        else:
+            msg = (
+                "Точка монтирования Google Drive не найдена в GVFS. "
+                "Откройте в «Файлах» раздел Google Drive (подождите список файлов), "
+                "затем снова нажмите «Определить»."
+            )
+            self._log(f"⚠  {msg}\n")
+            if hasattr(win, "add_toast"):
+                win.add_toast(Adw.Toast(title=msg, timeout=8))
         btn.set_sensitive(True)
 
     def _open_goa(self):

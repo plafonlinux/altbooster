@@ -46,7 +46,6 @@ _TAB_KEYWORDS: dict[str, tuple[str, ...]] = {
     ),
     "terminal": ("терминал", "shell", "bash"),
     "amd": ("amd", "radeon", "видеокарта", "gpu"),
-    "intel": ("intel", "процессор", "cpu", "scx", "meteor"),
     "davinci": ("davinci", "resolve", "видеомонтаж"),
     "maintenance": ("обслуживание", "система", "nfs", "диск"),
     "tweaks": (
@@ -325,14 +324,36 @@ def _maintenance_task_items() -> list[GlobalSearchItem]:
 
 
 def _tweaks_section_items() -> list[GlobalSearchItem]:
-    """Секции вкладки «Твики» (SCX/LAVD, ananicy) — не из JSON-модуля."""
+    """Секции вкладки «Твики» — не из JSON-модуля."""
     tab_kw = _TAB_KEYWORDS.get("tweaks", ())
+    _tw_k = "Твики · Планировщик ядра"
+    _tw_p = "Твики · Приоритеты процессов"
     return [
         GlobalSearchItem(
             tab_id="tweaks",
-            title="Планировщик CPU (SCX), LAVD",
+            title="Поддержка sched_ext в ядре",
             icon_name="cpu-symbolic",
-            subtitle="Твики · экспериментально",
+            subtitle=_tw_k,
+            keywords=(
+                "sched_ext",
+                "sched ext",
+                "sched-ext",
+                "scx",
+                "ядро",
+                "kernel",
+                "kernel-image",
+                "CONFIG_SCHED_CLASS_EXT",
+                "lavd",
+                "meteor",
+            )
+            + tab_kw,
+            focus_spec="d:sched_ext",
+        ),
+        GlobalSearchItem(
+            tab_id="tweaks",
+            title="Планировщик AMD Ryzen (SCX LAVD)",
+            icon_name="cpu-symbolic",
+            subtitle=_tw_k,
             keywords=(
                 "scx",
                 "scx-scheds",
@@ -347,15 +368,17 @@ def _tweaks_section_items() -> list[GlobalSearchItem]:
                 "игровой",
                 "valve",
                 "igalia",
+                "ryzen",
+                "amd ryzen",
             )
             + tab_kw,
             focus_spec="d:scx",
         ),
         GlobalSearchItem(
             tab_id="tweaks",
-            title="ananicy-cpp, приоритеты процессов",
+            title="Современный планировщик (ananicy-cpp, от CachyOS)",
             icon_name="system-run-symbolic",
-            subtitle="Твики",
+            subtitle=_tw_p,
             keywords=(
                 "ananicy",
                 "ananicy-cpp",
@@ -368,9 +391,52 @@ def _tweaks_section_items() -> list[GlobalSearchItem]:
                 "cachyos",
                 "cachy",
                 "правила",
+                "современный планировщик",
+                "планировщик linux",
+                "приоритеты процессов",
             )
             + tab_kw,
             focus_spec="d:ananicy",
+        ),
+        GlobalSearchItem(
+            tab_id="tweaks",
+            title="System76 Scheduler (Pop!_OS)",
+            icon_name="computer-symbolic",
+            subtitle=_tw_p,
+            keywords=(
+                "system76",
+                "system76-scheduler",
+                "pop os",
+                "popos",
+                "pop!_os",
+                "scheduler",
+                "планировщик",
+                "cfs",
+                "nice",
+                "pipewire",
+            )
+            + tab_kw,
+            focus_spec="d:system76_scheduler",
+        ),
+        GlobalSearchItem(
+            tab_id="tweaks",
+            title="Планировщик Intel (SCX Meteor)",
+            icon_name="processor-symbolic",
+            subtitle=_tw_k,
+            keywords=(
+                "scx_meteor",
+                "scx meteor",
+                "meteor",
+                "intel",
+                "sched_ext",
+                "lp-first",
+                "toxblh",
+                "гибрид",
+                "процессор intel",
+                "планировщик intel",
+            )
+            + tab_kw,
+            focus_spec="d:intel_scx_meteor",
         ),
     ]
 

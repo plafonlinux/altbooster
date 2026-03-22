@@ -10,31 +10,16 @@ import threading
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, GLib, Gtk
+from gi.repository import Adw, GLib, Gtk
 
 from core import backend
+from core.sched_ext import has_sched_ext
 from ui.rows import SettingRow
-from ui.widgets import make_icon, make_status_icon, set_status_ok, set_status_error
+from ui.widgets import make_icon
 
-_banner_css = Gtk.CssProvider()
-_banner_css.load_from_data(b"""
-    .experimental-banner {
-        background-color: alpha(@error_color, 0.60);
-        border-radius: 12px;
-        padding: 10px 14px;
-        margin: 12px;
-    }
-    .experimental-banner label {
-        color: white;
-    }
-    .experimental-banner image {
-        color: white;
-    }
-""")
-
-_SCX_METEOR_BIN     = "/usr/local/bin/scx_meteor"
+_SCX_METEOR_BIN = "/usr/local/bin/scx_meteor"
 _SCX_METEOR_SERVICE = "/etc/systemd/system/scx_meteor.service"
-_SCX_METEOR_REPO    = "https://github.com/Toxblh/scx_meteor"
+_SCX_METEOR_REPO = "https://github.com/Toxblh/scx_meteor"
 
 _SERVICE_CONTENT = """\
 [Unit]
@@ -55,132 +40,77 @@ WantedBy=multi-user.target
 """
 
 
-def _get_cpu_model() -> str:
+def is_intel_cpu() -> bool:
     try:
         with open("/proc/cpuinfo", encoding="utf-8") as f:
             for line in f:
-                if line.startswith("model name"):
-                    return line.split(":", 1)[1].strip()
+                if line.startswith("vendor_id"):
+                    return "intel" in line.split(":", 1)[1].strip().lower()
     except OSError:
         pass
-    return "Неизвестно"
+    return False
 
 
-class IntelPage(Gtk.Box):
+def _intel_only_badge() -> Gtk.Widget:
+    lbl = Gtk.Label(label="Только для Intel")
+    lbl.add_css_class("ab-tweak-intel-only-badge")
+    lbl.set_valign(Gtk.Align.CENTER)
+    lbl.set_tooltip_text(
+        "scx_meteor рассчитан на гибридные процессоры Intel (P/E/LP-ядра). "
+        "На AMD и других CPU блок отключён."
+    )
+    return lbl
 
-    def __init__(self, log_fn):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+
+def _experimental_tech_badge() -> Gtk.Widget:
+    lbl = Gtk.Label(label="Экспериментальная технология")
+    lbl.add_css_class("ab-tweak-experimental-badge")
+    lbl.set_valign(Gtk.Align.CENTER)
+    lbl.set_tooltip_text(
+        "scx_meteor в активной разработке. Возможны сбои и регрессии — используйте на свой страх и риск."
+    )
+    return lbl
+
+
+class ScxMeteorTweaksSection:
+    """Блок scx_meteor на вкладке «Твики» (раньше отдельная вкладка «Intel»)."""
+
+    def __init__(self, log_fn, host: Gtk.Widget):
         self._log = log_fn
+        self._host = host
 
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.set_hexpand(True)
-        scroll.set_vexpand(True)
-
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
-        body.set_margin_top(20)
-        body.set_margin_bottom(20)
-        body.set_margin_start(20)
-        body.set_margin_end(20)
-
-        clamp = Adw.Clamp()
-        clamp.set_maximum_size(1152)
-        clamp.set_tightening_threshold(864)
-        clamp.set_child(body)
-        scroll.set_child(clamp)
-
-        overlay = Gtk.Overlay()
-        overlay.set_vexpand(True)
-        overlay.set_child(scroll)
-        overlay.add_overlay(self._build_experimental_banner())
-        self.append(overlay)
-
-        body.append(self._build_compat_group())
-        body.append(self._build_scx_meteor_group())
-
-
-    def _build_experimental_banner(self) -> Gtk.Box:
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), _banner_css,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-        )
-
-        box = Gtk.Box(spacing=10)
-        box.add_css_class("experimental-banner")
-        box.set_halign(Gtk.Align.FILL)
-        box.set_valign(Gtk.Align.END)
-
-        icon = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
-        icon.set_icon_size(Gtk.IconSize.NORMAL)
-        box.append(icon)
-
-        label = Gtk.Label(
-            label="Экспериментальная вкладка — scx_meteor в активной разработке. "
-                  "Используйте на свой страх и риск."
-        )
-        label.set_wrap(True)
-        label.set_xalign(0.0)
-        label.set_hexpand(True)
-        box.append(label)
-
-        return box
-
-
-    def _build_compat_group(self) -> Adw.PreferencesGroup:
-        group = Adw.PreferencesGroup()
-        group.set_title("Совместимость")
-        group.set_description(
-            "scx_meteor работает на процессорах Intel с тремя типами ядер: "
-            "P-ядра, E-ядра и LP-ядра (SoC tile). "
-            "Требуется ядро Linux с поддержкой sched_ext (CONFIG_SCHED_CLASS_EXT)."
-        )
-
-        self._row_sched_ext = Adw.ActionRow()
-        self._row_sched_ext.set_title("sched_ext в ядре")
-        self._row_sched_ext.set_subtitle("Проверка /sys/kernel/sched_ext…")
-        self._row_sched_ext.add_prefix(make_icon("cpu-symbolic"))
-        self._status_sched = make_status_icon()
-        self._status_sched.set_visible(False)
-        self._row_sched_ext.add_suffix(self._status_sched)
-        group.add(self._row_sched_ext)
-
-        row_cpu = Adw.ActionRow()
-        row_cpu.set_title("Процессор")
-        row_cpu.set_subtitle(_get_cpu_model())
-        row_cpu.add_prefix(make_icon("computer-symbolic"))
-        group.add(row_cpu)
-
-        threading.Thread(target=self._check_compat, daemon=True).start()
-        return group
-
-    def _check_compat(self):
-        has_sched_ext = os.path.exists("/sys/kernel/sched_ext")
-        GLib.idle_add(self._apply_compat_ui, has_sched_ext)
-
-    def _apply_compat_ui(self, has_sched_ext: bool):
-        self._status_sched.set_visible(True)
-        if has_sched_ext:
-            set_status_ok(self._status_sched)
-            self._row_sched_ext.set_subtitle("Поддерживается (/sys/kernel/sched_ext найден)")
-        else:
-            set_status_error(self._status_sched)
-            self._row_sched_ext.set_subtitle(
-                "Не поддерживается — обновите ядро или добавьте CONFIG_SCHED_CLASS_EXT"
-            )
-
+    def append_to(self, body: Gtk.Box) -> Gtk.Widget:
+        group = self._build_scx_meteor_group()
+        if not is_intel_cpu():
+            group.set_header_suffix(_intel_only_badge())
+            group.set_sensitive(False)
+        body.append(group)
+        return self._row_install
 
     def _build_scx_meteor_group(self) -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup()
-        group.set_title("scx_meteor — планировщик задач")
-        group.set_description(
+        group.set_title("Планировщик Intel (SCX Meteor)")
+
+        intro = Adw.ActionRow()
+        intro.set_title("SCX Meteor")
+        intro.set_subtitle(
+            "Планировщик для гибридных процессоров Intel (P-, E- и LP-ядра, SoC tile). "
+            "Требуется активный sched_ext в ядре — настройка в общем блоке выше.\n\n"
             "Стратегия «LP-first, burst-up, drain-back»: задачи стартуют на LP-ядрах "
-            "и поднимаются на E/P-ядра по требованию. Снижает общее энергопотребление "
-            "на 30–50% по сравнению со стандартным планировщиком."
+            "и поднимаются на E/P-ядра по требованию; заявлено снижение энергопотребления "
+            "на 30–50% относительно стандартного планировщика."
         )
+        intro.set_activatable(False)
+        bulb = Gtk.Image.new_from_icon_name("dialog-information-symbolic")
+        bulb.set_valign(Gtk.Align.CENTER)
+        intro.add_prefix(bulb)
+        intro.add_suffix(_experimental_tech_badge())
+
+        group.add(intro)
 
         self._row_install = SettingRow(
             "application-x-executable-symbolic",
-            "scx_meteor",
+            "SCX Meteor",
             "Сборка из исходников и установка в /usr/local/bin/",
             "Установить",
             self._install_scx_meteor,
@@ -216,6 +146,21 @@ class IntelPage(Gtk.Box):
 
         return group
 
+    def apply_sched_ext_gate(self, sched_ok: bool) -> None:
+        if not is_intel_cpu():
+            return
+        tip = (
+            ""
+            if sched_ok
+            else (
+                "Сначала подключите sched_ext в ядре (блок «Поддержка sched_ext в ядре» "
+                "на подвкладке «Планировщик ядра»)."
+            )
+        )
+        self._row_install.set_sensitive(sched_ok)
+        self._row_service.set_sensitive(sched_ok)
+        self._row_install.set_tooltip_text(tip)
+        self._row_service.set_tooltip_text(tip)
 
     def _check_scx_meteor_installed(self) -> bool:
         return os.path.isfile(_SCX_METEOR_BIN)
@@ -230,18 +175,33 @@ class IntelPage(Gtk.Box):
         except OSError:
             return False
 
+    def _root(self):
+        return self._host.get_root()
 
     def _install_scx_meteor(self, row):
         row.set_working()
         self._log("\n▶  Установка scx_meteor...\n")
-        win = self.get_root()
+        win = self._root()
         if win and hasattr(win, "start_progress"):
             win.start_progress("Установка scx_meteor...")
 
         def _thread():
-            self._log("▶  Установка зависимостей (rust, cargo, git, clang)...\n")
+            if not has_sched_ext():
+                def _fail():
+                    self._log(
+                        "✘  В текущем ядре нет sched_ext. Установите ядро через блок "
+                        "«Поддержка sched_ext в ядре» на подвкладке «Планировщик ядра» и перезагрузитесь.\n"
+                    )
+                    row.set_done(False)
+                    if win and hasattr(win, "stop_progress"):
+                        win.stop_progress(False)
+
+                GLib.idle_add(_fail)
+                return
+
+            self._log("▶  Установка зависимостей (rust, rust-cargo, git, clang, llvm)...\n")
             backend.run_privileged_sync(
-                ["epm", "install", "-y", "rust", "cargo", "git", "clang", "llvm"],
+                ["epm", "install", "-y", "rust", "rust-cargo", "git", "clang", "llvm"],
                 self._log,
             )
 
@@ -297,11 +257,10 @@ class IntelPage(Gtk.Box):
         ]
         return backend.run_privileged_sync(cmd, self._log)
 
-
     def _uninstall_scx_meteor(self, row):
         row.set_working()
         self._log("\n▶  Удаление scx_meteor...\n")
-        win = self.get_root()
+        win = self._root()
         if win and hasattr(win, "start_progress"):
             win.start_progress("Удаление scx_meteor...")
 
@@ -321,15 +280,27 @@ class IntelPage(Gtk.Box):
 
         backend.run_privileged(cmd, self._log, _on_done)
 
-
     def _enable_scx_meteor_service(self, row):
         row.set_working()
         self._log("\n▶  Включение сервиса scx_meteor...\n")
-        win = self.get_root()
+        win = self._root()
         if win and hasattr(win, "start_progress"):
             win.start_progress("Включение scx_meteor...")
 
         def _thread():
+            if not has_sched_ext():
+                def _fail():
+                    self._log(
+                        "✘  В текущем ядре нет sched_ext. Установите ядро через блок "
+                        "«Поддержка sched_ext в ядре» на подвкладке «Планировщик ядра» и перезагрузитесь.\n"
+                    )
+                    row.set_done(False)
+                    if win and hasattr(win, "stop_progress"):
+                        win.stop_progress(False)
+
+                GLib.idle_add(_fail)
+                return
+
             if not os.path.exists(_SCX_METEOR_SERVICE):
                 ok_svc = self._write_service_file()
                 if not ok_svc:
@@ -357,7 +328,7 @@ class IntelPage(Gtk.Box):
     def _disable_scx_meteor_service(self, row):
         row.set_working()
         self._log("\n▶  Отключение сервиса scx_meteor...\n")
-        win = self.get_root()
+        win = self._root()
         if win and hasattr(win, "start_progress"):
             win.start_progress("Отключение scx_meteor...")
 
@@ -374,4 +345,3 @@ class IntelPage(Gtk.Box):
             ["systemctl", "disable", "--now", "scx_meteor"],
             self._log, _on_done,
         )
-

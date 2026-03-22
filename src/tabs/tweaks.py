@@ -17,11 +17,18 @@ from core import backend
 from ui.common import load_module
 from ui.widgets import make_button, make_icon, make_scrolled_page, scroll_child_into_view
 from ui.rows import SettingRow, TaskRow
+from core.sched_ext import has_sched_ext
+from tabs.intel import ScxMeteorTweaksSection
+from tabs.scx_sched_ext import SchedExtSupportSection
+from tabs.system76_scheduler import System76SchedulerTweaksSection
 
 _ANANICY_RULES_REPO = "https://github.com/CachyOS/ananicy-rules"
 _ANANICY_RULES_DIR  = "/etc/ananicy.d/cachyos-rules"
 
-# Pill badge (Sisyphus-only packages) + red emphasis for irreversible migration warning row.
+_KERNEL_SCHED_SEARCH_IDS = frozenset({"sched_ext", "scx", "intel_scx_meteor"})
+_USERSPACE_SCHED_SEARCH_IDS = frozenset({"ananicy", "system76_scheduler"})
+
+# Pill badge (Sisyphus-only packages, orange) + red emphasis for irreversible migration warning row.
 _tweak_page_css = Gtk.CssProvider()
 _tweak_page_css.load_from_data(b"""
     .ab-tweak-sisyphus-badge {
@@ -30,8 +37,8 @@ _tweak_page_css.load_from_data(b"""
         min-height: 0;
         padding: 2px 8px;
         border-radius: 999px;
-        color: @error_color;
-        background-color: alpha(@error_color, 0.18);
+        color: @warning_color;
+        background-color: alpha(@warning_color, 0.22);
     }
     .ab-tweak-irreversible-row image,
     .ab-tweak-irreversible-row label {
@@ -59,6 +66,24 @@ _tweak_page_css.load_from_data(b"""
     .ab-tweak-branch-badge-unknown {
         color: alpha(currentColor, 0.55);
         background-color: alpha(currentColor, 0.08);
+    }
+    .ab-tweak-intel-only-badge {
+        font-size: 0.72em;
+        font-weight: 600;
+        min-height: 0;
+        padding: 2px 8px;
+        border-radius: 999px;
+        color: #62a0ea;
+        background-color: alpha(#3584e4, 0.22);
+    }
+    .ab-tweak-experimental-badge {
+        font-size: 0.72em;
+        font-weight: 600;
+        min-height: 0;
+        padding: 2px 8px;
+        border-radius: 999px;
+        color: @error_color;
+        background-color: alpha(@error_color, 0.18);
     }
 """)
 
@@ -103,25 +128,107 @@ class TweaksPage(Gtk.Box):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
-        scroll, body = make_scrolled_page()
-        self._body = body
-        self.append(scroll)
+        self.set_vexpand(True)
         self._search_focus_widgets: dict[str, Gtk.Widget] = {}
 
-        self._build_sisyphus_group(body)
-        self._build_scx_ui(body)
-        self._build_ananicy_group(body)
-        self._build_fixes_group(body)
+        self._sub_stack = Adw.ViewStack()
+        self._sub_stack.set_vexpand(True)
+
+        sub_switcher = Adw.ViewSwitcher()
+        sub_switcher.set_stack(self._sub_stack)
+        sub_switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
+        sub_switcher.set_halign(Gtk.Align.CENTER)
+        sub_switcher.set_margin_top(10)
+        sub_switcher.set_margin_bottom(6)
+        sub_switcher.set_margin_start(20)
+        sub_switcher.set_margin_end(20)
+
+        self.append(sub_switcher)
+        self.append(self._sub_stack)
+
+        scroll_general, body_general = make_scrolled_page()
+        self._scroll_general = scroll_general
+        self._build_sisyphus_group(body_general)
+        self._build_fixes_group(body_general)
+        self._sub_stack.add_titled_with_icon(
+            scroll_general, "general", "Общие твики", "preferences-system-symbolic",
+        )
+
+        scroll_kernel, body_kernel = make_scrolled_page()
+        self._scroll_kernel_scheduler = scroll_kernel
+        self._sched_ext_section = SchedExtSupportSection(self._log, self)
+        w_sched = self._sched_ext_section.append_to(body_kernel)
+        self._search_focus_widgets["sched_ext"] = w_sched
+        self._build_scx_ui(body_kernel)
+        self._meteor_section = ScxMeteorTweaksSection(self._log, self)
+        focus_meteor = self._meteor_section.append_to(body_kernel)
+        self._search_focus_widgets["intel_scx_meteor"] = focus_meteor
+        self._sched_ext_section.add_listener(self._sync_scx_sched_ext_dependents)
+        self._sync_scx_sched_ext_dependents()
+        self._sub_stack.add_titled_with_icon(
+            scroll_kernel, "kernel_sched", "Планировщик ядра", "cpu-symbolic",
+        )
+
+        scroll_prio, body_prio = make_scrolled_page()
+        self._scroll_userspace_priorities = scroll_prio
+        self._build_userspace_priorities_tab_intro(body_prio)
+        self._build_ananicy_group(body_prio)
+        self._system76_section = System76SchedulerTweaksSection(self._log, self)
+        w_s76 = self._system76_section.append_to(body_prio)
+        self._search_focus_widgets["system76_scheduler"] = w_s76
+        self._sub_stack.add_titled_with_icon(
+            scroll_prio, "userspace_prio", "Приоритеты процессов", "system-run-symbolic",
+        )
 
     def focus_row_by_id(self, row_id: str) -> bool:
         w = self._search_focus_widgets.get(row_id)
         if w is None:
             return False
-        scroll = self.get_first_child()
-        if isinstance(scroll, Gtk.ScrolledWindow):
-            scroll_child_into_view(scroll, w)
+        if row_id in _KERNEL_SCHED_SEARCH_IDS:
+            self._sub_stack.set_visible_child_name("kernel_sched")
+            scroll = self._scroll_kernel_scheduler
+        elif row_id in _USERSPACE_SCHED_SEARCH_IDS:
+            self._sub_stack.set_visible_child_name("userspace_prio")
+            scroll = self._scroll_userspace_priorities
+        else:
+            self._sub_stack.set_visible_child_name("general")
+            scroll = self._scroll_general
+        scroll_child_into_view(scroll, w)
         GLib.idle_add(w.grab_focus)
         return True
+
+    def _sync_scx_sched_ext_dependents(self) -> None:
+        ok = has_sched_ext()
+        self._apply_lavd_sched_ext_gating(ok)
+        self._meteor_section.apply_sched_ext_gate(ok)
+
+    def _apply_lavd_sched_ext_gating(self, sched_ok: bool) -> None:
+        is_sis = _is_sisyphus()
+        for row in (self._row_lavd_std, self._row_lavd_auto):
+            row.set_sensitive(is_sis and sched_ok)
+            if not is_sis:
+                row.set_tooltip_text("Требуется репозиторий Sisyphus")
+            elif not sched_ok:
+                row.set_tooltip_text(
+                    "Сначала подключите sched_ext в ядре (блок «Поддержка sched_ext в ядре», подвкладка «Планировщик ядра»)."
+                )
+            else:
+                row.set_tooltip_text("")
+
+    def _build_userspace_priorities_tab_intro(self, body):
+        group = Adw.PreferencesGroup()
+        self._add_info_row(
+            group,
+            "dialog-information-symbolic",
+            "Приоритеты и отзывчивость в userspace",
+            "Здесь фоновые службы, которые работают поверх обычного планировщика ядра (как правило CFS): "
+            "правила nice, I/O-приоритеты, иногда настройки латентностей CFS. Ядро само выстраивает "
+            "очередь готовых потоков, но получает подсказки о важности процессов.\n\n"
+            "ananicy-cpp (правила от CachyOS) и System76 Scheduler из Pop!_OS решают похожую задачу — "
+            "не включайте их одновременно. Совместимость с LAVD/sched_ext возможна, но стек сложнее и "
+            "поведение менее предсказуемо; обычно выбирают один основной механизм.",
+        )
+        body.append(group)
 
     def _add_info_row(
         self,
@@ -152,6 +259,15 @@ class TweaksPage(Gtk.Box):
             row.add_suffix(badge)
         group.add(row)
         return row
+
+    def _experimental_header_badge(self) -> Gtk.Widget:
+        lbl = Gtk.Label(label="Экспериментально")
+        lbl.add_css_class("ab-tweak-experimental-badge")
+        lbl.set_valign(Gtk.Align.CENTER)
+        lbl.set_tooltip_text(
+            "Экспериментальная функция: возможны сбои и регрессии — используйте на свой страх и риск."
+        )
+        return lbl
 
     def _make_branch_badge_label(self, branch: str) -> Gtk.Widget:
         if branch == "sisyphus":
@@ -372,14 +488,22 @@ class TweaksPage(Gtk.Box):
     def _build_scx_ui(self, body):
         is_sis = _is_sisyphus()
         group = Adw.PreferencesGroup()
-        group.set_title("Планировщик CPU (SCX) — Экспериментально")
+        group.set_title("Планировщик AMD Ryzen (SCX LAVD)")
+        group.set_header_suffix(self._experimental_header_badge())
         body.append(group)
 
         scx_intro = self._add_info_row(
             group,
             "dialog-information-symbolic",
             "scx-scheds",
-            "Экспериментальные планировщики sched-ext (LAVD) для игровых задач.",
+            "LAVD (Latency-aware Virtual Deadline) — планировщик из линейки sched-ext "
+            "(Igalia, Valve): переводит задачи на «виртуальные дедлайны», чтобы снизить "
+            "задержки в играх и при скачках нагрузки на рабочем столе.\n\n"
+            "Чтобы включить LAVD, нужны одновременно пакет scx-scheds из Sisyphus и уже "
+            "загруженное ядро с каталогом /sys/kernel/sched_ext. Подготовку ядра выполняют "
+            "в блоке «Поддержка sched_ext в ядре» на подвкладке «Планировщик ядра». "
+            "Заголовок группы отражает типичный сценарий для Ryzen; на других x86_64 LAVD "
+            "допустим при той же связке ядра и пакета.",
             sisyphus_only_badge=not is_sis,
             sisyphus_only_tooltip="Пакет scx-scheds доступен только в репозитории Sisyphus.",
         )
@@ -395,9 +519,6 @@ class TweaksPage(Gtk.Box):
             help_text="LAVD (Latency-aware Virtual Deadline) — планировщик от Igalia/Valve. Снижает задержки в играх и улучшает отзывчивость системы."
         )
         group.add(self._row_lavd_std)
-        if not is_sis:
-            self._row_lavd_std.set_sensitive(False)
-            self._row_lavd_std.set_tooltip_text("Требуется репозиторий Sisyphus")
 
         self._row_lavd_auto = SettingRow(
             "battery-symbolic", "LAVD (Autopower)",
@@ -409,9 +530,6 @@ class TweaksPage(Gtk.Box):
             help_text="Версия с флагом --autopower. Адаптирует частоты для экономии энергии при работе от батареи."
         )
         group.add(self._row_lavd_auto)
-        if not is_sis:
-            self._row_lavd_auto.set_sensitive(False)
-            self._row_lavd_auto.set_tooltip_text("Требуется репозиторий Sisyphus")
 
     def _check_scx_installed(self):
         return backend.check_app_installed({"check": ["rpm", "scx-scheds"]})
@@ -435,6 +553,17 @@ class TweaksPage(Gtk.Box):
             win.start_progress(f"Включение LAVD ({mode_str})...")
 
         def _thread_worker():
+            if not has_sched_ext():
+                GLib.idle_add(
+                    self._log,
+                    "✘  В текущем ядре нет sched_ext. Установите ядро через блок "
+                    "«Поддержка sched_ext в ядре» на подвкладке «Планировщик ядра» и перезагрузитесь.\n",
+                )
+                GLib.idle_add(row.set_done, False)
+                if win and hasattr(win, "stop_progress"):
+                    GLib.idle_add(win.stop_progress, False)
+                return
+
             if not self._check_scx_installed():
                 GLib.idle_add(self._log, "▶  Установка пакета scx-scheds...\n")
                 ok_inst = backend.run_privileged_sync(["apt-get", "install", "-y", "scx-scheds"], self._log)
@@ -520,7 +649,7 @@ WantedBy=multi-user.target
     def _build_ananicy_group(self, body):
         is_sis = _is_sisyphus()
         group = Adw.PreferencesGroup()
-        group.set_title("Приоритеты процессов")
+        group.set_title("Современный планировщик для Linux (от CachyOS)")
         body.append(group)
 
         an_intro = self._add_info_row(

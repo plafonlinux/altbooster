@@ -25,7 +25,6 @@ from tabs.extensions import ExtensionsPage
 from tabs.terminal import TerminalPage
 from tabs.davinci import DaVinciPage
 from tabs.amd import AmdPage
-from tabs.intel import IntelPage
 from tabs.maintenance import MaintenancePage
 from tabs.tweaks import TweaksPage
 from tabs.flatpak import FlatpakPage
@@ -40,7 +39,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         ("flatpak",     "Flatpak",         "flatpak-symbolic",             FlatpakPage),
         ("terminal",    "Терминал",        "utilities-terminal-symbolic",  TerminalPage),
         ("amd",         "AMD Radeon",      "video-display-symbolic",       AmdPage),
-        ("intel",       "Intel",           "processor-symbolic",           IntelPage),
         ("davinci",     "DaVinci Resolve", "davinci-symbolic",             DaVinciPage),
         ("maintenance", "Обслуживание",    "emblem-system-symbolic",       MaintenancePage),
         ("tweaks",      "Твики",           "applications-engineering-symbolic", TweaksPage),
@@ -58,13 +56,12 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         _icons_base = Path(__file__).parent.parent.parent / "icons"
 
-        _src_base = _icons_base / "hicolor" / "scalable"
+        _hicolor_src = _icons_base / "hicolor"
         _dst_hicolor = Path.home() / ".local" / "share" / "icons" / "hicolor"
-        _dst_base = _dst_hicolor / "scalable"
         _icons_copied = False
-        for _cat in ("apps", "devices"):
-            _src_cat = _src_base / _cat
-            _dst_cat = _dst_base / _cat
+        for _kind, _cat in (("scalable", "apps"), ("scalable", "devices"), ("symbolic", "devices")):
+            _src_cat = _hicolor_src / _kind / _cat
+            _dst_cat = _dst_hicolor / _kind / _cat
             if not _src_cat.exists():
                 continue
             _dst_cat.mkdir(parents=True, exist_ok=True)

@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import gi
 gi.require_version("GLib", "2.0")
@@ -490,25 +491,104 @@ def borg_get_pubkey() -> str | None:
     return None
 
 
+def _gvfs_runtime_dir() -> Path:
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        return Path(runtime) / "gvfs"
+    return Path(f"/run/user/{os.getuid()}/gvfs")
+
+
+def _scan_gvfs_for_google(base: Path) -> str | None:
+    if not base.is_dir():
+        return None
+    for entry in sorted(base.iterdir()):
+        if not entry.is_dir():
+            continue
+        n = entry.name.lower()
+        if "google-drive" in n or "gdrive" in n:
+            return str(entry.resolve())
+    return None
+
+
+def _line_looks_like_google_gvfs_mount(line: str) -> bool:
+    low = line.lower()
+    if "google-drive" in low or "google-drive:" in low:
+        return True
+    if "google" in low and "drive" in low:
+        return True
+    # Локализованные подписи (например «Диск Google»)
+    if "google" in low and "диск" in low:
+        return True
+    return False
+
+
+def _path_from_gio_mount_line(line: str) -> str | None:
+    if " -> " not in line or "file://" not in line:
+        return None
+    if not _line_looks_like_google_gvfs_mount(line):
+        return None
+    uri_part = line.rsplit(" -> ", 1)[-1].strip()
+    if not uri_part.startswith("file://"):
+        return None
+    raw = unquote(urlparse(uri_part).path).rstrip("/")
+    if not raw:
+        return None
+    p = Path(raw)
+    return str(p.resolve()) if p.is_dir() else None
+
+
 def find_gvfs_google_drive() -> str | None:
-    gvfs_base = Path(f"/run/user/{os.getuid()}/gvfs")
-    if gvfs_base.exists():
-        for entry in gvfs_base.iterdir():
-            if "google-drive" in entry.name and entry.is_dir():
-                return str(entry)
+    """
+    Каталог GVFS для Google Drive: обычно
+    /run/user/UID/gvfs/google-drive:host=…,user=…
+    Точка появляется после входа в GOA и часто — после первого открытия диска в «Файлах».
+    """
+    base = _gvfs_runtime_dir()
+    found = _scan_gvfs_for_google(base)
+    if found:
+        return found
+
     try:
         r = subprocess.run(
             ["gio", "mount", "-l"],
-            capture_output=True, text=True, encoding="utf-8", timeout=5,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=12,
         )
         for line in r.stdout.splitlines():
-            if "google-drive" in line.lower():
-                gvfs_base2 = Path(f"/run/user/{os.getuid()}/gvfs")
-                for entry in gvfs_base2.iterdir():
-                    if "google-drive" in entry.name:
-                        return str(entry)
+            p = _path_from_gio_mount_line(line)
+            if p:
+                return p
+        # После gio иногда успевает появиться каталог
+        found = _scan_gvfs_for_google(base)
+        if found:
+            return found
     except Exception:
         pass
+
+    try:
+        r = subprocess.run(
+            ["gio", "list", str(base)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=8,
+        )
+        for line in r.stdout.splitlines():
+            name = (line.strip().split(None, 1)[0] if line.strip() else "") or ""
+            if not name or name in (".", ".."):
+                continue
+            nl = name.lower()
+            if "google-drive" in nl or "gdrive" in nl:
+                cand = base / name
+                if cand.is_dir():
+                    return str(cand.resolve())
+    except Exception:
+        pass
+
     return None
 
 
