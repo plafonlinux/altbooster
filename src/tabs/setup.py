@@ -11,7 +11,7 @@ from pathlib import Path
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, Gdk, GLib, Gtk
 
 from core import backend
 from core import config
@@ -26,6 +26,39 @@ _MIRRORS = [
     ("HEAnet",    "heanet.list", "HEAnet (ftp.heanet.ie) — Ирландия"),
     ("IPSL",      "ipsl.list",   "IPSL (distrib-coffee.ipsl.jussieu.fr) — Франция"),
 ]
+
+_BADGE_CSS_LOADED = False
+
+def _ensure_badge_css():
+    global _BADGE_CSS_LOADED
+    if _BADGE_CSS_LOADED:
+        return
+    css = Gtk.CssProvider()
+    css.load_from_data(b"""
+        .ab-channel-badge {
+            border-radius: 999px;
+            padding: 2px 10px;
+            font-size: 0.78em;
+            font-weight: bold;
+        }
+        .ab-channel-stable { background-color: @success_color; color: white; }
+        .ab-channel-beta   { background-color: @warning_color; color: white; }
+        .ab-channel-alpha  { background-color: @error_color;   color: white; }
+    """)
+    Gtk.StyleContext.add_provider_for_display(
+        Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+    )
+    _BADGE_CSS_LOADED = True
+
+
+def _make_channel_badge(channel: str) -> Gtk.Label:
+    _ensure_badge_css()
+    lbl = Gtk.Label(label=channel)
+    lbl.add_css_class("ab-channel-badge")
+    lbl.add_css_class(f"ab-channel-{channel}")
+    lbl.set_valign(Gtk.Align.CENTER)
+    return lbl
+
 
 def _detect_active_mirror() -> str:
     for _, fname, _ in _MIRRORS:
@@ -164,47 +197,33 @@ class SetupPage(Gtk.Box):
 
         if stable_ver:
             row = Adw.ActionRow()
-            _icon_s = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
-            _icon_s.add_css_class("ab-icon-green")
-            row.add_prefix(_icon_s)
-
-            if self._is_newer(stable_ver, config.VERSION):
-                row.set_title(f"Стабильная  v{stable_ver}")
-                row.set_subtitle("Рекомендуемая версия")
-                btn = Gtk.Button(label="Установить")
-                btn.add_css_class("suggested-action")
-                btn.add_css_class("pill")
-                btn.set_valign(Gtk.Align.CENTER)
-            elif is_on_beta:
-                row.set_title(f"Стабильная  v{stable_ver}")
-                row.set_subtitle("Последняя стабильная версия")
-                btn = Gtk.Button(label="Установить")
-                btn.add_css_class("suggested-action")
-                btn.add_css_class("pill")
-                btn.set_valign(Gtk.Align.CENTER)
-            else:
-                row.set_title(f"Стабильная  v{stable_ver}  ✓")
+            row.add_prefix(Gtk.Image.new_from_icon_name("software-update-available-symbolic"))
+            row.set_title(f"Стабильная  v{stable_ver}")
+            if not is_on_beta and not self._is_newer(stable_ver, config.VERSION):
                 row.set_subtitle("Установлена последняя версия")
-                btn = None
-
-            if btn:
+            else:
+                row.set_subtitle("Последняя стабильная версия")
+                row.add_suffix(_make_channel_badge("stable"))
+                btn = Gtk.Button(label="Установить")
+                btn.add_css_class("suggested-action")
+                btn.add_css_class("pill")
+                btn.set_valign(Gtk.Align.CENTER)
                 btn.connect("clicked", lambda b, v=stable_ver: self._do_update(b, v, "stable"))
                 row.add_suffix(btn)
             self._update_group.add(row)
 
         if beta_ver:
+            _channel = "alpha" if "alpha" in beta_ver.lower() else "beta"
+            _title = "Альфа" if _channel == "alpha" else "Бета"
             row_b = Adw.ActionRow()
-            _icon_b = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
-            _icon_b.add_css_class("ab-icon-red")
-            row_b.add_prefix(_icon_b)
-            row_b.set_title(f"Бета  v{beta_ver}")
-
+            row_b.add_prefix(Gtk.Image.new_from_icon_name("software-update-available-symbolic"))
+            row_b.set_title(f"{_title}  v{beta_ver}")
             if is_on_beta and not self._is_newer(beta_ver, config.VERSION):
                 row_b.set_subtitle("Установлена · переустановить?")
             else:
                 row_b.set_subtitle("Тестовая версия с новыми функциями")
-
-            btn_b = Gtk.Button(label="Установить бета")
+            row_b.add_suffix(_make_channel_badge(_channel))
+            btn_b = Gtk.Button(label="Установить")
             btn_b.add_css_class("suggested-action")
             btn_b.add_css_class("pill")
             btn_b.set_valign(Gtk.Align.CENTER)
