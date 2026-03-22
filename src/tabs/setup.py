@@ -285,7 +285,7 @@ class SetupPage(Gtk.Box):
         def _do():
             ok = backend.run_gsettings(["set", "org.gnome.software", "download-updates", "false"])
             GLib.idle_add(row.set_done, ok)
-            GLib.idle_add(self._log, "✔  Автообновления отключены. Центр приложений теперь будет летать!\n" if ok else "✘  Ошибка применения настроек GNOME\n")
+            GLib.idle_add(self._log, "✔  Фоновая загрузка пакетов отключена. Применяется сразу, перезагрузка не нужна.\n" if ok else "✘  Ошибка применения настроек GNOME\n")
             if hasattr(win, "stop_progress"): win.stop_progress(ok)
             
         threading.Thread(target=_do, daemon=True).start()    
@@ -381,9 +381,17 @@ class SetupPage(Gtk.Box):
             return
 
         row.set_working()
-        self._log("\n▶  Обновление списка пакетов...\n")
-
         win = self.get_root()
+
+        if backend.is_system_busy():
+            msg = "GNOME Software или PackageKit обновляет базу в фоне — операция будет ждать освобождения"
+            self._log(f"\n⚠  {msg}\n")
+            if hasattr(win, "add_toast"):
+                t = Adw.Toast(title=msg)
+                t.set_timeout(8)
+                GLib.idle_add(win.add_toast, t)
+
+        self._log("\n▶  Обновление списка пакетов...\n")
         if hasattr(win, "start_progress"):
             win.start_progress("Обновление системы...")
 
@@ -509,7 +517,7 @@ class SetupPage(Gtk.Box):
         
         sys_rows = [
             ("security-high-symbolic",             "Включить sudo",               "control sudowheel enabled",                     "Активировать", self._on_sudo,           None,                                  "setting_sudo", "Активировано", self._on_sudo_undo, "Отключить"),
-            ("view-refresh-symbolic",    "Автообновление GNOME Software",      "Отключает фоновую загрузку в Центре приложений", "Отключить",    self._on_gnome_software_updates, lambda: backend.gsettings_get("org.gnome.software", "download-updates") == "false", "setting_gnome_software_updates", "Выключено", self._on_gnome_software_updates_undo, "Включить"),
+            ("view-refresh-symbolic",    "Автообновление GNOME Software",      "Отключаем фоновую загрузку GNOME Software", "Отключить",    self._on_gnome_software_updates, lambda: backend.gsettings_get("org.gnome.software", "download-updates") == "false", "setting_gnome_software_updates", "Выключено", self._on_gnome_software_updates_undo, "Включить"),
             ("media-flash-symbolic",               "Автоматический TRIM",         "Включает еженедельную очистку блоков SSD",      "Включить",     self._on_trim_timer,           backend.is_fstrim_enabled,             "setting_trim_auto", "Активировано", self._on_trim_timer_undo, "Отключить"),
             ("document-open-recent-symbolic",      "Лимиты журналов",             "SystemMaxUse=100M и сжатие в journald.conf",    "Настроить",    self._on_journal_limit,  backend.is_journal_optimized,          "setting_journal_opt", "Активировано", self._on_journal_limit_undo, "Сбросить"),
             ("video-display-symbolic",             "Дробное масштабирование",     "Включает scale-monitor-framebuffer",            "Включить",     self._on_scale,          backend.is_fractional_scaling_enabled, "setting_scale", "Активировано", self._on_scale_undo, "Отключить"),

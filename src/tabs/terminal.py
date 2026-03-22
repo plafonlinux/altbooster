@@ -266,11 +266,11 @@ class TerminalPage(Gtk.Box):
         self._log("\n▶  Установка Ptyxis...\n")
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress("Установка Ptyxis...")
-        cmd = ["bash", "-c", "apt-get remove -y gnome-terminal 2>/dev/null || true && apt-get install -y ptyxis"]
         def _done(ok):
             row.set_done(ok)
             if hasattr(win, "stop_progress"): win.stop_progress(ok)
-        backend.run_privileged(cmd, self._log, _done)
+        backend.run_privileged(["bash", "-c", "apt-get remove -y gnome-terminal 2>/dev/null || true"], self._log,
+            lambda ok: backend.run_epm(["epm", "-i", "ptyxis"], self._log, _done))
 
     def _on_remove_ptyxis(self, row):
         row.set_working()

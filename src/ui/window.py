@@ -142,18 +142,31 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._global_search_btn.set_icon_name("system-search-symbolic")
         self._global_search_btn.set_hexpand(False)
         self._global_search_btn.set_vexpand(False)
-        self._global_search_btn.set_halign(Gtk.Align.END)
-        self._global_search_btn.set_valign(Gtk.Align.END)
-        self._global_search_btn.set_margin_end(16)
-        self._global_search_btn.set_margin_bottom(16)
         self._global_search_btn.add_css_class("circular")
         self._global_search_btn.add_css_class("ab-global-search-btn")
         self._global_search_btn.set_tooltip_text("По утилите Ctrl + K")
         self._global_search_btn.connect("clicked", self._present_global_search)
 
+        self._log_overlay_btn = Gtk.Button()
+        self._log_overlay_btn.set_icon_name("terminal-log-symbolic")
+        self._log_overlay_btn.set_hexpand(False)
+        self._log_overlay_btn.set_vexpand(False)
+        self._log_overlay_btn.add_css_class("circular")
+        self._log_overlay_btn.add_css_class("ab-global-search-btn")
+        self._log_overlay_btn.set_tooltip_text("Лог терминала")
+        self._log_overlay_btn.connect("clicked", lambda *_: self._open_log_overlay())
+
+        _fab_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        _fab_box.set_halign(Gtk.Align.END)
+        _fab_box.set_valign(Gtk.Align.END)
+        _fab_box.set_margin_end(16)
+        _fab_box.set_margin_bottom(16)
+        _fab_box.append(self._log_overlay_btn)
+        _fab_box.append(self._global_search_btn)
+
         self._op_card = self._build_op_card()
-        stack_overlay.add_overlay(self._global_search_btn)
-        stack_overlay.set_measure_overlay(self._global_search_btn, False)
+        stack_overlay.add_overlay(_fab_box)
+        stack_overlay.set_measure_overlay(_fab_box, False)
         stack_overlay.add_overlay(self._op_card)
         stack_overlay.set_measure_overlay(self._op_card, False)
 
@@ -161,6 +174,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._content_host_overlay.set_child(stack_overlay)
         self._content_host_overlay.set_vexpand(True)
         self._global_search_panel = None
+        self._log_overlay_panel = None
+        self._search_items_cache: list | None = None
+        self._search_items_building = False
+        self._search_items_built_at: float = 0.0
 
         root.append(self._content_host_overlay)
 
@@ -306,6 +323,35 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 box-shadow: 0 4px 16px alpha(black, 0.28);
                 opacity: 1;
                 padding: 12px 20px 14px 20px;
+            }
+            .ab-log-overlay-backdrop {
+                background-color: alpha(black, 0.62);
+            }
+            .ab-log-overlay-card {
+                background-color: @card_bg_color;
+                border-radius: 16px;
+                border: 1px solid alpha(@borders, 0.85);
+                box-shadow: 0 8px 28px alpha(black, 0.22);
+            }
+            .ab-log-overlay-header {
+                padding: 10px 10px 8px 16px;
+                border-bottom: 1px solid alpha(@borders, 0.4);
+            }
+            .ab-log-overlay-card scrolledwindow {
+                background: transparent;
+                border-radius: 0 0 15px 15px;
+            }
+            .ab-log-overlay-card scrolledwindow > undershoot,
+            .ab-log-overlay-card scrolledwindow > overshoot {
+                border-radius: 0 0 15px 15px;
+            }
+            .ab-log-overlay-card textview {
+                background: transparent;
+                border-radius: 0 0 15px 15px;
+            }
+            .ab-log-overlay-card textview > text {
+                background: transparent;
+                border-radius: 0 0 15px 15px;
             }
         """)
         Gtk.StyleContext.add_provider_for_display(
@@ -685,7 +731,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._log_scroll = Gtk.ScrolledWindow()
         self._log_scroll.set_vexpand(False)
         self._log_scroll.set_min_content_height(0)
-        self._log_scroll.set_propagate_natural_height(True)
+        self._log_scroll.set_max_content_height(200)
+        self._log_scroll.set_propagate_natural_height(False)
 
         self._tv = Gtk.TextView()
         self._tv.set_editable(False)
@@ -707,9 +754,95 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
     def _on_log_expander_expanded(self, *_):
         if self._log_expander.get_expanded():
-            self._log_scroll.set_min_content_height(140)
+            self._log_scroll.set_min_content_height(160)
         else:
             self._log_scroll.set_min_content_height(0)
+
+    def _build_log_overlay(self):
+        panel = Gtk.Overlay()
+        panel.set_hexpand(True)
+        panel.set_vexpand(True)
+        panel.set_halign(Gtk.Align.FILL)
+        panel.set_valign(Gtk.Align.FILL)
+        panel.set_visible(False)
+
+        backdrop = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        backdrop.add_css_class("ab-log-overlay-backdrop")
+        backdrop.set_hexpand(True)
+        backdrop.set_vexpand(True)
+        bd_click = Gtk.GestureClick()
+        bd_click.connect("pressed", lambda *_: self._close_log_overlay())
+        backdrop.add_controller(bd_click)
+
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        card.add_css_class("ab-log-overlay-card")
+        card.set_size_request(800, 520)
+        card.set_halign(Gtk.Align.CENTER)
+        card.set_valign(Gtk.Align.CENTER)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header.add_css_class("ab-log-overlay-header")
+        title = Gtk.Label(label="Лог терминала")
+        title.add_css_class("heading")
+        title.set_hexpand(True)
+        title.set_halign(Gtk.Align.START)
+        self._log_overlay_close_btn = Gtk.Button()
+        self._log_overlay_close_btn.set_icon_name("window-close-symbolic")
+        self._log_overlay_close_btn.add_css_class("flat")
+        self._log_overlay_close_btn.add_css_class("circular")
+        self._log_overlay_close_btn.connect("clicked", lambda *_: self._close_log_overlay())
+        header.append(title)
+        header.append(self._log_overlay_close_btn)
+
+        overlay_tv = Gtk.TextView()
+        overlay_tv.set_buffer(self._buf)
+        overlay_tv.set_editable(False)
+        overlay_tv.set_monospace(True)
+        overlay_tv.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        overlay_tv.set_left_margin(12)
+        overlay_tv.set_right_margin(12)
+        overlay_tv.set_top_margin(8)
+        overlay_tv.set_bottom_margin(12)
+
+        self._log_overlay_scroll = Gtk.ScrolledWindow()
+        self._log_overlay_scroll.set_vexpand(True)
+        self._log_overlay_scroll.set_child(overlay_tv)
+
+        card.append(header)
+        card.append(self._log_overlay_scroll)
+
+        panel.set_child(backdrop)
+        panel.add_overlay(card)
+        panel.set_measure_overlay(card, False)
+
+        key = Gtk.EventControllerKey()
+        key.connect("key-pressed", self._on_log_overlay_key)
+        panel.add_controller(key)
+
+        return panel
+
+    def _open_log_overlay(self):
+        if self._log_overlay_panel is None:
+            self._log_overlay_panel = self._build_log_overlay()
+            self._content_host_overlay.add_overlay(self._log_overlay_panel)
+            self._content_host_overlay.set_measure_overlay(self._log_overlay_panel, False)
+        self._log_overlay_panel.set_visible(True)
+        self._log_overlay_close_btn.grab_focus()
+        GLib.idle_add(self._scroll_log_overlay_to_bottom)
+
+    def _scroll_log_overlay_to_bottom(self):
+        adj = self._log_overlay_scroll.get_vadjustment()
+        adj.set_value(adj.get_upper() - adj.get_page_size())
+
+    def _close_log_overlay(self):
+        if self._log_overlay_panel:
+            self._log_overlay_panel.set_visible(False)
+
+    def _on_log_overlay_key(self, controller, keyval, keycode, state):
+        if keyval == Gdk.KEY_Escape:
+            self._close_log_overlay()
+            return True
+        return False
 
     def _hide_op_card_if_idle(self) -> None:
         if self._progress_nesting == 0:
@@ -783,6 +916,21 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._hide_op_card_if_idle()
         if config.INITIAL_TAB and config.INITIAL_TAB in self._pages:
             GLib.idle_add(self._stack.set_visible_child_name, config.INITIAL_TAB)
+        GLib.timeout_add(2000, self._warmup_search_cache)
+
+    def _warmup_search_cache(self) -> bool:
+        from ui.global_search import build_all_search_items
+        if not self._search_items_building and self._search_items_cache is None:
+            self._search_items_building = True
+            main_tabs = self._MAIN_TABS
+            borg_tab = self._BORG_TAB
+
+            def _build():
+                result = build_all_search_items(main_tabs, borg_tab)
+                GLib.idle_add(self._on_search_items_ready, result)
+
+            threading.Thread(target=_build, daemon=True).start()
+        return False
 
 
     def _load_settings(self):
@@ -838,12 +986,32 @@ class AltBoosterWindow(Adw.ApplicationWindow):
     def _present_global_search(self, *_):
         from ui.global_search import GlobalSearchPanel, build_all_search_items
 
-        items = build_all_search_items(self._MAIN_TABS, self._BORG_TAB)
         if self._global_search_panel is None:
             self._global_search_panel = GlobalSearchPanel()
             self._content_host_overlay.add_overlay(self._global_search_panel)
             self._content_host_overlay.set_measure_overlay(self._global_search_panel, False)
+
+        items = self._search_items_cache or []
         self._global_search_panel.open(items, self._on_global_search_pick)
+
+        stale = (time.time() - self._search_items_built_at) > 60.0
+        if not self._search_items_building and stale:
+            self._search_items_building = True
+            main_tabs = self._MAIN_TABS
+            borg_tab = self._BORG_TAB
+
+            def _build():
+                result = build_all_search_items(main_tabs, borg_tab)
+                GLib.idle_add(self._on_search_items_ready, result)
+
+            threading.Thread(target=_build, daemon=True).start()
+
+    def _on_search_items_ready(self, items: list) -> None:
+        self._search_items_cache = items
+        self._search_items_building = False
+        self._search_items_built_at = time.time()
+        if self._global_search_panel and self._global_search_panel.get_visible():
+            self._global_search_panel.update_items(items)
 
     def _on_global_search_pick(self, tab_id: str, focus_spec: str | None = None):
         self._stack.set_visible_child_name(tab_id)
@@ -1056,6 +1224,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         top.append(self._op_card_stop_btn)
         card.append(top)
 
+        click = Gtk.GestureClick()
+        click.connect("released", self._on_op_card_clicked)
+        card.add_controller(click)
+        card.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+
         self._op_card_detail = Gtk.Label()
         self._op_card_detail.add_css_class("caption")
         self._op_card_detail.set_halign(Gtk.Align.START)
@@ -1091,6 +1264,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 self._reset_status_timer_id = None
 
         GLib.idle_add(_do)
+
+    def _on_op_card_clicked(self, gesture, n_press, x, y):
+        self._open_log_overlay()
 
     def _on_stop_clicked(self, _):
         if not self._on_cancel_cb:

@@ -130,10 +130,16 @@ def _wait_for_apt_lock(on_line: OnLine | None = None, timeout: int = 60) -> bool
         if not _is_apt_locked():
             return True
         if on_line:
-            GLib.idle_add(
-                on_line,
-                f"⏳ APT занят другим процессом, ожидание... ({attempt + 1})\n",
-            )
+            if attempt == 0:
+                GLib.idle_add(
+                    on_line,
+                    "⏳ Пакетный менеджер занят другим процессом (возможно, GNOME Software или PackageKit обновляет базу в фоне). Ожидание освобождения...\n",
+                )
+            else:
+                GLib.idle_add(
+                    on_line,
+                    f"⏳ Ожидание... ({attempt * 5} с)\n",
+                )
         time.sleep(5)
     return False
 

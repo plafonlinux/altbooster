@@ -681,6 +681,12 @@ class GlobalSearchPanel(Gtk.Overlay):
         self.set_visible(True)
         GLib.idle_add(self._entry.grab_focus)
 
+    def update_items(self, items: Sequence[GlobalSearchItem]) -> None:
+        self._items = list(items)
+        if self._entry.get_text().strip():
+            self._filtered = filter_items(self._items, self._entry.get_text())
+            self._rebuild_rows()
+
     def dismiss(self) -> None:
         self.set_visible(False)
 
