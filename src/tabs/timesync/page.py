@@ -161,33 +161,13 @@ class BorgPage(Gtk.Box):
         scroll.set_vexpand(True)
         scroll.set_child(clamp)
 
-        # ── заголовок ────────────────────────────────────────────────────
-        page_title = Gtk.Label(label="TimeSync")
-        page_title.add_css_class("heading")
-        page_title.set_halign(Gtk.Align.START)
-        self._tm_box.append(page_title)
-
-        # ── блок «Этот компьютер» (fastfetch) ────────────────────────────
-        sysinfo_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        sysinfo_title = Gtk.Label(label="Этот компьютер")
-        sysinfo_title.add_css_class("heading")
-        sysinfo_title.set_halign(Gtk.Align.START)
-        sysinfo_title.set_hexpand(True)
-        self._tm_sysinfo_toggle = Gtk.ToggleButton()
-        self._tm_sysinfo_toggle.set_icon_name("pan-end-symbolic")
-        self._tm_sysinfo_toggle.add_css_class("flat")
-        self._tm_sysinfo_toggle.add_css_class("circular")
-        self._tm_sysinfo_toggle.set_valign(Gtk.Align.CENTER)
-        sysinfo_header.append(sysinfo_title)
-        sysinfo_header.append(self._tm_sysinfo_toggle)
-        self._tm_box.append(sysinfo_header)
-
-        self._tm_sysinfo_revealer = Gtk.Revealer()
-        self._tm_sysinfo_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
-        self._tm_sysinfo_revealer.set_reveal_child(False)
+        # ── блок «Этот компьютер» (fastfetch), строка-спойлер ────────────
+        sysinfo_group = Adw.PreferencesGroup()
+        sysinfo_expander = Adw.ExpanderRow()
+        sysinfo_expander.set_title("Этот компьютер")
+        sysinfo_expander.set_expanded(False)
 
         sysinfo_card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        sysinfo_card.add_css_class("card")
         sysinfo_card.set_overflow(Gtk.Overflow.HIDDEN)
 
         def _make_info_label():
@@ -217,15 +197,15 @@ class BorgPage(Gtk.Box):
         self._tm_sysinfo_label2.set_label("")
         sysinfo_card.append(self._tm_sysinfo_label2)
 
-        self._tm_sysinfo_revealer.set_child(sysinfo_card)
-        self._tm_box.append(self._tm_sysinfo_revealer)
+        sysinfo_content_row = Gtk.ListBoxRow()
+        sysinfo_content_row.set_selectable(False)
+        sysinfo_content_row.set_activatable(False)
+        sysinfo_content_row.set_child(sysinfo_card)
+        sysinfo_expander.add_row(sysinfo_content_row)
 
-        def _on_sysinfo_toggle(btn):
-            expanded = btn.get_active()
-            self._tm_sysinfo_revealer.set_reveal_child(expanded)
-            btn.set_icon_name("pan-down-symbolic" if expanded else "pan-end-symbolic")
+        sysinfo_group.add(sysinfo_expander)
+        self._tm_box.append(sysinfo_group)
 
-        self._tm_sysinfo_toggle.connect("toggled", _on_sysinfo_toggle)
         threading.Thread(target=self._tm_load_sysinfo, daemon=True).start()
 
         # ── хранилище Borg + экспорт .tar (одна карточка, выше списка архивов) ─
@@ -404,7 +384,8 @@ class BorgPage(Gtk.Box):
         self._repo_group.set_title("Куда сохранять" if simple else "Расположение")
         if simple:
             self._repo_group.set_description(
-                "Папка с Borg-хранилищем; при необходимости — экспорт в .tar для переноса на другой ПК."
+                "Создается архив резервной копии выбранных данных с возможностью переноса на другой ПК "
+                "для восстановления. Ниже можно включить опцию архивирования для удобного переноса."
             )
         else:
             self._repo_group.set_description(None)
