@@ -53,6 +53,8 @@ class MirrorPage(Gtk.Box):
         switcher.set_stack(self._stack)
         switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
         switcher.set_halign(Gtk.Align.CENTER)
+        switcher.set_valign(Gtk.Align.CENTER)
+        switcher.add_css_class("ab-borg-viewswitcher")
         switcher.set_margin_top(12)
         switcher.set_margin_bottom(12)
 
@@ -349,6 +351,9 @@ class MirrorPage(Gtk.Box):
         self._sv_rows: list[Adw.ActionRow] = []
         self._sv_group = Adw.PreferencesGroup()
         self._sv_group.set_title("Субволюмы")
+        self._sv_group.set_description(
+            "Снимки TimeSync (каталог .snapshots/altbooster) не показываются: они уже внутри выбранного @home."
+        )
         body.append(self._sv_group)
 
         self._sv_loading_row = Adw.ActionRow()
@@ -444,7 +449,18 @@ class MirrorPage(Gtk.Box):
                 def _is_root_snap(path: str) -> bool:
                     return path.startswith(".snap_") and path.endswith("_prev")
 
-                regular = [p for p in found if not _has_snap_part(p) and (p not in _check_if_empty or _has_content(p))]
+                def _is_timesync_snapshot_subvol(path: str) -> bool:
+                    # Снэпшоты вкладки «Снэпшоты»: вложенные субтомы под @home — дублируют зеркало
+                    p = path.replace("\\", "/")
+                    return ".snapshots/altbooster" in p
+
+                regular = [
+                    p
+                    for p in found
+                    if not _has_snap_part(p)
+                    and not _is_timesync_snapshot_subvol(p)
+                    and (p not in _check_if_empty or _has_content(p))
+                ]
                 snaps = [p for p in found if _is_root_snap(p)]
 
                 if regular:
@@ -564,12 +580,18 @@ class MirrorPage(Gtk.Box):
         dlg.add_response("delete", "Удалить")
         dlg.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
         dlg.set_default_response("cancel")
-        dlg.connect("response", lambda d, resp: self._delete_snap(resp, snap_path, row))
-        dlg.present(self.get_root())
+        dlg.set_close_response("cancel")
+        dlg.connect("response", lambda _d, resp: self._delete_snap(resp, snap_path, row))
+        root = self.get_root()
+        if root:
+            dlg.present(root)
+        else:
+            dlg.present()
 
     def _delete_snap(self, response: str, snap_path: str, row: Adw.ActionRow):
         if response != "delete":
             return
+        self._log(f"\n▶  Удаление снимка зеркала: {snap_path}\n")
         toplevel = "/tmp/.btrfs_mirror_toplevel"
         script = (
             "set -e\n"
@@ -582,13 +604,12 @@ class MirrorPage(Gtk.Box):
 
         def _on_done(ok):
             if ok:
-                GLib.idle_add(self._sv_snap_group.remove, row)
-                GLib.idle_add(self._sv_snap_rows.remove, row)
-                GLib.idle_add(lambda: self._sv_snap_group.set_visible(bool(self._sv_snap_rows)))
+                self._log("✔  Снимок удалён\n")
+                GLib.idle_add(self._load_btrfs_subvols)
             else:
                 GLib.idle_add(self._show_error, f"Не удалось удалить снимок {snap_path}")
 
-        backend.run_privileged(["bash", "-c", script], None, _on_done)
+        backend.run_privileged(["bash", "-c", script], self._log, _on_done)
 
     def _build_restore_page(self) -> Gtk.Widget:
         scroll, body = make_scrolled_page()

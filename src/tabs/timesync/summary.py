@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 from pathlib import Path
@@ -102,10 +103,11 @@ class BorgBackupSummaryDialog(Adw.Window):
         try:
             r = subprocess.run(
                 ["du", "--apparent-size", "-sk", path],
-                capture_output=True, text=True, encoding="utf-8", timeout=30,
+                capture_output=True, text=True, encoding="utf-8", timeout=180,
             )
-            if r.returncode == 0:
-                kb = int(r.stdout.split("\t")[0].strip())
+            line = (r.stdout or "").splitlines()
+            if line:
+                kb = int(line[0].split("\t")[0].strip())
                 if kb >= 1024 * 1024:
                     return f"{kb / 1024 / 1024:.1f} ГБ", kb
                 if kb >= 1024:
@@ -160,17 +162,53 @@ class BorgBackupSummaryDialog(Adw.Window):
         total_kb = 0
         var_app_str = str(home / ".var" / "app")
         estimate_paths: list[str] = []
+        du_kb_cache: dict[str, int] = {}
+        excludes = [os.path.expanduser(p) for p in self._opts.get("excludes", [])]
+
+        def _norm_path(p: str) -> str:
+            try:
+                return str(Path(p).resolve())
+            except Exception:
+                return os.path.abspath(p)
+
+        normalized_excludes = [_norm_path(p) for p in excludes]
+
+        def _du_kb_cached(p: str) -> int:
+            np = _norm_path(p)
+            if np not in du_kb_cache:
+                _, kb = self._du_pair(np)
+                du_kb_cache[np] = kb
+            return du_kb_cache[np]
+
+        def _effective_kb_for_path(path: str, base_kb: int) -> int:
+            np = _norm_path(path)
+            if not normalized_excludes:
+                return base_kb
+            prefix = np.rstrip("/") + "/"
+            excluded_kb = 0
+            for ex in normalized_excludes:
+                if ex == np or ex.startswith(prefix):
+                    excluded_kb += _du_kb_cached(ex)
+            return max(0, base_kb - excluded_kb)
 
         raw_paths = list(self._opts.get("paths", []))
         estimate_paths.extend(raw_paths)
+        raw_paths_normalized = [_norm_path(p) for p in raw_paths]
+        var_app_norm = _norm_path(var_app_str)
+        var_app_is_already_in_paths = any(
+            var_app_norm == rp or var_app_norm.startswith(rp.rstrip("/") + "/")
+            for rp in raw_paths_normalized
+        )
         paths_with_size = []
         paths_kb = 0
         for p in raw_paths:
             s, kb = self._du_pair(p)
-            paths_with_size.append((p, s))
+            effective_kb = _effective_kb_for_path(p, kb)
+            display_size = self._fmt_kb(effective_kb)
+            paths_with_size.append((p, display_size))
             if not p.startswith(var_app_str):
-                paths_kb += kb
-                total_kb += kb
+                paths_kb += effective_kb
+                total_kb += effective_kb
         data["paths"] = paths_with_size
         data["paths_kb"] = paths_kb
 
@@ -262,7 +300,8 @@ class BorgBackupSummaryDialog(Adw.Window):
                     flatpak_kb += kb
                 flatpak_total_str = self._fmt_kb(flatpak_kb) if flatpak_kb else ""
             data["flatpak_data_total"] = flatpak_total_str
-            total_kb += flatpak_kb
+            if not var_app_is_already_in_paths:
+                total_kb += flatpak_kb
 
         if self._opts.get("home_dirs"):
             home_dirs = self._opts["home_dirs"]
@@ -464,7 +503,7 @@ class BorgBackupSummaryDialog(Adw.Window):
             badge = f"{len(paths)} источников"
             if paths_kb:
                 badge += f"  ·  {self._fmt_kb(paths_kb)}"
-            section, flow = self._make_section("Конфигурационные файлы", badge)
+            section, flow = self._make_section("Домашний каталог", badge)
             self._add_cards(flow, paths, "folder-symbolic")
             self._content_box.append(section)
 

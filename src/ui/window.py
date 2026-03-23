@@ -21,6 +21,13 @@ from core import config
 from core import backend
 
 _ALT_ZERO_GUIDE_URL = "https://plafon.gitbook.io/alt-zero"
+
+# borg create --progress: "2.88 GB O 1.70 GB C 1.60 GB D 14576 N path/to/file"
+_BORG_CREATE_PROGRESS_RE = re.compile(
+    r"^([\d.,]+\s+\S+)\s+O\s+([\d.,]+\s+\S+)\s+C\s+([\d.,]+\s+\S+)\s+D\s+"
+    r"(?:[\d.,]+\s+%\s+)?"
+    r"(\d+)\s+N\s*(.*)$"
+)
 from tabs.setup import SetupPage
 from tabs.apps import AppsPage
 from tabs.extensions import ExtensionsPage
@@ -335,6 +342,23 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             .ab-log-overlay-card textview > text {
                 background-color: @view_bg_color;
                 border-radius: 0 0 15px 15px;
+            }
+            /* TimeSync tabs: align icon + label in header */
+            viewswitcher.ab-borg-viewswitcher {
+                margin-top: 2px;
+                margin-bottom: 2px;
+            }
+            viewswitcher.ab-borg-viewswitcher button.toggle > stack > box.wide {
+                padding-top: 5px;
+                padding-bottom: 5px;
+                border-spacing: 8px;
+            }
+            viewswitcher.ab-borg-viewswitcher button.toggle > stack > box.wide > label {
+                padding-top: 1px;
+                padding-bottom: 1px;
+            }
+            viewswitcher.ab-borg-viewswitcher button.toggle > stack > box.wide > image {
+                -gtk-icon-size: 18px;
             }
         """)
         Gtk.StyleContext.add_provider_for_display(
@@ -867,7 +891,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             self._op_card_spinner.set_visible(True)
             self._op_card_spinner.set_spinning(True)
             self._op_card_stop_btn.set_visible(False)
-            self._op_card_detail.set_visible(False)
+            self._op_card_detail_box.set_visible(False)
             self._op_card.set_visible(True)
             self._op_card.set_can_target(False)
 
@@ -1180,7 +1204,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         card.set_margin_end(16)
         card.set_halign(Gtk.Align.END)
         card.set_valign(Gtk.Align.END)
-        card.set_size_request(300, -1)
+        card.set_size_request(360, -1)
         card.set_visible(False)
         card.set_can_target(False)
 
@@ -1215,13 +1239,29 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         card.add_controller(click)
         card.set_cursor(Gdk.Cursor.new_from_name("pointer"))
 
-        self._op_card_detail = Gtk.Label()
-        self._op_card_detail.add_css_class("caption")
-        self._op_card_detail.set_halign(Gtk.Align.START)
-        self._op_card_detail.set_margin_bottom(2)
-        self._op_card_detail.set_ellipsize(Pango.EllipsizeMode.END)
-        self._op_card_detail.set_label("Запуск...")
-        card.append(self._op_card_detail)
+        self._op_card_detail_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self._op_card_detail_box.set_halign(Gtk.Align.FILL)
+        self._op_card_detail_box.set_hexpand(True)
+
+        def _detail_lbl() -> Gtk.Label:
+            lbl = Gtk.Label()
+            lbl.add_css_class("caption")
+            lbl.set_halign(Gtk.Align.START)
+            lbl.set_xalign(0.0)
+            lbl.set_hexpand(True)
+            lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            lbl.set_single_line_mode(True)
+            lbl.set_selectable(False)
+            return lbl
+
+        self._op_card_detail_l1 = _detail_lbl()
+        self._op_card_detail_l2 = _detail_lbl()
+        self._op_card_detail_l3 = _detail_lbl()
+        self._op_card_detail_l3.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        self._op_card_detail_box.append(self._op_card_detail_l1)
+        self._op_card_detail_box.append(self._op_card_detail_l2)
+        self._op_card_detail_box.append(self._op_card_detail_l3)
+        card.append(self._op_card_detail_box)
 
         return card
 
@@ -1241,8 +1281,8 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             self._op_card_spinner.set_spinning(True)
             self._op_card_stop_btn.set_visible(True)
             self._op_card_stop_btn.set_sensitive(True)
-            self._op_card_detail.set_visible(True)
-            self._op_card_detail.set_label("Запуск...")
+            self._op_card_detail_box.set_visible(True)
+            self._set_op_detail_lines("Запуск...", "", "")
             self._op_card.set_visible(True)
             self._op_card.set_can_target(True)
             if self._reset_status_timer_id:
@@ -1288,7 +1328,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 self._op_card_spinner.set_visible(False)
                 self._op_card_stop_btn.set_visible(False)
                 self._op_card_stop_btn.set_sensitive(True)
-                self._op_card_detail.set_visible(False)
+                self._op_card_detail_box.set_visible(False)
                 self._op_card.set_visible(True)
                 self._op_card.set_can_target(True)
                 if self._reset_status_timer_id:
@@ -1324,7 +1364,42 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             self._buf.move_mark(mark, end)
         self._tv.scroll_mark_onscreen(mark)
 
+    def _set_op_detail_lines(self, l1: str = "", l2: str = "", l3: str = "") -> None:
+        rows = (l1 or "").strip(), (l2 or "").strip(), (l3 or "").strip()
+        for lbl, t in zip(
+            (self._op_card_detail_l1, self._op_card_detail_l2, self._op_card_detail_l3),
+            rows,
+        ):
+            lbl.set_visible(bool(t))
+            lbl.set_label(t if t else "")
+
+    @staticmethod
+    def _normalize_borg_progress_path(path: str) -> str:
+        p = (path or "").strip()
+        if not p or p == "-":
+            return ""
+        if p.startswith("/"):
+            return p
+        if p.startswith(("home/", "var/", "usr/", "mnt/", "media/", "run/")):
+            return "/" + p
+        return p
+
     def _parse_progress_line(self, line: str):
+        # borg create --progress: "2.88 GB O 1.70 GB C 1.60 GB D 14576 N path"
+        bm = _BORG_CREATE_PROGRESS_RE.match(line.strip())
+        if bm:
+            o_s, c_s, d_s, n_raw, path_raw = bm.groups()
+            try:
+                n_fmt = f"{int(n_raw):,}".replace(",", " ")
+            except ValueError:
+                n_fmt = n_raw
+            path = self._normalize_borg_progress_path(path_raw)
+            self._set_op_detail_lines(
+                f"Исходно {o_s}  ·  Сжато {c_s}  ·  В репозитории {d_s}",
+                f"Файлов обработано: {n_fmt}",
+                f"Сейчас: {path}" if path else "",
+            )
+            return
         # rsync --info=progress2:  "  1,234,567  67%  45.20MB/s    0:01:23 ..."
         m = re.search(r'(\d+)%\s+([\d.]+\s*[KMGTkm]?B/s)\s+(\d+:\d+:\d+)', line)
         if m:
@@ -1332,9 +1407,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             speed = m.group(2)
             eta = m.group(3)
             self._op_card_pct = pct
-            self._op_card_detail.set_label(f"{int(pct*100)}%  ·  {speed}  ·  осталось {eta}")
+            self._set_op_detail_lines(f"{int(pct * 100)}%  ·  {speed}  ·  осталось {eta}", "", "")
             return
-        # borg create --progress: "2.34 GB O 1.23 GB C 456.78 MB D 78.9% N ..."
+        # borg create --progress: "2.34 GB O 1.23 GB C 456.78 MB D 78.9% N ..." (старые/другие сборки)
         m2 = re.search(r'(\d+(?:\.\d+)?)\s*%', line)
         if m2:
             pct = float(m2.group(1)) / 100.0
@@ -1347,11 +1422,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             )
             if meta:
                 eta_hint = f"  ·  осталось ~{meta.group(1).strip()}"
-            self._op_card_detail.set_label(f"{int(pct*100)}%{eta_hint}")
+            self._set_op_detail_lines(f"{int(pct * 100)}%{eta_hint}", "", "")
             return
-        # btrfs send / generic: just show last log line in detail
+        # btrfs send / generic: короткая строка — одна строка деталей
         if line and len(line) < 80:
-            self._op_card_detail.set_label(line)
+            self._set_op_detail_lines(line, "", "")
 
     def _log_writer_loop(self):
         self._setup_logging()

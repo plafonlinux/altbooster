@@ -62,6 +62,7 @@ from core.borg import (
     restore_packages_meta,
     restore_dconf_meta,
     borg_archive_info,
+    archive_stats_dedup_bytes,
     borg_export_tar,
 )
 from core.btrfs import (

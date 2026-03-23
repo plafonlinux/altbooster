@@ -189,7 +189,11 @@ def _wrap_epm_auto_install(cmd: Sequence[str]) -> Sequence[str]:
     )
     return ["bash", "-c", script, "--", *cmd]
 
-def _run_pkexec(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
+def _run_pkexec(cmd: Sequence[str], on_line: OnLine | None, on_done: OnDone) -> None:
+    def _emit(line: str) -> None:
+        if on_line is not None:
+            GLib.idle_add(on_line, line)
+
     def _worker() -> None:
         check_lock = False
         if cmd:
@@ -205,7 +209,7 @@ def _run_pkexec(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
             proc = _get_pkexec_shell()
 
             if not proc or proc.poll() is not None:
-                GLib.idle_add(on_line, "⚠  Root-сессия не активна (pkexec).\n")
+                _emit("⚠  Root-сессия не активна (pkexec).\n")
                 GLib.idle_add(on_done, False)
                 return
 
@@ -232,19 +236,19 @@ def _run_pkexec(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
                                 success = False
                             break
 
-                        GLib.idle_add(on_line, line)
+                        _emit(line)
             except (BrokenPipeError, OSError):
-                GLib.idle_add(on_line, "⚠  Root-сессия была прервана.\n")
+                _emit("⚠  Root-сессия была прервана.\n")
 
             GLib.idle_add(on_done, success)
 
     threading.Thread(target=_worker, daemon=True).start()
 
 
-def run_privileged(cmd: Sequence[str], on_line: OnLine, on_done: OnDone) -> None:
+def run_privileged(cmd: Sequence[str], on_line: OnLine | None, on_done: OnDone) -> None:
     _run_pkexec(cmd, on_line, on_done)
 
-def run_privileged_sync(cmd: Sequence[str], on_line: OnLine) -> bool:
+def run_privileged_sync(cmd: Sequence[str], on_line: OnLine | None) -> bool:
     event = threading.Event()
     result = False
 

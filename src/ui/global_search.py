@@ -61,7 +61,19 @@ _TAB_KEYWORDS: dict[str, tuple[str, ...]] = {
         "sched-ext",
         "планировщик cpu",
     ),
-    "borg": ("timesync", "time sync", "резерв", "бэкап", "backup", "borg", "архив", "снимок", "btrfs"),
+    "borg": (
+        "timesync",
+        "time sync",
+        "резерв",
+        "бэкап",
+        "backup",
+        "borg",
+        "архив",
+        "снимок",
+        "снэпшот",
+        "snapshot",
+        "btrfs",
+    ),
 }
 
 

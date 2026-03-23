@@ -18,12 +18,23 @@ from core import config
 
 OPTIONAL_EXCLUDES = [
     {
+        "key": "downloads",
+        "title": "Папка Загрузки",
+        "description": "Downloads/Загрузки — часто содержит временные или уже распакованные файлы",
+        "paths": [
+            "~/Downloads",
+            "~/Загрузки",
+        ],
+    },
+    {
         "key": "steam_games",
         "title": "Игры Steam",
         "description": "steamapps/common — включите, чтобы сразу играть после восстановления",
         "paths": [
             "~/.local/share/Steam/steamapps/common",
             "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common",
+            "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/compatdata",
+            "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/shadercache",
         ],
     },
     {
@@ -56,6 +67,30 @@ OPTIONAL_EXCLUDES = [
         ],
     },
     {
+        "key": "heroic_prefixes",
+        "title": "Префиксы Heroic Games",
+        "description": "Совместимость-данные и wineprefix игр Heroic",
+        "paths": [
+            "~/.var/app/com.heroicgameslauncher.hgl/data/heroic/Prefixes",
+        ],
+    },
+    {
+        "key": "portproton_prefixes",
+        "title": "Префиксы PortProton",
+        "description": "Префиксы игр с системными файлами Windows и Program Files",
+        "paths": [
+            "~/.var/app/ru.linux_gaming.PortProton/data/prefixes",
+        ],
+    },
+    {
+        "key": "bottles_data",
+        "title": "Bottles: bottle-данные и runners",
+        "description": "Папки Bottles с префиксами, runners и компонентами",
+        "paths": [
+            "~/.var/app/com.usebottles.bottles/data/bottles",
+        ],
+    },
+    {
         "key": "build_artifacts",
         "title": "Сборочные артефакты (Rust, Node.js, Java...)",
         "description": "target/, build/, .gradle/ — первый бэкап может занять часы при большом объёме",
@@ -77,6 +112,9 @@ OPTIONAL_EXCLUDES = [
 _OPTIONAL_PATHS = {p for g in OPTIONAL_EXCLUDES for p in g["paths"]}
 
 DEFAULT_EXCLUDES = [
+    # пользовательские загрузки
+    "~/Downloads",
+    "~/Загрузки",
     # системный кэш
     "~/.cache",
     "~/.var/app/*/cache",
@@ -132,6 +170,7 @@ DEFAULT_EXCLUDES = [
     "~/.config/libvirt/qemu/save",
     # Heroic Games Launcher — дистрибутивы Wine/Proton (re-downloadable)
     "~/.var/app/com.heroicgameslauncher.hgl/config/heroic/tools",
+    "~/.var/app/com.heroicgameslauncher.hgl/data/heroic/Prefixes",
     # Warehouse (Flattool) — снимки flatpak-приложений
     "~/.var/app/io.github.flattool.Warehouse/data/Snapshots",
     # Telegram — медиакэш
@@ -154,12 +193,15 @@ DEFAULT_EXCLUDES = [
     # Steam (Flatpak) — игры и runtime (перекачиваемое), userdata/ сохраняется
     "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/common",
     "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/shadercache",
+    "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/compatdata",
     "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/ubuntu12_32",
     "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/ubuntu12_64",
     "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/package",
     "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/appcache",
     "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/config/htmlcache",
     "~/.var/app/com.valvesoftware.Steam/.local/share/Steam/logs",
+    # Bottles (Flatpak) — префиксы и runners
+    "~/.var/app/com.usebottles.bottles/data/bottles",
     # DaVinci Resolve — только кэш, не проекты
     "~/.local/share/DaVinciResolve/DVIP/Cache",
     "~/.local/share/DaVinciResolve/logs",
@@ -439,16 +481,49 @@ def borg_list_archive(repo_path: str, archive_name: str) -> list[dict]:
     return []
 
 
+def archive_stats_dedup_bytes(stats: dict | None) -> int | None:
+    """Байты, уникальные для архива в репозитории (borg stats / JSON)."""
+    if not stats:
+        return None
+    for key in ("deduplicated_size", "deduplicated"):
+        v = stats.get(key)
+        if v is None:
+            continue
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, (int, float)):
+            n = int(v)
+            return n if n >= 0 else None
+        if isinstance(v, str) and v.strip().lstrip("-").isdigit():
+            n = int(v.strip())
+            return n if n >= 0 else None
+    return None
+
+
+def _parse_borg_json_stdout(stdout: str) -> dict | None:
+    text = (stdout or "").strip()
+    if not text:
+        return None
+    if "{" in text:
+        text = text[text.index("{") :]
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
 def borg_archive_info(repo_path: str, archive_name: str, on_done) -> None:
     def _worker():
         try:
             r = subprocess.run(
                 [_borg_exe(), "info", "--json", f"{repo_path}::{archive_name}"],
-                capture_output=True, text=True, encoding="utf-8", timeout=30,
+                capture_output=True, text=True, encoding="utf-8", timeout=60,
                 env=_borg_env(repo_path),
             )
-            if r.returncode == 0:
-                data = json.loads(r.stdout)
+            data = _parse_borg_json_stdout(r.stdout or "")
+            if data is None:
+                data = _parse_borg_json_stdout(r.stderr or "")
+            if data is not None and r.returncode in (0, 1):
                 archives = data.get("archives", [])
                 if archives:
                     GLib.idle_add(on_done, archives[0].get("stats"))

@@ -90,6 +90,22 @@ _badge_css.load_from_data(b"""
     }
 """)
 
+_ab_source_badge_css_registered = False
+
+
+def ensure_ab_source_badge_styles() -> None:
+    """Подключает стили .ab-source-badge (вкладка «Приложения» и др.)."""
+    global _ab_source_badge_css_registered
+    if _ab_source_badge_css_registered:
+        return
+    display = Gdk.Display.get_default()
+    if display:
+        Gtk.StyleContext.add_provider_for_display(
+            display, _badge_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+    _ab_source_badge_css_registered = True
+
+
 from core import backend
 from core import config
 from core.checks import invalidate_flatpak_cache
@@ -365,10 +381,7 @@ class AppRow(Adw.ActionRow):
         self._trailing_cluster.append(self._actions_strip)
         self.add_suffix(self._trailing_cluster)
 
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), _badge_css,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
-        )
+        ensure_ab_source_badge_styles()
 
         self._update_source_label()
         threading.Thread(target=self._check, daemon=True).start()

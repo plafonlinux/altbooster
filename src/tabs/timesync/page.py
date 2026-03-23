@@ -19,9 +19,10 @@ from ui.widgets import (
     make_status_icon, set_status_ok, set_status_error, clear_status,
     make_suffix_box,
 )
+from ui.rows import ensure_ab_source_badge_styles
 from .restore import BtrfsRestoreDialog, BorgArchiveBrowserDialog, BorgRestoreDialog
 from .pickers import HomeDirPickerDialog, FlatpakDataPickerDialog, FolderPickerDialog
-from .summary import BorgBackupSummaryDialog
+from .summary import BorgBackupSummaryDialog, _fmt_size
 from .mirror import MirrorPage
 from .manual import build_terminal_page
 
@@ -51,6 +52,9 @@ class BorgPage(Gtk.Box):
         switcher.set_stack(self._stack)
         switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
         switcher.set_halign(Gtk.Align.CENTER)
+        switcher.set_valign(Gtk.Align.CENTER)
+        # Стили выравнивания: ui/window.py → viewswitcher.ab-borg-viewswitcher
+        switcher.add_css_class("ab-borg-viewswitcher")
 
         top_header = Adw.HeaderBar()
         top_header.set_title_widget(switcher)
@@ -67,6 +71,10 @@ class BorgPage(Gtk.Box):
         tm_tab = self._build_timesync_tab()
         self._stack.add_titled_with_icon(tm_tab, "timesync", "TimeSync", "document-revert-symbolic")
 
+        if backend.is_home_on_btrfs():
+            btrfs_tab, self._btrfs_body = self._build_btrfs_tab()
+            self._stack.add_titled_with_icon(btrfs_tab, "btrfs", "Снэпшоты", "camera-photo-symbolic")
+
         mirror_page = MirrorPage(self._log, self._start_progress, self._stop_progress)
         self._stack.add_titled_with_icon(mirror_page, "mirror", "Зеркало", "edit-copy-symbolic")
 
@@ -77,18 +85,14 @@ class BorgPage(Gtk.Box):
         self._build_settings_page()
         self._build_schedule_page()
 
-        if backend.is_home_on_btrfs():
-            btrfs_tab, self._btrfs_body = self._build_btrfs_tab()
-            self._manual_stack.add_titled_with_icon(btrfs_tab, "btrfs", "Снимки", "camera-photo-symbolic")
-
         term_page = build_terminal_page(self._log)
         self._manual_stack.add_titled_with_icon(term_page, "terminal", "Терминал", "utilities-terminal-symbolic")
 
         self._page_info = self._manual_stack.get_page(self._manual_stack.get_child_by_name("info"))
         self._page_settings = self._manual_stack.get_page(self._manual_stack.get_child_by_name("settings"))
         self._page_schedule = self._manual_stack.get_page(self._manual_stack.get_child_by_name("schedule"))
-        btrfs_w = self._manual_stack.get_child_by_name("btrfs")
-        self._page_btrfs = self._manual_stack.get_page(btrfs_w) if btrfs_w else None
+        btrfs_top = self._stack.get_child_by_name("btrfs")
+        self._page_btrfs = self._stack.get_page(btrfs_top) if btrfs_top else None
 
         self._fastfetch_offer_shown = False
         self._update_sections_visibility()
@@ -107,6 +111,8 @@ class BorgPage(Gtk.Box):
         inner_switcher.set_stack(inner_stack)
         inner_switcher.set_policy(Adw.ViewSwitcherPolicy.WIDE)
         inner_switcher.set_halign(Gtk.Align.CENTER)
+        inner_switcher.set_valign(Gtk.Align.CENTER)
+        inner_switcher.add_css_class("ab-borg-viewswitcher")
         inner_switcher.set_margin_top(12)
         inner_switcher.set_margin_bottom(12)
 
@@ -222,6 +228,10 @@ class BorgPage(Gtk.Box):
         self._tm_sysinfo_toggle.connect("toggled", _on_sysinfo_toggle)
         threading.Thread(target=self._tm_load_sysinfo, daemon=True).start()
 
+        # ── хранилище Borg + экспорт .tar (одна карточка, выше списка архивов) ─
+        self._tm_repo_slot = Gtk.Box()
+        self._tm_box.append(self._tm_repo_slot)
+
         # ── заголовок «Резервные копии» + кнопка обновить ────────────────
         backups_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         backups_label = Gtk.Label(label="Резервные копии")
@@ -284,54 +294,25 @@ class BorgPage(Gtk.Box):
         self._tm_box.append(carousel_row)
         self._tm_box.append(dots)
 
-        # ── кнопки ───────────────────────────────────────────────────────
-        btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        btns.set_halign(Gtk.Align.CENTER)
+        # ── удаление + создание архива — одна строка по центру ───────────
+        self._tm_action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        self._tm_action_row.set_halign(Gtk.Align.CENTER)
+        self._tm_action_row.set_margin_top(24)
+
+        self._tm_delete_btn = Gtk.Button(label="Удалить архивы")
+        self._tm_delete_btn.add_css_class("destructive-action")
+        self._tm_delete_btn.add_css_class("pill")
+        self._tm_delete_btn.connect("clicked", lambda _: self._tm_on_delete_archives())
+        self._tm_delete_btn.set_visible(False)
 
         self._tm_create_btn = Gtk.Button(label="Создать резервную копию")
         self._tm_create_btn.add_css_class("suggested-action")
         self._tm_create_btn.add_css_class("pill")
         self._tm_create_btn.connect("clicked", lambda _: self._tm_on_create())
-        btns.append(self._tm_create_btn)
 
-        self._tm_delete_btn = Gtk.Button(label="Удалить снимки")
-        self._tm_delete_btn.add_css_class("destructive-action")
-        self._tm_delete_btn.add_css_class("pill")
-        self._tm_delete_btn.connect("clicked", lambda _: self._tm_on_delete_archives())
-        btns.append(self._tm_delete_btn)
-
-        self._tm_box.append(btns)
-
-        self._tm_repo_slot = Gtk.Box()
-        self._tm_box.append(self._tm_repo_slot)
-
-        # ── блок переноса на другой компьютер ────────────────────────────
-        transfer_group = Adw.PreferencesGroup()
-        transfer_group.set_title("Перенос на другой компьютер")
-
-        self._sw_tar_export = Adw.SwitchRow()
-        self._sw_tar_export.set_title("Сохранять .tar после бэкапа")
-        self._sw_tar_export.set_subtitle("Копирует borg-репозиторий в один .tar-файл на указанный носитель")
-        self._sw_tar_export.set_active(config.state_get("borg_tar_export_enabled", False))
-        self._sw_tar_export.connect("notify::active", self._on_tar_export_toggled)
-        transfer_group.add(self._sw_tar_export)
-
-        self._row_tar_path = Adw.EntryRow()
-        self._row_tar_path.set_title("Папка назначения")
-        self._row_tar_path.set_text(config.state_get("borg_tar_export_path", "") or "")
-        self._row_tar_path.set_show_apply_button(True)
-        self._row_tar_path.connect("apply", lambda _: config.state_set("borg_tar_export_path", self._row_tar_path.get_text().strip()))
-        self._row_tar_path.set_visible(config.state_get("borg_tar_export_enabled", False))
-
-        tar_pick_btn = Gtk.Button()
-        tar_pick_btn.set_icon_name("folder-open-symbolic")
-        tar_pick_btn.add_css_class("flat")
-        tar_pick_btn.set_valign(Gtk.Align.CENTER)
-        tar_pick_btn.connect("clicked", self._on_pick_tar_folder)
-        self._row_tar_path.add_suffix(tar_pick_btn)
-        transfer_group.add(self._row_tar_path)
-
-        self._tm_box.append(transfer_group)
+        self._tm_action_row.append(self._tm_create_btn)
+        self._tm_action_row.append(self._tm_delete_btn)
+        self._tm_box.append(self._tm_action_row)
 
         scroll.connect("map", lambda _: (self._tm_refresh_archives(), self._move_repo_group_to(self._tm_repo_slot)))
         return scroll
@@ -421,6 +402,12 @@ class BorgPage(Gtk.Box):
             parent.remove(self._repo_group)
         simple = (slot is self._tm_repo_slot)
         self._repo_group.set_title("Куда сохранять" if simple else "Расположение")
+        if simple:
+            self._repo_group.set_description(
+                "Папка с Borg-хранилищем; при необходимости — экспорт в .tar для переноса на другой ПК."
+            )
+        else:
+            self._repo_group.set_description(None)
         self._row_repo_path.set_title("Папка для резервных копий" if simple else "Путь к хранилищу")
         self._row_passphrase.set_visible(True)
         slot.append(self._repo_group)
@@ -531,52 +518,58 @@ class BorgPage(Gtk.Box):
         self._tm_carousel.set_visible(True)
         self._tm_carousel_row.set_visible(True)
         self._tm_dots.set_visible(True)
+        self._tm_action_row.set_visible(True)
         self._tm_create_btn.set_visible(True)
-        self._tm_delete_btn.set_visible(True)
+        self._tm_update_backup_actions(True)
         self._tm_update_nav_buttons()
 
-    def _tm_build_archive_card(self, archive: dict) -> Gtk.Box:
+    def _tm_build_archive_card(self, archive: dict) -> Gtk.Widget:
         name = archive.get("name", "")
         raw = archive.get("start") or archive.get("time") or ""
         date_part = raw[:10] if len(raw) >= 10 else raw
         time_part = raw[11:16] if len(raw) >= 16 else ""
 
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        card.add_css_class("card")
-        card.set_margin_start(16)
-        card.set_margin_end(16)
-        card.set_margin_top(8)
-        card.set_margin_bottom(8)
-        card.set_hexpand(True)
+        ensure_ab_source_badge_styles()
+
+        overlay = Gtk.Overlay()
+        overlay.add_css_class("card")
+        overlay.set_margin_start(16)
+        overlay.set_margin_end(16)
+        overlay.set_margin_top(8)
+        overlay.set_margin_bottom(8)
+        overlay.set_hexpand(True)
+
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
 
         icon = make_icon("document-revert-symbolic", 64)
         icon.set_halign(Gtk.Align.CENTER)
         icon.set_margin_top(16)
-        card.append(icon)
+        inner.append(icon)
 
         date_label = Gtk.Label(label=date_part)
         date_label.add_css_class("title-2")
         date_label.set_halign(Gtk.Align.CENTER)
-        card.append(date_label)
+        inner.append(date_label)
 
         if time_part:
             time_label = Gtk.Label(label=time_part)
             time_label.add_css_class("dim-label")
             time_label.set_halign(Gtk.Align.CENTER)
-            card.append(time_label)
+            inner.append(time_label)
 
         size_label = Gtk.Label(label="Размер: …")
         size_label.add_css_class("dim-label")
         size_label.set_halign(Gtk.Align.CENTER)
-        card.append(size_label)
+        inner.append(size_label)
 
         repo_path = config.state_get("borg_repo_path", "") or ""
 
         def _on_info(stats):
-            if stats and isinstance(stats.get("deduplicated_size"), (int, float)):
-                size_label.set_label(f"Размер: {_fmt_size(int(stats['deduplicated_size']))}")
+            b = backend.archive_stats_dedup_bytes(stats)
+            if b is not None:
+                size_label.set_label(f"Размер: {_fmt_size(b)}")
             else:
-                size_label.set_label("")
+                size_label.set_label("Размер: —")
 
         backend.borg_archive_info(repo_path, name, _on_info)
 
@@ -596,9 +589,25 @@ class BorgPage(Gtk.Box):
         btn_restore.connect("clicked", lambda _, n=name, d=display: self._show_restore_dialog(n, d))
         btns_row.append(btn_restore)
 
-        card.append(btns_row)
+        inner.append(btns_row)
 
-        return card
+        overlay.set_child(inner)
+
+        badge = Gtk.Label(label="Архив резервных данных")
+        badge.add_css_class("ab-source-badge")
+        badge.add_css_class("success")
+        badge.set_halign(Gtk.Align.END)
+        badge.set_valign(Gtk.Align.START)
+        badge.set_margin_top(12)
+        badge.set_margin_end(12)
+        badge.set_hexpand(False)
+        badge.set_vexpand(False)
+        badge.set_tooltip_text("Архив резервных данных")
+        badge.set_ellipsize(Pango.EllipsizeMode.END)
+        badge.set_max_width_chars(22)
+        overlay.add_overlay(badge)
+
+        return overlay
 
     def _tm_show_placeholder(self, state: str, error: str = ""):
         self._tm_carousel.set_visible(False)
@@ -609,8 +618,7 @@ class BorgPage(Gtk.Box):
             self._tm_placeholder.set_visible(False)
             self._tm_spinner.set_spinning(True)
             self._tm_spinner.set_visible(True)
-            self._tm_create_btn.set_visible(False)
-            self._tm_delete_btn.set_visible(False)
+            self._tm_action_row.set_visible(False)
             return
 
         self._tm_spinner.set_spinning(False)
@@ -618,8 +626,7 @@ class BorgPage(Gtk.Box):
         self._tm_placeholder.set_visible(True)
 
         if state == "not_configured":
-            self._tm_create_btn.set_visible(False)
-            self._tm_delete_btn.set_visible(False)
+            self._tm_action_row.set_visible(False)
             self._tm_placeholder.set_icon_name("drive-harddisk-symbolic")
             self._tm_placeholder.set_title("Хранилище не настроено")
             self._tm_placeholder.set_description("Настройте Borg-хранилище в разделе «Ручной режим»")
@@ -631,10 +638,18 @@ class BorgPage(Gtk.Box):
             self._tm_placeholder.set_icon_name("document-revert-symbolic")
             self._tm_placeholder.set_title("Архивов пока нет")
             self._tm_placeholder.set_visible(False)
+            self._tm_action_row.set_visible(True)
             self._tm_create_btn.set_visible(True)
-            self._tm_delete_btn.set_visible(False)
+            self._tm_update_backup_actions(False)
             if error:
                 self._log(f"borg list: {error}\n")
+
+    def _tm_update_backup_actions(self, has_archives: bool):
+        """Подпись «ещё один архив» и кнопка удаления — только если архивы уже есть."""
+        self._tm_create_btn.set_label(
+            "Создать ещё один архив" if has_archives else "Создать резервную копию"
+        )
+        self._tm_delete_btn.set_visible(has_archives)
 
     def _tm_update_nav_buttons(self):
         n = self._tm_carousel.get_n_pages()
@@ -736,18 +751,117 @@ class BorgPage(Gtk.Box):
         if not repo_path:
             repo_path = str(Path.home() / ".local" / "share" / "altbooster" / "backup")
         config.state_set("borg_repo_path", repo_path)
-        self._tm_show_exclude_dialog(repo_path)
+        self._tm_show_backup_scope_dialog(repo_path)
+
+    def _tm_show_backup_scope_dialog(self, repo_path: str):
+        parent = self.get_root()
+        win = Adw.Window(transient_for=parent, modal=True)
+        win.set_title("Как работает TimeSync-бэкап")
+        win.set_default_size(920, 640)
+        if hasattr(win, "set_resizable"):
+            win.set_resizable(True)
+
+        title_lbl = Gtk.Label(label="Как работает TimeSync-бэкап")
+        title_lbl.add_css_class("title-2")
+        header = Adw.HeaderBar()
+        header.set_title_widget(title_lbl)
+
+        text = (
+            "Стандартный (экономный) режим: что исключаем\n\n"
+            "I/O и временные данные\n"
+            "• Загрузки: ~/Downloads, ~/Загрузки, *.iso\n"
+            "• Кэши: ~/.cache, Flatpak cache, миниатюры\n"
+            "• Браузеры: Chrome/Yandex cache (в т.ч. Service Worker, GPUCache), Chrome Flatpak\n"
+            "• VS Code: Cache, CachedData, logs\n"
+            "• Пакетные кэши: ~/.npm, ~/.yarn/cache, ~/.m2/repository, ~/.cargo/*, ~/.rustup/toolchains\n\n"
+            "Тяжёлые каталоги приложений\n"
+            "• Контейнеры: ~/.local/share/containers\n"
+            "• VM-образы/сейвы: GNOME Boxes, libvirt, VirtualBox (*.vdi, *.vmdk, *.vhd)\n"
+            "• Steam: steamapps/common, shadercache, compatdata, runtime/cache/logs\n"
+            "• Heroic: tools, Prefixes\n"
+            "• Bottles: ~/.var/app/com.usebottles.bottles/data/bottles\n"
+            "• PortProton: dist, tmp, системные части префиксов\n"
+            "• DaVinci / OrcaSlicer: кэши и system-профили\n\n"
+            "Артефакты разработки\n"
+            "• **/target, **/build, **/.gradle, **/.next, **/.nuxt, **/.svelte-kit, **/.output\n"
+            "• **/venv, **/.venv, **/.tox, **/node_modules, **/__pycache__, **/.git\n\n"
+            "Прочее\n"
+            "• ~/.local/share/Trash, ~/.local/share/gvfs-metadata\n\n"
+            "Важно:\n"
+            "• В режиме «Полный бэкап» эти исключения не применяются.\n"
+            "• Путь репозитория всегда исключается, чтобы архив не включал сам себя."
+        )
+        lbl = Gtk.Label(label=text)
+        lbl.set_wrap(True)
+        lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        lbl.set_selectable(False)
+        lbl.set_can_focus(False)
+        lbl.set_halign(Gtk.Align.FILL)
+        lbl.set_xalign(0.0)
+        lbl.set_justify(Gtk.Justification.LEFT)
+        lbl.set_hexpand(True)
+        lbl.set_margin_start(20)
+        lbl.set_margin_end(20)
+        lbl.set_margin_top(12)
+        lbl.set_margin_bottom(12)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        scroll.set_min_content_width(860)
+        scroll.set_child(lbl)
+
+        btn_cancel = Gtk.Button(label="Отмена")
+        btn_ok = Gtk.Button(label="Понятно")
+        btn_ok.add_css_class("destructive-action")
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        actions.set_halign(Gtk.Align.END)
+        actions.set_margin_start(20)
+        actions.set_margin_end(20)
+        actions.set_margin_top(8)
+        actions.set_margin_bottom(20)
+        actions.append(btn_cancel)
+        actions.append(btn_ok)
+
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        inner.append(scroll)
+        inner.append(actions)
+
+        toolbar = Adw.ToolbarView()
+        toolbar.add_top_bar(header)
+        toolbar.set_content(inner)
+        win.set_content(toolbar)
+
+        def _go_next(_btn=None):
+            win.close()
+            self._tm_show_exclude_dialog(repo_path)
+
+        def _cancel(_btn=None):
+            win.close()
+
+        btn_cancel.connect("clicked", _cancel)
+        btn_ok.connect("clicked", _go_next)
+        win.present()
 
     def _tm_show_exclude_dialog(self, repo_path: str):
         dialog = Adw.AlertDialog(heading="Что включить в бэкап?")
-        dialog.set_body("Мы исключаем крупные папки, которые можно перекачать. Отметьте, что хотите сохранить:")
+        dialog.set_body(
+            "Базовый бэкап включает: личные файлы из /home, настройки ALT Booster и данные для восстановления.\n"
+            "Далее выберите режим: полный (без исключений) или стандартный (экономный, можно добавить тяжёлые папки ниже)."
+        )
         dialog.add_response("cancel", "Отмена")
-        dialog.add_response("start", "Создать")
-        dialog.set_default_response("start")
+        dialog.add_response("full", "Полный бэкап")
+        dialog.add_response("custom", "Стандартный (экономный)")
+        dialog.set_default_response("full")
         dialog.set_close_response("cancel")
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         box.set_margin_top(8)
+        box.set_margin_bottom(8)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+        box.set_size_request(620, -1)
         checks = []
         for group in backend.OPTIONAL_EXCLUDES:
             row = Adw.ActionRow()
@@ -760,31 +874,47 @@ class BorgPage(Gtk.Box):
             box.append(row)
             checks.append((cb, group["paths"]))
 
-        dialog.set_extra_child(box)
-
         def _on_response(d, response):
-            if response != "start":
+            if response not in ("full", "custom"):
                 return
+            include_all_heavy = (response == "full")
             extra_includes = {p for cb, paths in checks if cb.get_active() for p in paths}
             home = Path.home()
+            use_light_mode = config.state_get("borg_exclude_heavy_data", True) and not include_all_heavy
+            excludes = []
+            if use_light_mode:
+                excludes = [p for p in backend.DEFAULT_EXCLUDES if p not in extra_includes]
+            if repo_path.startswith(str(home)):
+                excludes.append(repo_path)
             opts = {
                 "paths": [str(home), str(config.CONFIG_DIR)],
+                "excludes": excludes,
                 "flatpak_apps": True,
                 "flatpak_apps_source": 0,
                 "flatpak_remotes": True,
                 "extensions": True,
                 "system_packages": config.state_get("borg_src_system_packages", True),
             }
+            if config.state_get("borg_src_flatpak_data", True):
+                opts["flatpak_data"] = True
+                opts["flatpak_data_filter"] = config.state_get("borg_flatpak_data_filter", None)
 
             def _after_summary():
                 if not backend.is_repo_initialized(repo_path):
-                    self._tm_ask_password_and_init(repo_path, extra_includes)
+                    self._tm_ask_password_and_init(repo_path, extra_includes, include_all_heavy=include_all_heavy)
                 else:
-                    self._tm_do_backup(extra_includes)
+                    self._tm_do_backup(extra_includes, include_all_heavy=include_all_heavy)
 
             summary = BorgBackupSummaryDialog(self.get_root(), repo_path, opts, _after_summary)
             summary.present()
 
+        # Чекбоксы нужны только в режиме "Выборочно".
+        dialog.set_response_enabled("custom", True)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_min_content_height(420)
+        scroll.set_child(box)
+        dialog.set_extra_child(scroll)
         dialog.connect("response", _on_response)
         dialog.present(self.get_root())
 
@@ -816,7 +946,7 @@ class BorgPage(Gtk.Box):
         dialog.connect("response", _on_response)
         dialog.present(self.get_root())
 
-    def _tm_ask_password_and_init(self, repo_path: str, extra_includes: set = None):
+    def _tm_ask_password_and_init(self, repo_path: str, extra_includes: set = None, include_all_heavy: bool = False):
         dialog = Adw.AlertDialog(
             heading="Защитите резервную копию",
             body="Придумайте пароль для шифрования архива. Запомните его — без него восстановление невозможно.",
@@ -846,7 +976,7 @@ class BorgPage(Gtk.Box):
                     win.stop_progress(ok)
                 if ok:
                     self._log("✔  Хранилище готово\n")
-                    self._tm_do_backup(extra_includes)
+                    self._tm_do_backup(extra_includes, include_all_heavy=include_all_heavy)
                 else:
                     self._log("✘  Ошибка инициализации хранилища\n")
 
@@ -855,17 +985,20 @@ class BorgPage(Gtk.Box):
         dialog.connect("response", _on_response)
         dialog.present(self.get_root())
 
-    def _tm_do_backup(self, extra_includes: set = None):
+    def _tm_do_backup(self, extra_includes: set = None, include_all_heavy: bool = False):
         repo_path = config.state_get("borg_repo_path", "") or ""
         if not repo_path:
             return
 
         home = Path.home()
         paths = [str(home), str(config.CONFIG_DIR)]
+        use_light_mode = config.state_get("borg_exclude_heavy_data", True) and not include_all_heavy
 
         build_artifact_paths = {p for g in backend.OPTIONAL_EXCLUDES if g["key"] == "build_artifacts" for p in g["paths"]}
         include_build = bool(extra_includes and extra_includes & build_artifact_paths)
-        excludes = [p for p in backend.DEFAULT_EXCLUDES if not (extra_includes and p in extra_includes)]
+        excludes = []
+        if use_light_mode:
+            excludes = [p for p in backend.DEFAULT_EXCLUDES if not (extra_includes and p in extra_includes)]
         if repo_path.startswith(str(home)):
             excludes.append(repo_path)
 
@@ -1040,6 +1173,32 @@ class BorgPage(Gtk.Box):
 
         self._repo_group.add(self._btn_init_repo)
 
+        self._sw_tar_export = Adw.SwitchRow()
+        self._sw_tar_export.set_title("Сохранять .tar после бэкапа")
+        self._sw_tar_export.set_subtitle(
+            "Перенос на другой компьютер: весь каталог репозитория в один .tar на указанный носитель"
+        )
+        self._sw_tar_export.set_margin_top(8)
+        self._sw_tar_export.set_active(config.state_get("borg_tar_export_enabled", False))
+        self._sw_tar_export.connect("notify::active", self._on_tar_export_toggled)
+        self._repo_group.add(self._sw_tar_export)
+
+        self._row_tar_path = Adw.EntryRow()
+        self._row_tar_path.set_title("Папка для .tar")
+        self._row_tar_path.set_text(config.state_get("borg_tar_export_path", "") or "")
+        self._row_tar_path.set_show_apply_button(True)
+        self._row_tar_path.connect(
+            "apply", lambda _: config.state_set("borg_tar_export_path", self._row_tar_path.get_text().strip())
+        )
+        self._row_tar_path.set_visible(config.state_get("borg_tar_export_enabled", False))
+        tar_pick_btn = Gtk.Button()
+        tar_pick_btn.set_icon_name("folder-open-symbolic")
+        tar_pick_btn.add_css_class("flat")
+        tar_pick_btn.set_valign(Gtk.Align.CENTER)
+        tar_pick_btn.connect("clicked", self._on_pick_tar_folder)
+        self._row_tar_path.add_suffix(tar_pick_btn)
+        self._repo_group.add(self._row_tar_path)
+
         pubkey = backend.borg_get_pubkey()
         if pubkey:
             self._row_pubkey.set_subtitle(pubkey[:64] + "…")
@@ -1163,6 +1322,16 @@ class BorgPage(Gtk.Box):
         self._row_flatpak_data.set_activatable_widget(self._sw_flatpak_data)
         grp_flatpak.add(self._row_flatpak_data)
         self._update_flatpak_data_subtitle()
+
+        self._sw_exclude_heavy = Adw.SwitchRow()
+        self._sw_exclude_heavy.set_title("Экономный режим")
+        self._sw_exclude_heavy.set_subtitle("Исключать кэши и тяжёлые временные данные (Steam, VM, браузеры и т.д.)")
+        self._sw_exclude_heavy.set_active(config.state_get("borg_exclude_heavy_data", True))
+        self._sw_exclude_heavy.connect(
+            "notify::active",
+            lambda s, _: config.state_set("borg_exclude_heavy_data", s.get_active()),
+        )
+        grp_flatpak.add(self._sw_exclude_heavy)
 
         self._grp_custom = Adw.PreferencesGroup()
         self._grp_custom.set_title("Дополнительные пути")
@@ -1524,29 +1693,33 @@ class BorgPage(Gtk.Box):
 
         self._btrfs_update_nav_buttons()
 
-    def _btrfs_build_snapshot_card(self, snap: dict) -> Gtk.Box:
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        card.add_css_class("card")
-        card.set_margin_start(16)
-        card.set_margin_end(16)
-        card.set_margin_top(8)
-        card.set_margin_bottom(8)
-        card.set_hexpand(True)
+    def _btrfs_build_snapshot_card(self, snap: dict) -> Gtk.Widget:
+        ensure_ab_source_badge_styles()
+
+        overlay = Gtk.Overlay()
+        overlay.add_css_class("card")
+        overlay.set_margin_start(16)
+        overlay.set_margin_end(16)
+        overlay.set_margin_top(8)
+        overlay.set_margin_bottom(8)
+        overlay.set_hexpand(True)
+
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
 
         icon = make_icon("camera-photo-symbolic", 32)
         icon.set_halign(Gtk.Align.CENTER)
         icon.set_margin_top(16)
-        card.append(icon)
+        inner.append(icon)
 
         date_lbl = Gtk.Label(label=snap["date_str"])
         date_lbl.add_css_class("title-2")
         date_lbl.set_halign(Gtk.Align.CENTER)
-        card.append(date_lbl)
+        inner.append(date_lbl)
 
         size_lbl = Gtk.Label(label="…")
         size_lbl.add_css_class("dim-label")
         size_lbl.set_halign(Gtk.Align.CENTER)
-        card.append(size_lbl)
+        inner.append(size_lbl)
 
         def _on_size(s):
             size_lbl.set_text(f"эксклюзивно: {_fmt_size(s)}" if s else "")
@@ -1558,9 +1731,25 @@ class BorgPage(Gtk.Box):
         btn_restore.set_halign(Gtk.Align.CENTER)
         btn_restore.set_margin_bottom(16)
         btn_restore.connect("clicked", lambda _, s=snap: self._btrfs_on_restore(s))
-        card.append(btn_restore)
+        inner.append(btn_restore)
 
-        return card
+        overlay.set_child(inner)
+
+        badge = Gtk.Label(label="Точка восстановления Btrfs")
+        badge.add_css_class("ab-source-badge")
+        badge.add_css_class("warning")
+        badge.set_halign(Gtk.Align.END)
+        badge.set_valign(Gtk.Align.START)
+        badge.set_margin_top(12)
+        badge.set_margin_end(12)
+        badge.set_hexpand(False)
+        badge.set_vexpand(False)
+        badge.set_tooltip_text("Точка восстановления Btrfs")
+        badge.set_ellipsize(Pango.EllipsizeMode.END)
+        badge.set_max_width_chars(22)
+        overlay.add_overlay(badge)
+
+        return overlay
 
     def _btrfs_carousel_prev(self, _btn):
         idx = round(self._btrfs_carousel.get_position())
@@ -1959,7 +2148,10 @@ class BorgPage(Gtk.Box):
                 self._refresh_status_thread()
                 GLib.idle_add(self._tm_refresh_archives)
 
-        backend.borg_create(repo_path, archive_name, paths, backend.DEFAULT_EXCLUDES, self._log, _done)
+        excludes = []
+        if config.state_get("borg_exclude_heavy_data", True):
+            excludes = list(backend.DEFAULT_EXCLUDES)
+        backend.borg_create(repo_path, archive_name, paths, excludes, self._log, _done)
 
 
     def _on_check(self, _):
@@ -2241,7 +2433,7 @@ class BorgPage(Gtk.Box):
         self._btrfs_snapshots_dir_row.add_prefix(make_icon("folder-symbolic"))
         status_group.add(self._btrfs_snapshots_dir_row)
 
-        snapshots_label = Gtk.Label(label="Снимки")
+        snapshots_label = Gtk.Label(label="Снэпшоты")
         snapshots_label.add_css_class("heading")
         snapshots_label.set_halign(Gtk.Align.START)
         snapshots_label.set_margin_top(16)
