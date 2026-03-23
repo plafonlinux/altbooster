@@ -177,10 +177,25 @@ class BorgArchiveBrowserDialog(Adw.Window):
         self._spinner.start()
         self._spinner.set_valign(Gtk.Align.CENTER)
         self._spinner.set_halign(Gtk.Align.CENTER)
-        self._spinner.set_vexpand(True)
+
+        loading_label = Gtk.Label(label="Дайте минутку! Согласую выше, что данный архив точно ваш.")
+        loading_label.add_css_class("dim-label")
+        loading_label.set_halign(Gtk.Align.CENTER)
+        loading_label.set_wrap(True)
+        loading_label.set_justify(Gtk.Justification.CENTER)
+        loading_label.set_max_width_chars(52)
+
+        loading_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        loading_box.set_valign(Gtk.Align.CENTER)
+        loading_box.set_halign(Gtk.Align.CENTER)
+        loading_box.set_vexpand(True)
+        loading_box.set_margin_start(20)
+        loading_box.set_margin_end(20)
+        loading_box.append(self._spinner)
+        loading_box.append(loading_label)
 
         self._stack = Gtk.Stack()
-        self._stack.add_named(self._spinner, "loading")
+        self._stack.add_named(loading_box, "loading")
         self._stack.add_named(scroll, "list")
         self._stack.set_visible_child_name("loading")
 
@@ -200,7 +215,36 @@ class BorgArchiveBrowserDialog(Adw.Window):
         self._all_items = items
         self._children = self._build_tree(items)
         self._dir_sizes = self._compute_dir_sizes(items)
-        self._navigate_to("")
+        initial_path = self._guess_initial_path()
+        if initial_path:
+            parts = initial_path.split("/")
+            self._nav_stack = ["/".join(parts[:i]) for i in range(len(parts) - 1)]
+        self._navigate_to(initial_path)
+
+    def _guess_initial_path(self) -> str:
+        root = self._children.get("", {"dirs": [], "files": []})
+        if root.get("files"):
+            return ""
+
+        root_dirs = root.get("dirs", [])
+        if not root_dirs:
+            return ""
+
+        # Типичный Borg-путь: /home/<user>/... + служебный /tmp/altbooster-backup-meta.
+        if "home" in root_dirs:
+            home_node = self._children.get("home", {"dirs": [], "files": []})
+            home_dirs = home_node.get("dirs", [])
+            if len(home_dirs) == 1 and not home_node.get("files"):
+                return home_dirs[0]
+
+        # Если есть один явный контейнер без файлов в корне — открываем его.
+        if len(root_dirs) == 1:
+            only = root_dirs[0]
+            only_node = self._children.get(only, {"dirs": [], "files": []})
+            if not only_node.get("files"):
+                return only
+
+        return ""
 
     def _compute_dir_sizes(self, items: list[dict]) -> dict:
         sizes = {}
@@ -411,12 +455,20 @@ class BorgRestoreDialog(Adw.AlertDialog):
         self._cb_files.set_active(True)
         self._cb_packages = Gtk.CheckButton(label="Переустановить RPM-пакеты")
         self._cb_packages.set_active(False)
+        self._cb_packages_only_missing = Gtk.CheckButton(label="Только отсутствующие RPM-пакеты")
+        self._cb_packages_only_missing.set_active(True)
+        self._cb_packages_only_missing.set_sensitive(self._cb_packages.get_active())
+        self._cb_packages.connect(
+            "toggled",
+            lambda cb: self._cb_packages_only_missing.set_sensitive(cb.get_active()),
+        )
         self._cb_dconf = Gtk.CheckButton(label="Восстановить настройки GNOME (dconf)")
         self._cb_dconf.set_active(True)
         box.append(self._cb_altbooster)
         box.append(self._cb_flatpak)
         box.append(self._cb_files)
         box.append(self._cb_packages)
+        box.append(self._cb_packages_only_missing)
         box.append(self._cb_dconf)
 
         sep2 = Gtk.Separator()
@@ -494,6 +546,7 @@ class BorgRestoreDialog(Adw.AlertDialog):
 
         restore_flatpak = self._cb_flatpak.get_active()
         restore_packages = self._cb_packages.get_active()
+        restore_packages_only_missing = self._cb_packages_only_missing.get_active()
         restore_dconf = self._cb_dconf.get_active()
 
         def _done(ok):
@@ -517,7 +570,12 @@ class BorgRestoreDialog(Adw.AlertDialog):
 
             def _step_packages(ok_flat):
                 if restore_packages and meta_dir.exists():
-                    backend.restore_packages_meta(meta_dir, self._log, _step_dconf)
+                    backend.restore_packages_meta(
+                        meta_dir,
+                        self._log,
+                        _step_dconf,
+                        only_missing=restore_packages_only_missing,
+                    )
                 else:
                     _step_dconf(True)
 

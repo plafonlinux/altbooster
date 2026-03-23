@@ -35,6 +35,7 @@ from core.borg import (
     borg_repo_info,
     borg_init,
     borg_create,
+    borg_estimate_create,
     borg_list,
     borg_list_archive,
     borg_extract,

@@ -291,7 +291,7 @@ def borg_init(repo_path: str, on_line, on_done) -> None:
     cmd = [_borg_exe(), "init", "--encryption=repokey", repo_path]
     env = _borg_env(repo_path)
     env["BORG_NEW_PASSPHRASE"] = env.get("BORG_PASSPHRASE", "")
-    _run_borg_async(cmd, on_line, on_done, env=env)
+    _run_borg_async(cmd, lambda line: on_line(_translate_borg_line(line)), on_done, env=env)
 
 
 _BORG_TRANSLATIONS = {
@@ -318,6 +318,20 @@ _BORG_TRANSLATIONS = {
     "seconds":                             "сек.",
     "minute":                              "мин.",
     "second":                              "сек.",
+    "IMPORTANT: you will need both KEY AND PASSPHRASE to access this repo!":
+    "ВАЖНО: для доступа к этому хранилищу понадобятся И КЛЮЧ, И ПАРОЛЬНАЯ ФРАЗА!",
+    "Key storage location depends on the mode:":
+    "Место хранения ключа зависит от режима:",
+    "- repokey modes: key is stored in the repository directory.":
+    "- режимы repokey: ключ хранится в каталоге репозитория.",
+    "- keyfile modes: key is stored in the home directory of this user.":
+    "- режимы keyfile: ключ хранится в домашнем каталоге текущего пользователя.",
+    "For any mode, you should:":
+    "Для любого режима рекомендуется:",
+    "1. Export the borg key and store the result at a safe place:":
+    "1. Экспортируйте ключ borg и сохраните результат в безопасном месте:",
+    "2. Write down the borg key passphrase and store it at safe place.":
+    "2. Запишите парольную фразу ключа borg и храните её в безопасном месте.",
 }
 
 
@@ -340,6 +354,50 @@ def borg_create(repo_path: str, archive_name: str, paths: list[str], excludes: l
     for e in excludes:
         cmd += ["--exclude", os.path.expanduser(e)]
     _run_borg_async(cmd, _on_line_ru, on_done, env=_borg_env(repo_path))
+
+
+def borg_estimate_create(
+    repo_path: str,
+    paths: list[str],
+    excludes: list[str],
+    exclude_caches: bool = True,
+) -> dict | None:
+    if not repo_path or not paths:
+        return None
+    archive_name = "altbooster-estimate"
+    cmd = [_borg_exe(), "create", "--stats", "--dry-run", "--compression", "lz4"]
+    if exclude_caches:
+        cmd.append("--exclude-caches")
+    cmd.append(f"{repo_path}::{archive_name}")
+    cmd += paths
+    for e in excludes:
+        cmd += ["--exclude", os.path.expanduser(e)]
+    try:
+        r = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            env=_borg_env(repo_path),
+        )
+        text = (r.stdout or "") + "\n" + (r.stderr or "")
+        import re
+
+        m = re.search(
+            r"This archive:\s+([0-9][0-9.,]*\s+[A-Za-z]+)\s+([0-9][0-9.,]*\s+[A-Za-z]+)\s+([0-9][0-9.,]*\s+[A-Za-z]+)",
+            text,
+        )
+        if m:
+            return {
+                "original": m.group(1).strip(),
+                "compressed": m.group(2).strip(),
+                "deduplicated": m.group(3).strip(),
+            }
+    except Exception:
+        pass
+    return None
 
 
 def borg_list(repo_path: str) -> tuple[list[dict], str]:
@@ -674,16 +732,17 @@ def generate_extensions_meta(target_dir: Path) -> bool:
         return False
 
 
-def generate_system_meta(target_dir: Path) -> bool:
+def generate_system_meta(target_dir: Path, include_packages: bool = True) -> bool:
     target_dir.mkdir(parents=True, exist_ok=True)
     try:
-        r1 = subprocess.run(
-            ["rpm", "-qa", "--queryformat", "%{NAME}\n"],
-            capture_output=True, text=True, encoding="utf-8", timeout=30,
-        )
-        if r1.returncode == 0:
-            names = sorted(set(r1.stdout.splitlines()))
-            (target_dir / "packages.txt").write_text("\n".join(names), encoding="utf-8")
+        if include_packages:
+            r1 = subprocess.run(
+                ["rpm", "-qa", "--queryformat", "%{NAME}\n"],
+                capture_output=True, text=True, encoding="utf-8", timeout=30,
+            )
+            if r1.returncode == 0:
+                names = sorted(set(r1.stdout.splitlines()))
+                (target_dir / "packages.txt").write_text("\n".join(names), encoding="utf-8")
             
         r2 = subprocess.run(
             ["dconf", "dump", "/"],
@@ -696,7 +755,7 @@ def generate_system_meta(target_dir: Path) -> bool:
         return False
 
 
-def restore_packages_meta(meta_dir: Path, on_line, on_done) -> None:
+def restore_packages_meta(meta_dir: Path, on_line, on_done, only_missing: bool = False) -> None:
     pkg_file = meta_dir / "packages.txt"
     if not pkg_file.exists():
         GLib.idle_add(on_done, False)
@@ -706,9 +765,42 @@ def restore_packages_meta(meta_dir: Path, on_line, on_done) -> None:
     if not packages:
         GLib.idle_add(on_done, True)
         return
-        
+
+    if only_missing:
+        try:
+            r = subprocess.run(
+                ["rpm", "-qa", "--queryformat", "%{NAME}\n"],
+                capture_output=True, text=True, encoding="utf-8", timeout=30,
+            )
+            if r.returncode == 0:
+                installed = {p.strip() for p in r.stdout.splitlines() if p.strip()}
+                total = len(packages)
+                packages = [p for p in packages if p not in installed]
+                GLib.idle_add(
+                    on_line,
+                    f"▶  Системные пакеты: всего {total}, отсутствуют {len(packages)}\n",
+                )
+            else:
+                GLib.idle_add(
+                    on_line,
+                    "⚠  Не удалось получить список установленных пакетов. Будет обычная установка.\n",
+                )
+        except Exception:
+            GLib.idle_add(
+                on_line,
+                "⚠  Ошибка проверки установленных пакетов. Будет обычная установка.\n",
+            )
+
+    if not packages:
+        GLib.idle_add(on_line, "✔  Все пакеты из резервной копии уже установлены.\n")
+        GLib.idle_add(on_done, True)
+        return
+
     from core import privileges
-    GLib.idle_add(on_line, "▶  Переустановка RPM-пакетов...\n")
+    GLib.idle_add(
+        on_line,
+        "▶  Установка отсутствующих RPM-пакетов...\n" if only_missing else "▶  Переустановка RPM-пакетов...\n",
+    )
     privileges.run_privileged(["epm", "install", "-y", *packages], on_line, on_done)
 
 

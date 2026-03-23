@@ -773,6 +773,7 @@ class BorgPage(Gtk.Box):
                 "flatpak_apps_source": 0,
                 "flatpak_remotes": True,
                 "extensions": True,
+                "system_packages": config.state_get("borg_src_system_packages", True),
             }
 
             def _after_summary():
@@ -832,6 +833,7 @@ class BorgPage(Gtk.Box):
         def _on_response(d, response):
             if response != "ok":
                 return
+            repo_path_resolved = self._prepare_repo_path_for_init(repo_path)
             password = pw_row.get_text()
             config.state_set("borg_passphrase", password)
             win = self.get_root()
@@ -848,7 +850,7 @@ class BorgPage(Gtk.Box):
                 else:
                     self._log("✘  Ошибка инициализации хранилища\n")
 
-            backend.borg_init(repo_path, self._log, _on_init_done)
+            backend.borg_init(repo_path_resolved, self._log, _on_init_done)
 
         dialog.connect("response", _on_response)
         dialog.present(self.get_root())
@@ -870,7 +872,10 @@ class BorgPage(Gtk.Box):
         meta_dir = Path("/tmp/altbooster-backup-meta")
         backend.generate_flatpak_meta(meta_dir, 0)
         backend.generate_extensions_meta(meta_dir)
-        backend.generate_system_meta(meta_dir)
+        backend.generate_system_meta(
+            meta_dir,
+            include_packages=config.state_get("borg_src_system_packages", True),
+        )
         if meta_dir.exists():
             paths.append(str(meta_dir))
 
@@ -1101,6 +1106,17 @@ class BorgPage(Gtk.Box):
         self._sw_extensions.connect("notify::active", lambda s, _: config.state_set("borg_src_extensions", s.get_active()))
         grp_system.add(self._sw_extensions)
 
+        self._sw_system_packages = Adw.SwitchRow()
+        self._sw_system_packages.set_title("Системные пакеты RPM")
+        self._sw_system_packages.set_subtitle("Список установленных пакетов для восстановления")
+        self._sw_system_packages.set_active(config.state_get("borg_src_system_packages", True))
+        self._sw_system_packages.add_prefix(make_icon("package-x-generic-symbolic"))
+        self._sw_system_packages.connect(
+            "notify::active",
+            lambda s, _: config.state_set("borg_src_system_packages", s.get_active()),
+        )
+        grp_system.add(self._sw_system_packages)
+
         grp_flatpak = Adw.PreferencesGroup()
         grp_flatpak.set_title("Flatpak")
         self._body.append(grp_flatpak)
@@ -1170,6 +1186,21 @@ class BorgPage(Gtk.Box):
 
         for path in config.state_get("borg_custom_paths", []):
             self._add_custom_path_row(path)
+
+        grp_start = Adw.PreferencesGroup()
+        grp_start.set_title("Далее")
+        self._body.append(grp_start)
+
+        row_start = Adw.ActionRow()
+        row_start.set_title("Готово к запуску")
+        row_start.set_subtitle("Перейти в «Хранилище» и начать резервную копию")
+        row_start.add_prefix(make_icon("go-next-symbolic"))
+
+        btn_start = make_button("Приступить к бэкапу", width=190)
+        btn_start.set_valign(Gtk.Align.CENTER)
+        btn_start.connect("clicked", self._on_start_backup_from_sources)
+        row_start.add_suffix(btn_start)
+        grp_start.add(row_start)
 
     def _build_schedule_group(self):
         self._schedule_group = Adw.PreferencesGroup()
@@ -1257,6 +1288,28 @@ class BorgPage(Gtk.Box):
         self._schedule_group.add(self._row_time)
 
         self._update_schedule_mode_ui()
+
+    def _on_start_backup_from_sources(self, _btn):
+        self._stack.set_visible_child_name("manual")
+        self._manual_stack.set_visible_child_name("info")
+        if hasattr(self, "_btn_create") and self._btn_create:
+            self._btn_create.grab_focus()
+            pulse = {"step": 0, "max_steps": 8}
+
+            def _pulse():
+                if not self._btn_create:
+                    return False
+                if pulse["step"] >= pulse["max_steps"]:
+                    self._btn_create.remove_css_class("accent")
+                    return False
+                if pulse["step"] % 2 == 0:
+                    self._btn_create.add_css_class("accent")
+                else:
+                    self._btn_create.remove_css_class("accent")
+                pulse["step"] += 1
+                return True
+
+            GLib.timeout_add(180, _pulse)
 
     def _build_prune_group(self):
         group = Adw.PreferencesGroup()
@@ -1683,6 +1736,7 @@ class BorgPage(Gtk.Box):
             def _resp(d, r):
                 if r == Gtk.ResponseType.ACCEPT:
                     self._row_repo_path.set_text(d.get_file().get_path())
+                    self._save_repo_settings()
                 d.unref()
             fc.connect("response", _resp)
             fc.show()
@@ -1692,6 +1746,7 @@ class BorgPage(Gtk.Box):
             folder = dialog.select_folder_finish(result)
             if folder:
                 self._row_repo_path.set_text(folder.get_path())
+                self._save_repo_settings()
         except GLib.Error:
             pass
 
@@ -1739,6 +1794,44 @@ class BorgPage(Gtk.Box):
         if self._stack.get_visible_child_name() == "timesync":
             GLib.idle_add(self._tm_refresh_archives)
 
+    def _prepare_repo_path_for_init(self, repo_path: str) -> str:
+        repo_path = (repo_path or "").strip()
+        if not repo_path:
+            return repo_path
+        if repo_path.startswith("ssh://") or "@" in repo_path:
+            return repo_path
+
+        p = Path(repo_path).expanduser()
+        try:
+            if not p.exists() or not p.is_dir():
+                return str(p)
+            if backend.is_repo_initialized(str(p)):
+                return str(p)
+            if not any(p.iterdir()):
+                return str(p)
+        except OSError:
+            return repo_path
+
+        # Borg может инициализироваться только в пустой каталог.
+        base_name = "altbooster-borg-repo"
+        candidate = p / base_name
+        idx = 2
+        while candidate.exists() and not candidate.is_dir():
+            candidate = p / f"{base_name}-{idx}"
+            idx += 1
+        while candidate.exists() and candidate.is_dir() and any(candidate.iterdir()) and not backend.is_repo_initialized(str(candidate)):
+            candidate = p / f"{base_name}-{idx}"
+            idx += 1
+
+        if str(candidate) != repo_path:
+            self._log(
+                "ℹ Выбрана непустая папка, репозиторий будет создан в "
+                f"{candidate}\n"
+            )
+            self._row_repo_path.set_text(str(candidate))
+            config.state_set("borg_repo_path", str(candidate))
+        return str(candidate)
+
     def _on_install_borg(self, _btn):
         self._btn_install.set_sensitive(False)
         win = self.get_root()
@@ -1760,6 +1853,7 @@ class BorgPage(Gtk.Box):
         repo_path = self._row_repo_path.get_text().strip()
         if not repo_path:
             return
+        repo_path = self._prepare_repo_path_for_init(repo_path)
         self._save_repo_settings()
         if backend.is_repo_initialized(repo_path):
             self._log(f"✔ Хранилище уже инициализировано: {repo_path}\n")
@@ -1780,10 +1874,18 @@ class BorgPage(Gtk.Box):
     def _get_backup_opts(self) -> dict:
         opts = {}
         paths = []
+        home = Path.home()
         if config.state_get("borg_src_altbooster", True):
             paths.append(str(config.CONFIG_DIR))
         if config.state_get("borg_src_home", False):
             opts["home_dirs"] = config.state_get("borg_home_dirs", [])
+        config_dirs = config.state_get("borg_config_dirs", [])
+        if config_dirs:
+            cfg_root = home / ".config"
+            for d in config_dirs:
+                p = cfg_root / d
+                if p.exists():
+                    paths.append(str(p))
         if config.state_get("borg_src_extensions", True):
             opts["extensions"] = True
         if config.state_get("borg_src_flatpak_apps", True):
@@ -1793,12 +1895,24 @@ class BorgPage(Gtk.Box):
             opts["flatpak_remotes"] = True
         if config.state_get("borg_src_flatpak_data", True):
             opts["flatpak_data"] = True
-            opts["flatpak_data_filter"] = config.state_get("borg_flatpak_data_filter", None)
+            flt = config.state_get("borg_flatpak_data_filter", None)
+            opts["flatpak_data_filter"] = flt
+            var_app = home / ".var" / "app"
+            if var_app.exists():
+                if flt is None:
+                    paths.append(str(var_app))
+                else:
+                    for app_id in flt:
+                        p = var_app / app_id
+                        if p.exists():
+                            paths.append(str(p))
+        opts["system_packages"] = config.state_get("borg_src_system_packages", True)
         opts["custom_paths"] = config.state_get("borg_custom_paths", [])
         opts["paths"] = paths
         return opts
 
     def _on_create_archive(self, _):
+        self._save_repo_settings()
         repo_path = config.state_get("borg_repo_path", "")
         if not repo_path: return
         opts = self._get_backup_opts()
@@ -1822,7 +1936,7 @@ class BorgPage(Gtk.Box):
             backend.generate_flatpak_meta(meta_dir, opts.get("flatpak_apps_source"))
         if opts.get("extensions"):
             backend.generate_extensions_meta(meta_dir)
-        backend.generate_system_meta(meta_dir)
+        backend.generate_system_meta(meta_dir, include_packages=opts.get("system_packages", True))
         if meta_dir.exists():
             paths.append(str(meta_dir))
 
@@ -2012,6 +2126,8 @@ class BorgPage(Gtk.Box):
         except Exception:
             all_dirs = []
         selected = config.state_get("borg_flatpak_data_filter", all_dirs)
+        if selected is None:
+            selected = all_dirs
         
         icons_thread = threading.Thread(target=self._load_flatpak_icons, args=(all_dirs, selected), daemon=True)
         icons_thread.start()

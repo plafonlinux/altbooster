@@ -59,7 +59,16 @@ class BorgBackupSummaryDialog(Adw.Window):
         self._spinner.start()
         self._spinner.set_valign(Gtk.Align.CENTER)
         self._spinner.set_halign(Gtk.Align.CENTER)
-        self._spinner.set_vexpand(True)
+
+        self._loading_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self._loading_box.set_vexpand(True)
+        self._loading_box.set_valign(Gtk.Align.CENTER)
+        self._loading_box.set_halign(Gtk.Align.CENTER)
+        self._loading_box.append(self._spinner)
+
+        loading_label = Gtk.Label(label="Собираем данные. Ожидайте!")
+        loading_label.add_css_class("dim-label")
+        self._loading_box.append(loading_label)
 
         self._content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
         self._content_box.set_margin_start(20)
@@ -73,7 +82,7 @@ class BorgBackupSummaryDialog(Adw.Window):
         scroll.set_child(self._content_box)
 
         self._stack = Gtk.Stack()
-        self._stack.add_named(self._spinner, "loading")
+        self._stack.add_named(self._loading_box, "loading")
         self._stack.add_named(scroll, "content")
         self._stack.set_visible_child_name("loading")
 
@@ -92,7 +101,7 @@ class BorgBackupSummaryDialog(Adw.Window):
     def _du_pair(path: str) -> tuple[str, int]:
         try:
             r = subprocess.run(
-                ["du", "-sk", path],
+                ["du", "--apparent-size", "-sk", path],
                 capture_output=True, text=True, encoding="utf-8", timeout=30,
             )
             if r.returncode == 0:
@@ -118,7 +127,7 @@ class BorgBackupSummaryDialog(Adw.Window):
     def _du_children(parent: str) -> dict[str, str]:
         try:
             r = subprocess.run(
-                ["du", "-sh", "--max-depth=1", parent],
+                ["du", "--apparent-size", "-sh", "--max-depth=1", parent],
                 capture_output=True, text=True, encoding="utf-8", timeout=60,
             )
             result = {}
@@ -150,8 +159,10 @@ class BorgBackupSummaryDialog(Adw.Window):
         home = Path.home()
         total_kb = 0
         var_app_str = str(home / ".var" / "app")
+        estimate_paths: list[str] = []
 
         raw_paths = list(self._opts.get("paths", []))
+        estimate_paths.extend(raw_paths)
         paths_with_size = []
         paths_kb = 0
         for p in raw_paths:
@@ -242,12 +253,20 @@ class BorgBackupSummaryDialog(Adw.Window):
             flt = self._opts.get("flatpak_data_filter")
             dirs = [d for d in all_dirs if d in flt] if flt is not None else all_dirs
             data["flatpak_data_dirs"] = [(d, sizes.get(d, "")) for d in dirs]
-            flatpak_total_str, flatpak_kb = self._du_pair(str(var_app))
-            data["flatpak_data_total"] = flatpak_total_str if flt is None else ""
+            if flt is None:
+                flatpak_total_str, flatpak_kb = self._du_pair(str(var_app))
+            else:
+                flatpak_kb = 0
+                for d in dirs:
+                    _, kb = self._du_pair(str(var_app / d))
+                    flatpak_kb += kb
+                flatpak_total_str = self._fmt_kb(flatpak_kb) if flatpak_kb else ""
+            data["flatpak_data_total"] = flatpak_total_str
             total_kb += flatpak_kb
 
         if self._opts.get("home_dirs"):
             home_dirs = self._opts["home_dirs"]
+            estimate_paths.extend(str(home / d) for d in home_dirs)
             home_pairs = [(d, *self._du_pair(str(home / d))) for d in home_dirs]
             data["home_dirs"] = [(d, s) for d, s, _ in home_pairs]
             home_kb = sum(kb for _, _, kb in home_pairs)
@@ -256,19 +275,29 @@ class BorgBackupSummaryDialog(Adw.Window):
 
         if self._opts.get("custom_paths"):
             custom = self._opts["custom_paths"]
+            estimate_paths.extend(custom)
             custom_pairs = [(p, *self._du_pair(p)) for p in custom]
             data["custom_paths"] = [(p, s) for p, s, _ in custom_pairs]
             total_kb += sum(kb for _, _, kb in custom_pairs)
 
-        try:
-            r = subprocess.run(
-                ["rpm", "-qa", "--queryformat", "%{NAME}\n"],
-                capture_output=True, text=True, encoding="utf-8", timeout=15,
-            )
-            data["packages_count"] = len([line for line in r.stdout.splitlines() if line.strip()])
-        except Exception:
+        if self._opts.get("system_packages", True):
+            try:
+                r = subprocess.run(
+                    ["rpm", "-qa", "--queryformat", "%{NAME}\n"],
+                    capture_output=True, text=True, encoding="utf-8", timeout=15,
+                )
+                data["packages_count"] = len([line for line in r.stdout.splitlines() if line.strip()])
+            except Exception:
+                data["packages_count"] = 0
+        else:
             data["packages_count"] = 0
 
+        data["borg_estimate"] = backend.borg_estimate_create(
+            self._repo_path,
+            estimate_paths,
+            backend.DEFAULT_EXCLUDES,
+            exclude_caches=True,
+        )
         data["total_kb"] = total_kb
         GLib.idle_add(self._populate, data)
 
@@ -379,8 +408,24 @@ class BorgBackupSummaryDialog(Adw.Window):
             flow.append(self._make_card(f"… и ещё {len(items) - limit}", icon="view-more-symbolic"))
 
     def _populate(self, data: dict):
+        note_row = Adw.ActionRow()
+        note_row.set_title("Как читать размер")
+        note_row.set_subtitle(
+            "Оценка в сводке считается по логическому размеру (как Original size в Borg). "
+            "Фактический объём в хранилище обычно меньше за счёт сжатия и дедупликации "
+            "(Compressed/Deduplicated size)."
+        )
+        note_row.add_prefix(make_icon("dialog-information-symbolic"))
+        self._content_box.append(note_row)
+
         total_kb = data.get("total_kb", 0)
         total_badge = f"Всего: {self._fmt_kb(total_kb)}" if total_kb else ""
+        estimate = data.get("borg_estimate")
+        if estimate:
+            total_badge = (
+                f"{total_badge}  ·  Borg dry-run O/C/D: "
+                f"{estimate.get('original', '?')} / {estimate.get('compressed', '?')} / {estimate.get('deduplicated', '?')}"
+            ).strip()
         repo_section, repo_flow = self._make_section("Хранилище", total_badge)
         repo_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         repo_card.add_css_class("card")

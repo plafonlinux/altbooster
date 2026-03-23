@@ -192,6 +192,7 @@ class FlatpakDataPickerDialog(Adw.Window):
         self.set_title("Данные Flatpak — выбор приложений")
         self.set_default_size(728, 600)
         self._on_apply = on_apply
+        selected = selected or []
         self._selected: set[str] = set(selected)
         self._row_map: dict[str, tuple[Gtk.ListBoxRow, Gtk.CheckButton]] = {}
         self._icons: dict = icons or {}
