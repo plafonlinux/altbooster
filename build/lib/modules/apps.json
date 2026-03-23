@@ -1,0 +1,1416 @@
+{
+  "id": "apps",
+  "title": "Приложения",
+  "icon": "application-x-executable-symbolic",
+  "groups": [
+    {
+      "id": "общение",
+      "title": "Общение",
+      "items": [
+        {
+          "id": "telegram",
+          "label": "Telegram",
+          "desc": "Мессенджер",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.telegram.desktop"
+            ],
+            "check": [
+              "flatpak",
+              "org.telegram.desktop"
+            ]
+          }
+        },
+        {
+          "id": "thunderbird",
+          "label": "Thunderbird",
+          "desc": "Почтовый клиент",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.mozilla.Thunderbird"
+            ],
+            "check": [
+              "flatpak",
+              "org.mozilla.Thunderbird"
+            ]
+          }
+        },
+        {
+          "id": "aurynk",
+          "label": "Aurynk",
+          "desc": "Клиент для общения",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "io.github.IshuSinghSE.aurynk"
+            ],
+            "check": [
+              "flatpak",
+              "io.github.IshuSinghSE.aurynk"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "удалённый_доступ",
+      "title": "Удалённый доступ",
+      "items": [
+        {
+          "id": "gnome_connections",
+          "label": "GNOME Connections",
+          "desc": "Подключение к удалённым рабочим столам (RDP, VNC)",
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.gnome.Connections"
+              ],
+              "check": [
+                "flatpak",
+                "org.gnome.Connections"
+              ]
+            },
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "gnome-connections"
+              ],
+              "check": [
+                "rpm",
+                "gnome-connections"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "remmina",
+          "label": "Remmina",
+          "desc": "Клиент удалённого рабочего стола (RDP, VNC, SSH, SPICE)",
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.remmina.Remmina"
+              ],
+              "check": [
+                "flatpak",
+                "org.remmina.Remmina"
+              ]
+            },
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "remmina"
+              ],
+              "check": [
+                "rpm",
+                "remmina"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "freerdp",
+          "label": "FreeRDP",
+          "desc": "RDP-клиент с нативной поддержкой Wayland (wlfreerdp)",
+          "source": {
+            "label": "EPM",
+            "cmd": [
+              "epm",
+              "-i",
+              "freerdp"
+            ],
+            "check": [
+              "which",
+              "wlfreerdp"
+            ]
+          }
+        },
+        {
+          "id": "rustdesk",
+          "label": "RustDesk",
+          "desc": "Открытый аналог TeamViewer с поддержкой Wayland",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.rustdesk.RustDesk"
+            ],
+            "check": [
+              "flatpak",
+              "com.rustdesk.RustDesk"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "браузеры",
+      "title": "Браузеры",
+      "items": [
+        {
+          "id": "firefox",
+          "label": "Firefox",
+          "desc": "Браузер Mozilla Firefox",
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.mozilla.firefox"
+              ],
+              "check": [
+                "flatpak",
+                "org.mozilla.firefox"
+              ]
+            },
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "-y",
+                "firefox"
+              ],
+              "check": [
+                "rpm",
+                "firefox"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "chrome",
+          "label": "Google Chrome",
+          "desc": "Браузер Google Chrome",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.google.Chrome"
+            ],
+            "check": [
+              "flatpak",
+              "com.google.Chrome"
+            ]
+          }
+        },
+        {
+          "id": "yandex",
+          "label": "Яндекс Браузер",
+          "desc": "Официальный браузер от Яндекса",
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "ru.yandex.Browser"
+              ],
+              "check": [
+                "flatpak",
+                "ru.yandex.Browser"
+              ]
+            },
+            {
+              "label": "EPM play",
+              "cmd": [
+                "epm",
+                "play",
+                "yandex-browser"
+              ],
+              "check": [
+                "rpm",
+                "yandex-browser"
+              ]
+            },
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "-y",
+                "yandex-browser-stable"
+              ],
+              "check": [
+                "rpm",
+                "yandex-browser-stable"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "работа_s_документами",
+      "title": "Работа с документами",
+      "items": [
+        {
+          "id": "libreoffice",
+          "label": "LibreOffice",
+          "desc": "Офисный пакет",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.libreoffice.LibreOffice"
+            ],
+            "check": [
+              "flatpak",
+              "org.libreoffice.LibreOffice"
+            ]
+          }
+        },
+        {
+          "id": "onlyoffice",
+          "label": "OnlyOffice",
+          "desc": "Офисный пакет с совместимостью MS",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.onlyoffice.desktopeditors"
+            ],
+            "check": [
+              "flatpak",
+              "org.onlyoffice.desktopeditors"
+            ]
+          }
+        },
+        {
+          "id": "brother_printer",
+          "label": "Принтер Brother",
+          "desc": "cups-browsed avahi-daemon — поддержка сети и AirPrint",
+          "source": {
+            "label": "APT",
+            "cmd": [
+              "bash",
+              "-c",
+              "apt-get install -y cups-browsed avahi-daemon libnss-mdns sane sane-airscan && systemctl enable --now cups-browsed && systemctl enable --now avahi-daemon"
+            ],
+            "check": [
+              "rpm",
+              "cups-browsed"
+            ]
+          }
+        },
+        {
+          "id": "foliate",
+          "label": "Foliate",
+          "desc": "Читалка книг",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.github.johnfactotum.Foliate"
+            ],
+            "check": [
+              "flatpak",
+              "com.github.johnfactotum.Foliate"
+            ]
+          }
+        },
+        {
+          "id": "calibre",
+          "label": "Calibre",
+          "desc": "Управление библиотекой книг",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.calibre_ebook.calibre"
+            ],
+            "check": [
+              "flatpak",
+              "com.calibre_ebook.calibre"
+            ]
+          }
+        },
+        {
+          "id": "obsidian",
+          "label": "Obsidian",
+          "desc": "База знаний и заметки в Markdown",
+          "sources": [
+            {
+              "label": "EPM play",
+              "cmd": [
+                "epm",
+                "play",
+                "obsidian"
+              ],
+              "check": [
+                "rpm",
+                "obsidian"
+              ]
+            },
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "md.obsidian.Obsidian"
+              ],
+              "check": [
+                "flatpak",
+                "md.obsidian.Obsidian"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "мультимедиа",
+      "title": "Мультимедиа",
+      "items": [
+        {
+          "id": "cassette",
+          "label": "Cassette",
+          "desc": "Неофициальный клиент Яндекс Музыки",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "space.rirusha.Cassette"
+            ],
+            "check": [
+              "flatpak",
+              "space.rirusha.Cassette"
+            ]
+          }
+        },
+        {
+          "id": "obs",
+          "label": "OBS Studio",
+          "desc": "Запись и стриминг",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.obsproject.Studio",
+              "com.obsproject.Studio.Plugin.WaylandHotkeys"
+            ],
+            "check": [
+              "flatpak",
+              "com.obsproject.Studio"
+            ]
+          }
+        },
+        {
+          "id": "kdenlive",
+          "label": "KDENlive",
+          "desc": "Видеоредактор",
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.kde.kdenlive"
+              ],
+              "check": [
+                "flatpak",
+                "org.kde.kdenlive"
+              ]
+            },
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "kdenlive"
+              ],
+              "check": [
+                "rpm",
+                "kdenlive"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "audacity",
+          "label": "Audacity",
+          "desc": "Аудиоредактор",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.audacityteam.Audacity"
+            ],
+            "check": [
+              "flatpak",
+              "org.audacityteam.Audacity"
+            ]
+          }
+        },
+        {
+          "id": "gradia",
+          "label": "Gradia",
+          "desc": "Аннотирование и оформление скриншотов (GTK4)",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "be.alexandervanhee.gradia"
+            ],
+            "check": [
+              "flatpak",
+              "be.alexandervanhee.gradia"
+            ]
+          }
+        },
+        {
+          "id": "parabolic",
+          "label": "Parabolic",
+          "desc": "Загрузчик видео (YouTube и др.)",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.nickvision.tubeconverter"
+            ],
+            "check": [
+              "flatpak",
+              "org.nickvision.tubeconverter"
+            ]
+          }
+        },
+        {
+          "id": "kitsune",
+          "label": "Kitsune",
+          "desc": "Клиент для просмотра аниме с озвучкой AniLiberty (Libadwaita)",
+          "sources": [
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "kitsune-adw"
+              ],
+              "check": [
+                "rpm",
+                "kitsune-adw"
+              ]
+            },
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "net.armatik.Kitsune"
+              ],
+              "check": [
+                "flatpak",
+                "net.armatik.Kitsune"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "spotify",
+          "label": "Spotify",
+          "desc": "Музыкальный стриминг",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.spotify.Client"
+            ],
+            "check": [
+              "flatpak",
+              "com.spotify.Client"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "игры",
+      "title": "Игры",
+      "items": [
+        {
+          "id": "portproton",
+          "label": "PortProton",
+          "desc": "Запуск Windows-игр через Wine/Proton",
+          "sources": [
+            {
+              "label": "EPM play",
+              "cmd": [
+                "epm",
+                "play",
+                "portproton"
+              ],
+              "check": [
+                "rpm",
+                "portproton"
+              ]
+            },
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "portproton"
+              ],
+              "check": [
+                "rpm",
+                "portproton"
+              ]
+            },
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "ru.linux_gaming.PortProton"
+              ],
+              "check": [
+                "flatpak",
+                "ru.linux_gaming.PortProton"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "heroic",
+          "label": "Heroic Games Launcher",
+          "desc": "Запуск игр Epic Games и GOG",
+          "sources": [
+            {
+              "label": "EPM play",
+              "cmd": [
+                "epm",
+                "play",
+                "heroic-games-launcher"
+              ],
+              "check": [
+                "rpm",
+                "heroic-games-launcher"
+              ]
+            },
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "com.heroicgameslauncher.hgl"
+              ],
+              "check": [
+                "flatpak",
+                "com.heroicgameslauncher.hgl"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "protonplus",
+          "label": "Proton Plus",
+          "desc": "Менеджер версий Proton для Steam",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.vysp3r.ProtonPlus"
+            ],
+            "check": [
+              "flatpak",
+              "com.vysp3r.ProtonPlus"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "редакторы",
+      "title": "Редакторы",
+      "items": [
+        {
+          "id": "krita",
+          "label": "Krita",
+          "desc": "Растровый графический редактор",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.kde.krita"
+            ],
+            "check": [
+              "flatpak",
+              "org.kde.krita"
+            ]
+          }
+        },
+        {
+          "id": "inkscape",
+          "label": "Inkscape",
+          "desc": "Векторный редактор",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "org.inkscape.Inkscape"
+            ],
+            "check": [
+              "flatpak",
+              "org.inkscape.Inkscape"
+            ]
+          }
+        },
+        {
+          "id": "gimp",
+          "label": "GIMP",
+          "desc": "Растровый графический редактор",
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.gimp.GIMP"
+              ],
+              "check": [
+                "flatpak",
+                "org.gimp.GIMP"
+              ]
+            },
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "gimp"
+              ],
+              "check": [
+                "rpm",
+                "gimp"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "photogimp",
+          "label": "PhotoGIMP",
+          "desc": "Конфигурация GIMP в стиле Photoshop",
+          "source": {
+            "label": "GitHub",
+            "cmd": [
+              "bash",
+              "-c",
+              "set -e; REAL_USER=${SUDO_USER:-$(getent passwd \"${PKEXEC_UID:-0}\" | cut -d: -f1)}; HOME_DIR=$(getent passwd $REAL_USER | cut -d: -f6); TMP=$(mktemp -d); sudo -u $REAL_USER git clone --depth=1 https://github.com/Diolinux/PhotoGIMP.git \"$TMP/PhotoGIMP\"; SRC=\"$TMP/PhotoGIMP/.config/GIMP/3.0\"; for GIMP_DIR in \"$HOME_DIR/.var/app/org.gimp.GIMP/config/GIMP/3.0\" \"$HOME_DIR/.config/GIMP/3.0\"; do sudo -u $REAL_USER mkdir -p \"$GIMP_DIR\" && sudo -u $REAL_USER cp -r \"$SRC/.\" \"$GIMP_DIR/\"; done; sudo -u $REAL_USER touch \"$HOME_DIR/.config/photogimp-installed\"; rm -rf \"$TMP\""
+            ],
+            "check": [
+              "any_of",
+              [
+                [
+                  "path",
+                  "~/.config/photogimp-installed"
+                ],
+                [
+                  "desktop_keyword",
+                  "photogimp"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "id": "darktable",
+          "label": "Darktable",
+          "desc": "Обработка RAW-фотографий",
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.darktable.Darktable"
+              ],
+              "check": [
+                "flatpak",
+                "org.darktable.Darktable"
+              ]
+            },
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "darktable"
+              ],
+              "check": [
+                "rpm",
+                "darktable"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "rawtherapee",
+          "label": "RawTherapee",
+          "desc": "Обработка RAW-фотографий с расширенными настройками",
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "com.rawtherapee.RawTherapee"
+              ],
+              "check": [
+                "flatpak",
+                "com.rawtherapee.RawTherapee"
+              ]
+            },
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "rawtherapee"
+              ],
+              "check": [
+                "rpm",
+                "rawtherapee"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "color_picker",
+          "label": "Color Picker",
+          "desc": "Выбор и определение цвета с экрана",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "nl.hjdskes.gcolor3"
+            ],
+            "check": [
+              "flatpak",
+              "nl.hjdskes.gcolor3"
+            ]
+          }
+        },
+        {
+          "id": "blender",
+          "label": "Blender",
+          "desc": "3D-редактор и анимация",
+          "sources": [
+            {
+              "label": "EPM",
+              "cmd": [
+                "epm",
+                "-i",
+                "blender"
+              ],
+              "check": [
+                "rpm",
+                "blender"
+              ]
+            },
+            {
+              "label": "EPM Play",
+              "cmd": [
+                "epm",
+                "play",
+                "blender"
+              ],
+              "check": [
+                "which",
+                "blender"
+              ]
+            },
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.blender.Blender"
+              ],
+              "check": [
+                "flatpak",
+                "org.blender.Blender"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "программирование",
+      "title": "Программирование",
+      "items": [
+        {
+          "id": "vscode",
+          "label": "Visual Studio Code",
+          "desc": "Редактор кода от Microsoft",
+          "source": {
+            "label": "EPM play",
+            "cmd": [
+              "epm",
+              "play",
+              "code"
+            ],
+            "check": [
+              "which",
+              "code"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "системные_инструменты",
+      "title": "Системные инструменты",
+      "items": [
+        {
+          "id": "extension_manager",
+          "label": "Extension Manager",
+          "desc": "Управление расширениями GNOME",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.mattjakeman.ExtensionManager"
+            ],
+            "check": [
+              "flatpak",
+              "com.mattjakeman.ExtensionManager"
+            ]
+          }
+        },
+        {
+          "id": "alacarte",
+          "label": "Alacarte",
+          "desc": "Редактор главного меню",
+          "source": {
+            "label": "EPM",
+            "cmd": [
+              "epm",
+              "-i",
+              "alacarte"
+            ],
+            "check": [
+              "rpm",
+              "alacarte"
+            ]
+          }
+        },
+        {
+          "id": "bitwarden",
+          "label": "Bitwarden",
+          "desc": "Менеджер паролей",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.bitwarden.desktop"
+            ],
+            "check": [
+              "flatpak",
+              "com.bitwarden.desktop"
+            ]
+          }
+        },
+        {
+          "id": "resources",
+          "label": "Ресурсы",
+          "desc": "Мониторинг системных ресурсов",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "net.nokyan.Resources"
+            ],
+            "check": [
+              "flatpak",
+              "net.nokyan.Resources"
+            ]
+          }
+        },
+        {
+          "id": "warehouse",
+          "label": "Warehouse",
+          "desc": "Управление Flatpak-приложениями",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "io.github.flattool.Warehouse"
+            ],
+            "check": [
+              "flatpak",
+              "io.github.flattool.Warehouse"
+            ]
+          }
+        },
+        {
+          "id": "flatseal",
+          "label": "Flatseal",
+          "desc": "Управление правами Flatpak",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.github.tchx84.Flatseal"
+            ],
+            "check": [
+              "flatpak",
+              "com.github.tchx84.Flatseal"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "устройства_и_сеть",
+      "title": "Устройства и сеть",
+      "items": [
+        {
+          "id": "solaar",
+          "label": "Solaar",
+          "desc": "Управление устройствами Logitech",
+          "source": {
+            "label": "EPM",
+            "cmd": [
+              "epm",
+              "-i",
+              "solaar"
+            ],
+            "check": [
+              "rpm",
+              "solaar"
+            ]
+          }
+        },
+        {
+          "id": "piper",
+          "label": "Piper",
+          "desc": "Настройка игровых мышей (libratbag)",
+          "source": {
+            "label": "EPM",
+            "cmd": [
+              "epm",
+              "-i",
+              "piper"
+            ],
+            "check": [
+              "rpm",
+              "piper"
+            ]
+          }
+        },
+        {
+          "id": "localsend",
+          "label": "LocalSend",
+          "desc": "Передача файлов по локальной сети (AirDrop-аналог)",
+          "sources": [
+            {
+              "label": "Flathub",
+              "cmd": [
+                "flatpak",
+                "install",
+                "-y",
+                "flathub",
+                "org.localsend.localsend_app"
+              ],
+              "check": [
+                "flatpak",
+                "org.localsend.localsend_app"
+              ]
+            },
+            {
+              "label": "EPM play",
+              "cmd": [
+                "epm",
+                "play",
+                "localsend"
+              ],
+              "check": [
+                "rpm",
+                "localsend"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "synology_drive",
+          "label": "Synology Drive",
+          "desc": "Клиент синхронизации файлов с Synology NAS",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.synology.SynologyDrive"
+            ],
+            "check": [
+              "flatpak",
+              "com.synology.SynologyDrive"
+            ]
+          }
+        },
+        {
+          "id": "monic",
+          "label": "Monic",
+          "desc": "Управление монитором (DDC/CI)",
+          "source": {
+            "label": "GitHub",
+            "cmd": [
+              "bash",
+              "-c",
+              "set -e; REAL_USER=$SUDO_USER; HOME_DIR=$(getent passwd $REAL_USER | cut -d: -f6); apt-get install -y python3-module-pip; mkdir -p /etc/modules-load.d; echo i2c-dev > /etc/modules-load.d/i2c-dev.conf; groupadd -f i2c; chown :i2c /dev/i2c-* 2>/dev/null || true; usermod -aG i2c $REAL_USER; echo 'KERNEL==\"i2c-[0-9]*\", GROUP=\"i2c\"' > /etc/udev/rules.d/10-i2c.rules; udevadm control --reload-rules; udevadm trigger; sudo -u $REAL_USER bash -c   'cd /tmp && rm -rf Monic   && git clone https://github.com/toxblh/Monic.git   && cd Monic && ./install.sh'; sudo -u $REAL_USER bash $HOME_DIR/.local/share/monitor-control/run_monitor_control.sh"
+            ],
+            "check": [
+              "path",
+              "~/.local/share/monitor-control/run_monitor_control.sh"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "обход_блокировок",
+      "title": "Обход блокировок",
+      "items": [
+        {
+          "id": "v2ray",
+          "label": "v2ray",
+          "desc": "Прокси-платформа для обхода блокировок",
+          "source": {
+            "label": "EPM",
+            "cmd": [
+              "epm",
+              "-i",
+              "-y",
+              "v2ray"
+            ],
+            "check": [
+              "which",
+              "v2ray"
+            ]
+          }
+        },
+        {
+          "id": "xray",
+          "label": "Xray (xray-core)",
+          "desc": "Ядро Project X (форк v2ray): XTLS, REALITY — используется с v2rayN, Nekoray и др.",
+          "source": {
+            "label": "EPM",
+            "cmd": [
+              "epm",
+              "-i",
+              "-y",
+              "xray-core"
+            ],
+            "check": [
+              "rpm",
+              "xray-core"
+            ]
+          }
+        },
+        {
+          "id": "v2rayn",
+          "label": "v2rayN",
+          "desc": "Графический клиент v2ray/xray",
+          "source": {
+            "label": "EPM Play",
+            "cmd": [
+              "epm",
+              "play",
+              "v2rayn"
+            ],
+            "check": [
+              "which",
+              "v2rayn"
+            ]
+          }
+        },
+        {
+          "id": "nekoray",
+          "label": "Nekoray",
+          "desc": "Qt-клиент для Xray и sing-box: маршруты, подписки, TUN",
+          "source": {
+            "label": "EPM Play",
+            "cmd": [
+              "epm",
+              "play",
+              "nekoray"
+            ],
+            "check": [
+              "rpm",
+              "nekoray"
+            ]
+          }
+        },
+        {
+          "id": "hiddify",
+          "label": "Hiddify",
+          "desc": "Прокси-клиент на ядре Sing-box (VLESS, Reality и др.)",
+          "source": {
+            "label": "EPM Play",
+            "cmd": [
+              "epm",
+              "play",
+              "hiddify"
+            ],
+            "check": [
+              "rpm",
+              "hiddify"
+            ]
+          }
+        },
+        {
+          "id": "amneziavpn",
+          "label": "Amnezia VPN",
+          "desc": "AmneziaVPN из исходников: Premium, Free (ограниченный список сайтов) и свой сервер — AppImage с GitHub",
+          "source": {
+            "label": "GitHub",
+            "cmd": [
+              "bash",
+              "-c",
+              "set -e; REAL_USER=${SUDO_USER:-$(getent passwd \"${PKEXEC_UID:-0}\" | cut -d: -f1)}; HOME_DIR=$(getent passwd $REAL_USER | cut -d: -f6); mkdir -p \"$HOME_DIR/Applications\"; API=$(curl -sf https://api.github.com/repos/amnezia-vpn/amnezia-client/releases/latest); URL=$(echo \"$API\" | python3 -c \"import sys,json; r=json.load(sys.stdin); print(next((a['browser_download_url'] for a in r['assets'] if a['name'].endswith('.AppImage')), ''))\"); [ -n \"$URL\" ] || (echo 'AppImage не найден в релизе'; exit 1); curl -L -o \"$HOME_DIR/Applications/AmneziaVPN.AppImage\" \"$URL\"; chmod +x \"$HOME_DIR/Applications/AmneziaVPN.AppImage\"; chown $REAL_USER:$REAL_USER \"$HOME_DIR/Applications/AmneziaVPN.AppImage\"; sudo -u $REAL_USER mkdir -p \"$HOME_DIR/.local/share/applications\"; printf '[Desktop Entry]\\nType=Application\\nName=Amnezia VPN\\nExec=%s/Applications/AmneziaVPN.AppImage\\nIcon=network-vpn\\nCategories=Network;\\nTerminal=false\\n' \"$HOME_DIR\" > \"$HOME_DIR/.local/share/applications/amneziavpn.desktop\"; chown $REAL_USER:$REAL_USER \"$HOME_DIR/.local/share/applications/amneziavpn.desktop\""
+            ],
+            "check": [
+              "path",
+              "~/Applications/AmneziaVPN.AppImage"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "диагностика",
+      "title": "Диагностика",
+      "items": [
+        {
+          "id": "furmark",
+          "label": "FurMark",
+          "desc": "Стресс-тест GPU",
+          "sources": [
+            {
+              "label": "EPM play",
+              "cmd": [
+                "epm",
+                "play",
+                "furmark"
+              ],
+              "check": [
+                "rpm",
+                "furmark"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "occt",
+          "label": "OCCT",
+          "desc": "Стресс-тест CPU/GPU/RAM",
+          "source": {
+            "label": "EPM Play",
+            "cmd": [
+              "epm",
+              "play",
+              "occt"
+            ],
+            "check": [
+              "which",
+              "occt"
+            ]
+          }
+        },
+        {
+          "id": "gtkstresstesting",
+          "label": "GtkStressTesting",
+          "desc": "Стресс-тест GTK и системных компонентов",
+          "source": {
+            "label": "Flathub",
+            "cmd": [
+              "flatpak",
+              "install",
+              "-y",
+              "flathub",
+              "com.leinardi.gst"
+            ],
+            "check": [
+              "flatpak",
+              "com.leinardi.gst"
+            ]
+          }
+        },
+        {
+          "id": "unigine_valley",
+          "label": "Unigine Valley",
+          "desc": "Бенчмарк GPU на движке Unigine",
+          "sources": [
+            {
+              "label": "EPM Play",
+              "cmd": [
+                "epm",
+                "play",
+                "unigine-valley"
+              ],
+              "check": [
+                "rpm",
+                "unigine-valley"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "unigine_superposition",
+          "label": "Unigine Superposition",
+          "desc": "Бенчмарк GPU на движке Unigine",
+          "sources": [
+            {
+              "label": "EPM Play",
+              "cmd": [
+                "epm",
+                "play",
+                "unigine-superposition"
+              ],
+              "check": [
+                "rpm",
+                "unigine-superposition"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "unigine_heaven",
+          "label": "Unigine Heaven",
+          "desc": "Бенчмарк GPU на движке Unigine",
+          "sources": [
+            {
+              "label": "EPM Play",
+              "cmd": [
+                "epm",
+                "play",
+                "unigine-heaven"
+              ],
+              "check": [
+                "rpm",
+                "unigine-heaven"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

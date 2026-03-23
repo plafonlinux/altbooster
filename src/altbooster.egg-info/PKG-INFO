@@ -1,3 +1,17 @@
+Metadata-Version: 2.4
+Name: altbooster
+Version: 5.6.9
+Summary: Утилита настройки и обслуживания ALT Linux
+Author: PLAFON
+License-Expression: MIT
+Project-URL: Homepage, https://github.com/plafonlinux/altbooster
+Project-URL: Repository, https://github.com/plafonlinux/altbooster
+Project-URL: Issues, https://github.com/plafonlinux/altbooster/issues
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Dynamic: license-file
+
 <div align="center">
 
 <img src="icons/altbooster.png" width="120" alt="ALT Booster Logo"/>

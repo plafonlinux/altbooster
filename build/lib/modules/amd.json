@@ -1,0 +1,106 @@
+{
+  "id": "amd",
+  "title": "AMD Radeon",
+  "icon": "video-display-symbolic",
+  "groups": [
+    {
+      "id": "overclock",
+      "title": "Разгон AMD Radeon",
+      "description": "Добавляет параметры amdgpu в GRUB и пересобирает загрузчик. Требуется перезагрузка.",
+      "rows": [
+        {
+          "id": "overclock_enable",
+          "type": "command_row",
+          "title": "Режим разгона",
+          "subtitle": "Разблокирует управление частотами и питанием GPU",
+          "icon": "computer-symbolic",
+          "button_label": "Включить",
+          "button_done_label": "Включено",
+          "check": { "type": "builtin", "fn": "check_overclock" },
+          "action": { "type": "builtin", "fn": "enable_overclock" }
+        },
+        {
+          "id": "grub_rebuild",
+          "type": "command_row",
+          "title": "Обновление загрузчика",
+          "subtitle": "Применяет параметры ядра (update-grub)",
+          "icon": "system-reboot-symbolic",
+          "button_label": "Применить",
+          "button_style": "suggested-action",
+          "check": null,
+          "action": { "type": "privileged", "cmd": ["update-grub"] }
+        },
+        {
+          "id": "reboot",
+          "type": "command_row",
+          "title": "Перезагрузка системы",
+          "subtitle": "Необходима для вступления изменений в силу",
+          "icon": "system-shutdown-symbolic",
+          "button_label": "Выполнить",
+          "button_style": "destructive-action",
+          "check": null,
+          "action": { "type": "builtin", "fn": "confirm_reboot" }
+        }
+      ]
+    },
+    {
+      "id": "lact",
+      "title": "LACT — управление видеокартой",
+      "description": "Linux AMDGPU Controller: мониторинг, разгон и управление вентилятором",
+      "rows": [
+        {
+          "id": "lact_install",
+          "type": "command_row",
+          "title": "Установить LACT",
+          "subtitle": "Утилита для разгона и управления вентиляторами",
+          "icon": "application-x-executable-symbolic",
+          "button_label": "Установить",
+          "button_done_label": "Установлен",
+          "check": { "type": "which", "value": "lact" },
+          "action": { "type": "epm", "cmd": ["epm", "-i", "lact"] }
+        },
+        {
+          "id": "lactd_enable",
+          "type": "command_row",
+          "title": "Служба lactd",
+          "subtitle": "Автозапуск демона управления настройками",
+          "icon": "system-run-symbolic",
+          "button_label": "Включить",
+          "button_done_label": "Активен",
+          "check": { "type": "systemd", "value": "lactd" },
+          "action": { "type": "privileged", "cmd": ["systemctl", "enable", "--now", "lactd"] }
+        },
+        {
+          "id": "lact_wheel",
+          "type": "command_row",
+          "title": "Права доступа",
+          "subtitle": "Разрешает пользователю управлять видеокартой (группа wheel)",
+          "icon": "security-medium-symbolic",
+          "button_label": "Разрешить",
+          "button_done_label": "Разрешено",
+          "check": { "type": "builtin", "fn": "check_wheel" },
+          "action": { "type": "builtin", "fn": "setup_lact_wheel" }
+        }
+      ]
+    },
+    {
+      "id": "lact_config",
+      "title": "Профиль настроек LACT",
+      "description": "Выберите готовый файл конфига (.json) — он будет применён как основной",
+      "rows": [
+        {
+          "id": "lact_conf_file",
+          "type": "file_row",
+          "title": "Файл конфига",
+          "subtitle": "Файл не выбран",
+          "icon": "document-open-symbolic",
+          "pick_label": "Выбрать файл",
+          "apply_label": "Применить конфиг",
+          "file_filter": { "name": "JSON файлы", "patterns": ["*.json"] },
+          "state_key": "lact_applied_conf",
+          "action": { "type": "builtin", "fn": "apply_lact_config" }
+        }
+      ]
+    }
+  ]
+}
