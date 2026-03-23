@@ -1,0 +1,58 @@
+<page xmlns="http://projectmallard.org/1.0/"
+      type="topic"
+      id="extensions">
+  <info>
+    <link type="guide" xref="index" group="extensions"/>
+    <desc>Управление расширениями GNOME Shell.</desc>
+  </info>
+
+  <title>Расширения</title>
+
+  <p>
+    Вкладка позволяет искать, устанавливать, включать, настраивать
+    и удалять расширения GNOME Shell.
+  </p>
+
+  <section id="features">
+    <title>Возможности</title>
+    <terms>
+      <item>
+        <title>Поиск расширений</title>
+        <p>Поиск по имени или UUID в каталоге extensions.gnome.org.</p>
+      </item>
+      <item>
+        <title>Включить / выключить</title>
+        <p>Переключатель рядом с расширением мгновенно меняет его состояние.</p>
+      </item>
+      <item>
+        <title>Настройки расширения</title>
+        <p>
+          Кнопка открывает окно настроек (prefs),
+          если расширение его предоставляет.
+        </p>
+      </item>
+      <item>
+        <title>Удаление</title>
+        <p>
+          Пользовательские расширения удаляются напрямую.
+          Системные расширения удаляются с анализом RPM-зависимостей.
+        </p>
+      </item>
+      <item>
+        <title>Рекомендованные расширения</title>
+        <p>
+          Подборка проверенных расширений: Dash-to-Dock, Vitals,
+          Just Perfection и другие.
+        </p>
+      </item>
+      <item>
+        <title>Исправление метаданных</title>
+        <p>
+          Починка некорректного значения version float в metadata.json
+          для несовместимых расширений.
+        </p>
+      </item>
+    </terms>
+  </section>
+
+</page>

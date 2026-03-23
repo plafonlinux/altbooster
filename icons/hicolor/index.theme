@@ -1,7 +1,7 @@
 [Icon Theme]
 Name=hicolor
 Comment=ALT Booster bundled icons
-Directories=scalable/apps,scalable/devices
+Directories=scalable/apps,scalable/devices,symbolic/devices
 
 [scalable/apps]
 Size=16
@@ -10,6 +10,12 @@ MinSize=16
 MaxSize=512
 
 [scalable/devices]
+Size=16
+Type=Scalable
+MinSize=16
+MaxSize=512
+
+[symbolic/devices]
 Size=16
 Type=Scalable
 MinSize=16

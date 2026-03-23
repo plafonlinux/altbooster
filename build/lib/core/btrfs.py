@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import pwd
 import shlex
 import subprocess
 import threading
 from datetime import datetime
 from pathlib import Path
+
 
 from gi.repository import GLib
 
@@ -13,16 +15,46 @@ from core import config
 from core import privileges
 
 
-def get_btrfs_mount_for_home() -> str | None:
-    home = os.path.expanduser("~")
+def _real_home() -> Path:
     try:
-        result = subprocess.run(
-            ["findmnt", "-n", "-o", "TARGET", "--target", home, "--types", "btrfs"],
-            capture_output=True, text=True, check=True, encoding="utf-8",
-        )
-        return result.stdout.strip() or None
-    except (subprocess.CalledProcessError, FileNotFoundError):
+        return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+    except Exception:
+        return Path(os.path.expanduser("~")).resolve()
+
+
+def get_btrfs_mount_for_home() -> str | None:
+    home = _real_home()
+    try:
+        with open("/proc/self/mountinfo", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
         return None
+
+    best: Path | None = None
+    for line in lines:
+        fields = line.split()
+        try:
+            sep = fields.index("-")
+            fstype = fields[sep + 1]
+            mountpoint_str = fields[4]
+        except (ValueError, IndexError):
+            continue
+        if fstype != "btrfs":
+            continue
+        try:
+            mp = Path(mountpoint_str).resolve()
+        except Exception:
+            continue
+        if not mp.is_absolute() or not mp.is_dir():
+            continue
+        try:
+            home.relative_to(mp)
+        except ValueError:
+            continue
+        if best is None or len(mp.parts) > len(best.parts):
+            best = mp
+
+    return str(best) if best else None
 
 
 def is_home_on_btrfs() -> bool:
@@ -39,9 +71,13 @@ def get_snapshots_dir() -> Path:
     return Path.home() / ".local" / "share" / "altbooster" / "btrfs-snapshots"
 
 
+def _validate_mount_point(mp: str) -> bool:
+    return Path(mp).is_absolute() and "'" not in mp and "\n" not in mp
+
+
 def btrfs_snapshot_create(on_line, on_done) -> None:
     mount_point = get_btrfs_mount_for_home()
-    if not mount_point:
+    if not mount_point or not _validate_mount_point(mount_point):
         GLib.idle_add(on_line, "✘ $HOME не находится на Btrfs.\n")
         GLib.idle_add(on_done, False)
         return
@@ -176,3 +212,95 @@ def btrfs_snapshot_size(snapshot_path: str, on_done) -> None:
         ["btrfs", "filesystem", "du", "--summarize", snapshot_path],
         _on_line, _on_size_done,
     )
+
+
+def write_btrfs_systemd_units(interval_hours: int, keep_count: int) -> bool:
+    d = config.SYSTEMD_USER_DIR
+    d.mkdir(parents=True, exist_ok=True)
+
+    mount_point = get_btrfs_mount_for_home()
+    snapshots_dir = get_snapshots_dir()
+    if not mount_point or not _validate_mount_point(mount_point):
+        return False
+
+    prune_n = max(1, keep_count)
+    prune_cmd = (
+        f"ls -1dt {shlex.quote(str(snapshots_dir))}/home-* 2>/dev/null | "
+        f"tail -n +{prune_n + 1} | "
+        f"xargs -r btrfs subvolume delete"
+    )
+
+    timestamp_format = "$(date +'%Y-%m-%dT%H-%M-%S')"
+    snapshot_path = str(snapshots_dir / f"home-{timestamp_format}")
+    snapshot_cmd = (
+        f"mkdir -p {shlex.quote(str(snapshots_dir))} && "
+        f"btrfs subvolume snapshot -r {shlex.quote(mount_point)} {snapshot_path}"
+    )
+
+    service_content = (
+        "[Unit]\n"
+        "Description=ALT Booster - Btrfs Snapshot\n\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        f"ExecStart=pkexec bash -c '{snapshot_cmd}'\n"
+        f"ExecStartPost=-pkexec bash -c '{prune_cmd}'\n"
+    )
+
+    calendar_map = {1: "hourly", 6: "*-*-* 0/6:00:00", 24: "daily"}
+    calendar_expr = calendar_map.get(interval_hours, "hourly")
+
+    timer_content = (
+        "[Unit]\n"
+        "Description=ALT Booster - Btrfs Snapshot Timer\n\n"
+        "[Timer]\n"
+        f"OnCalendar={calendar_expr}\n"
+        "Persistent=true\n\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n"
+    )
+
+    try:
+        (d / "altbooster-btrfs.service").write_text(service_content, encoding="utf-8")
+        (d / "altbooster-btrfs.timer").write_text(timer_content, encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def _run_systemctl(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["systemctl", "--user", *args],
+        capture_output=True, text=True, encoding="utf-8", timeout=10,
+    )
+
+
+def enable_btrfs_timer() -> bool:
+    _run_systemctl(["daemon-reload"])
+    r = _run_systemctl(["enable", "--now", "altbooster-btrfs.timer"])
+    return r.returncode == 0
+
+
+def disable_btrfs_timer() -> bool:
+    r = _run_systemctl(["disable", "--now", "altbooster-btrfs.timer"])
+    return r.returncode == 0
+
+
+def is_btrfs_timer_active() -> bool:
+    r = _run_systemctl(["is-active", "altbooster-btrfs.timer"])
+    return r.returncode == 0
+
+
+def get_btrfs_timer_next_run() -> str | None:
+    try:
+        r = _run_systemctl(["show", "altbooster-btrfs.timer", "--property=NextElapseUSecRealtime"])
+        if r.returncode == 0:
+            for line in r.stdout.splitlines():
+                if "=" in line:
+                    val = line.split("=", 1)[1].strip()
+                    if val and val != "0":
+                        usec = int(val)
+                        dt = datetime.fromtimestamp(usec / 1_000_000)
+                        return dt.strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        pass
+    return None

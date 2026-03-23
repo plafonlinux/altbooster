@@ -11,6 +11,16 @@ BIN="/usr/local/bin/altbooster"
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'; BOLD='\033[1m'
 
 if [[ $EUID -ne 0 ]]; then
+    DE="${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-unknown}}"
+    if [[ ! "$DE" =~ [Gg][Nn][Oo][Mm][Ee] ]]; then
+        echo -e "${YELLOW}⚠  ALT Booster разработан для GNOME.${NC}"
+        echo -e "   Обнаружено окружение: ${BOLD}${DE}${NC}"
+        echo -e "   Приложение использует GTK4 + libadwaita и не тестировалось на других DE."
+        echo ""
+        read -r -p "   Продолжить установку? [y/N] " _confirm
+        [[ "$_confirm" =~ ^[Yy]$ ]] || exit 0
+        echo ""
+    fi
     echo -e "${YELLOW}🔒 Требуются права root...${NC}"
     # На чистой установке ALT Linux sudo может быть не настроен.
     # Пробуем использовать pkexec (запросит пароль root).
@@ -58,6 +68,14 @@ ok
 step "Установка иконок"
 install -d "$ICON_DIR"
 install -m 644 "$SCRIPT_DIR/icons/altbooster.svg" "$ICON_DIR/altbooster.svg"
+install -d "/usr/local/share/icons/hicolor/scalable/apps"
+for _svg in "$SCRIPT_DIR/icons/hicolor/scalable/apps/"*.svg; do
+    install -m 644 "$_svg" "/usr/local/share/icons/hicolor/scalable/apps/"
+done
+install -d "/usr/local/share/icons/hicolor/scalable/devices"
+for _svg in "$SCRIPT_DIR/icons/hicolor/scalable/devices/"*.svg; do
+    install -m 644 "$_svg" "/usr/local/share/icons/hicolor/scalable/devices/"
+done
 gtk-update-icon-cache /usr/local/share/icons/hicolor 2>/dev/null || true
 ok
 
@@ -79,6 +97,12 @@ StartupNotify=true
 StartupWMClass=ru.altbooster.app
 DESKTOP
 update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+ok
+
+# Справка (Yelp / Mallard)
+step "Установка справки"
+install -d "/usr/local/share/help/C/altbooster"
+cp -r "$SCRIPT_DIR/help/C/"* "/usr/local/share/help/C/altbooster/"
 ok
 
 # Команда в PATH

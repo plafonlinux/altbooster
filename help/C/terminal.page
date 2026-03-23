@@ -1,0 +1,65 @@
+<page xmlns="http://projectmallard.org/1.0/"
+      type="topic"
+      id="terminal">
+  <info>
+    <link type="guide" xref="index" group="terminal"/>
+    <desc>Настройка терминального окружения: Ptyxis, ZSH, Fastfetch и алиасы.</desc>
+  </info>
+
+  <title>Терминал</title>
+
+  <p>
+    Вкладка настраивает терминальное окружение: современный терминал Ptyxis,
+    оболочку ZSH с плагинами, отображение системной информации и алиасы команд.
+  </p>
+
+  <section id="components">
+    <title>Компоненты</title>
+    <terms>
+      <item>
+        <title>Ptyxis</title>
+        <p>
+          Современный терминал для GNOME. Устанавливается вместо
+          gnome-terminal и назначается терминалом по умолчанию.
+        </p>
+      </item>
+      <item>
+        <title>Горячие клавиши</title>
+        <p>
+          Создание системных сочетаний клавиш для открытия терминала:
+          <key>Ctrl</key>+<key>Alt</key>+<key>T</key> и
+          <key>Super</key>+<key>Enter</key>.
+        </p>
+      </item>
+      <item>
+        <title>ZSH + zplug</title>
+        <p>
+          Замена bash на ZSH с менеджером плагинов zplug.
+          Назначение ZSH оболочкой по умолчанию.
+        </p>
+      </item>
+      <item>
+        <title>Fastfetch</title>
+        <p>
+          Отображение информации о системе при запуске терминала.
+          Включает установку шрифта FiraCode Nerd Font и кастомный конфиг.
+        </p>
+      </item>
+      <item>
+        <title>Алиасы</title>
+        <p>
+          Набор удобных псевдонимов команд, добавляемых в
+          <file>~/.zshrc</file>.
+        </p>
+      </item>
+      <item>
+        <title>Применить всё</title>
+        <p>
+          Настраивает всё терминальное окружение за один шаг:
+          Ptyxis, ZSH, Fastfetch и алиасы.
+        </p>
+      </item>
+    </terms>
+  </section>
+
+</page>

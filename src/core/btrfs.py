@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import pwd
 import shlex
 import subprocess
 import threading
@@ -14,16 +15,46 @@ from core import config
 from core import privileges
 
 
-def get_btrfs_mount_for_home() -> str | None:
-    home = os.path.expanduser("~")
+def _real_home() -> Path:
     try:
-        result = subprocess.run(
-            ["findmnt", "-n", "-o", "TARGET", "--target", home, "--types", "btrfs"],
-            capture_output=True, text=True, check=True, encoding="utf-8",
-        )
-        return result.stdout.strip() or None
-    except (subprocess.CalledProcessError, FileNotFoundError):
+        return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+    except Exception:
+        return Path(os.path.expanduser("~")).resolve()
+
+
+def get_btrfs_mount_for_home() -> str | None:
+    home = _real_home()
+    try:
+        with open("/proc/self/mountinfo", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
         return None
+
+    best: Path | None = None
+    for line in lines:
+        fields = line.split()
+        try:
+            sep = fields.index("-")
+            fstype = fields[sep + 1]
+            mountpoint_str = fields[4]
+        except (ValueError, IndexError):
+            continue
+        if fstype != "btrfs":
+            continue
+        try:
+            mp = Path(mountpoint_str).resolve()
+        except Exception:
+            continue
+        if not mp.is_absolute() or not mp.is_dir():
+            continue
+        try:
+            home.relative_to(mp)
+        except ValueError:
+            continue
+        if best is None or len(mp.parts) > len(best.parts):
+            best = mp
+
+    return str(best) if best else None
 
 
 def is_home_on_btrfs() -> bool:
@@ -40,9 +71,13 @@ def get_snapshots_dir() -> Path:
     return Path.home() / ".local" / "share" / "altbooster" / "btrfs-snapshots"
 
 
+def _validate_mount_point(mp: str) -> bool:
+    return Path(mp).is_absolute() and "'" not in mp and "\n" not in mp
+
+
 def btrfs_snapshot_create(on_line, on_done) -> None:
     mount_point = get_btrfs_mount_for_home()
-    if not mount_point:
+    if not mount_point or not _validate_mount_point(mount_point):
         GLib.idle_add(on_line, "✘ $HOME не находится на Btrfs.\n")
         GLib.idle_add(on_done, False)
         return
@@ -185,7 +220,7 @@ def write_btrfs_systemd_units(interval_hours: int, keep_count: int) -> bool:
 
     mount_point = get_btrfs_mount_for_home()
     snapshots_dir = get_snapshots_dir()
-    if not mount_point:
+    if not mount_point or not _validate_mount_point(mount_point):
         return False
 
     prune_n = max(1, keep_count)

@@ -1,0 +1,70 @@
+<page xmlns="http://projectmallard.org/1.0/"
+      type="topic"
+      id="davinci">
+  <info>
+    <link type="guide" xref="index" group="davinci"/>
+    <desc>Установка и настройка DaVinci Resolve на ALT Linux.</desc>
+  </info>
+
+  <title>DaVinci Resolve</title>
+
+  <p>
+    Вкладка упрощает установку и настройку профессионального
+    видеоредактора DaVinci Resolve на ALT Linux.
+  </p>
+
+  <section id="install">
+    <title>Установка</title>
+    <terms>
+      <item>
+        <title>Выбор инсталлятора</title>
+        <p>
+          Укажите путь к официальному файлу установщика
+          (<file>.zip</file> или <file>.run</file>) от Blackmagic Design.
+        </p>
+      </item>
+      <item>
+        <title>Установка</title>
+        <p>
+          Запускает инсталлятор с автоматическим разрешением
+          системных зависимостей.
+        </p>
+      </item>
+      <item>
+        <title>ROCm для AMD</title>
+        <p>
+          Устанавливает ROCm runtime для аппаратного ускорения
+          на видеокартах AMD Radeon.
+        </p>
+      </item>
+    </terms>
+  </section>
+
+  <section id="setup">
+    <title>Настройка</title>
+    <terms>
+      <item>
+        <title>Fairlight Audio</title>
+        <p>
+          Настройка звукового модуля Fairlight через
+          PulseAudio/ALSA для корректной работы звука.
+        </p>
+      </item>
+      <item>
+        <title>Очистка кэша</title>
+        <p>
+          Удаление временных файлов медиакэша и базы данных проектов
+          для освобождения дискового пространства.
+        </p>
+      </item>
+      <item>
+        <title>DaVinci Ready</title>
+        <p>
+          Применяет все необходимые настройки для корректной работы
+          DaVinci Resolve одним нажатием.
+        </p>
+      </item>
+    </terms>
+  </section>
+
+</page>

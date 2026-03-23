@@ -1,0 +1,97 @@
+<page xmlns="http://projectmallard.org/1.0/"
+      type="topic"
+      id="maintenance">
+  <info>
+    <link type="guide" xref="index" group="maintenance"/>
+    <desc>Задачи по очистке и оптимизации системы.</desc>
+  </info>
+
+  <title>Обслуживание</title>
+
+  <p>
+    Вкладка содержит задачи по очистке и оптимизации системы.
+    Каждое действие можно запустить отдельно.
+  </p>
+
+  <section id="cleanup">
+    <title>Очистка</title>
+    <terms>
+      <item>
+        <title>Очистка APT</title>
+        <p>Удаление кэша загруженных пакетов (<cmd>apt-get clean</cmd>).</p>
+      </item>
+      <item>
+        <title>Очистка Flatpak</title>
+        <p>Удаление неиспользуемых Flatpak runtime-компонентов.</p>
+      </item>
+      <item>
+        <title>Восстановление Flatpak</title>
+        <p>Исправление повреждённой базы данных Flatpak.</p>
+      </item>
+      <item>
+        <title>Сжатие журналов</title>
+        <p>
+          Очистка логов systemd с сохранением записей
+          за последние 14 дней.
+        </p>
+      </item>
+    </terms>
+  </section>
+
+  <section id="btrfs">
+    <title>Btrfs</title>
+    <terms>
+      <item>
+        <title>Балансировка</title>
+        <p>Оптимизация использования метаданных и данных на Btrfs-разделах.</p>
+      </item>
+      <item>
+        <title>Дефрагментация</title>
+        <p>Сжатие и дефрагментация всех смонтированных Btrfs-файловых систем.</p>
+      </item>
+      <item>
+        <title>Скраб</title>
+        <p>
+          Проверка целостности данных на Btrfs-разделах
+          с автоматическим исправлением ошибок.
+        </p>
+      </item>
+      <item>
+        <title>SSD TRIM</title>
+        <p>Оптимизация flash-накопителей командой <cmd>fstrim</cmd>.</p>
+      </item>
+    </terms>
+  </section>
+
+  <section id="fixes">
+    <title>Исправления</title>
+    <terms>
+      <item>
+        <title>Фантомные USB</title>
+        <p>
+          Удаление призрачных USB-накопителей из меню входа GDM
+          через polkit-правила.
+        </p>
+      </item>
+      <item>
+        <title>GSConnect</title>
+        <p>Принудительное завершение зависшего демона GSConnect.</p>
+      </item>
+      <item>
+        <title>Поиск файлов</title>
+        <p>
+          Отключение службы localsearch для снижения нагрузки на диск
+          и ускорения системы.
+        </p>
+      </item>
+      <item>
+        <title>Доступ Flatpak к /home</title>
+        <p>
+          Предоставление всем Flatpak-приложениям доступа
+          к домашней директории пользователя.
+        </p>
+      </item>
+    </terms>
+  </section>
+
+</page>
