@@ -291,9 +291,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             /* Same column width as op card stretched the search button - fixed square */
             button.ab-global-search-btn {
                 min-width: 42px;
-                max-width: 42px;
                 min-height: 42px;
-                max-height: 42px;
                 padding: 0;
             }
             button.ab-global-search-btn image {

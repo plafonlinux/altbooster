@@ -69,20 +69,16 @@ _badge_css.load_from_data(b"""
         min-height: 26px;
         padding: 2px 8px;
         border-radius: 999px;
-        max-width: 118px;
     }
     /* Trailing cluster wraps only the actions column now. */
     box.ab-app-row-trailing-cluster {
         min-width: 560px;
-        max-width: 560px;
     }
     box.ab-app-row-actions-column {
         min-width: 560px;
-        max-width: 560px;
     }
     menubutton.ab-app-row-src-menu {
         min-width: 0;
-        max-width: 140px;
     }
     menubutton.ab-app-row-src-menu button {
         padding-left: 6px;

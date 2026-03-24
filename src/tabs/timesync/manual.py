@@ -24,14 +24,14 @@ def build_terminal_page(log_fn) -> Gtk.Widget:
     quick_group.set_title("Быстрые команды")
     body.append(quick_group)
 
-    repo = config.state_get("borg_repo_path", "") or "<репозиторий>"
+    repo = config.state_get("borg_repo_path", "") or "[репозиторий]"
 
     quick_cmds = [
         ("borg list", f"borg list {repo}"),
         ("borg info", f"borg info {repo}"),
         ("borg check", f"borg check --verify-data {repo}"),
         ("btrfs subvolumes", "btrfs subvolume list /"),
-        ("rsync dry-run", f"rsync -aAXn --info=progress2 / <назначение>/rootfs/"),
+        ("rsync dry-run", "rsync -aAXn --info=progress2 / [назначение]/rootfs/"),
         ("lsblk", "lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT,MODEL"),
     ]
 
