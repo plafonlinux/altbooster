@@ -203,41 +203,49 @@ class AppsPage(Gtk.Box):
             return False
 
     def _do_pkg_search(self, query, branch):
-        primary = []
         try:
-            primary = self._fetch_from_source(query, branch)
-            for pkg in primary:
-                pkg["installed"] = self._check_installed(pkg["install_id"], pkg["install_type"])
-        except Exception:
-            pass
+            primary = []
+            try:
+                primary = self._fetch_from_source(query, branch)
+                for pkg in primary:
+                    pkg["installed"] = self._check_installed(pkg["install_id"], pkg["install_type"])
+            except Exception:
+                pass
 
-        if primary:
-            GLib.idle_add(self._display_pkg_results, [(branch, primary)], False)
-        else:
-            GLib.idle_add(self._log, "ℹ Не найдено в выбранном источнике, ищу в других...\n")
-            all_branches = ["p11", "sisyphus", "epm_play", "flathub"]
-            other_branches = [ob for ob in all_branches if ob != branch]
-            fallback_map = {}
-            with ThreadPoolExecutor(max_workers=len(other_branches)) as executor:
-                futures = {executor.submit(self._fetch_from_source, query, ob): ob for ob in other_branches}
-                for future in as_completed(futures):
-                    ob = futures[future]
-                    try:
-                        r = future.result()
-                        for pkg in r:
-                            pkg["installed"] = self._check_installed(pkg["install_id"], pkg["install_type"])
-                        if r:
-                            fallback_map[ob] = r
-                    except Exception:
-                        pass
-            fallback = [(ob, fallback_map[ob]) for ob in other_branches if ob in fallback_map]
-            GLib.idle_add(self._display_pkg_results, fallback, True)
-        
-        def _unlock_search():
-            self._pkg_search_busy = False
-            self._branch_combo.set_sensitive(True)
+            if primary:
+                GLib.idle_add(self._display_pkg_results, [(branch, primary)], False)
+            else:
+                GLib.idle_add(self._log, "ℹ Не найдено в выбранном источнике, ищу в других...\n")
+                all_branches = ["p11", "sisyphus", "epm_play", "flathub"]
+                other_branches = [ob for ob in all_branches if ob != branch]
+                fallback_map = {}
+                with ThreadPoolExecutor(max_workers=len(other_branches)) as executor:
+                    futures = {executor.submit(self._fetch_from_source, query, ob): ob for ob in other_branches}
+                    for future in as_completed(futures):
+                        ob = futures[future]
+                        try:
+                            r = future.result()
+                            for pkg in r:
+                                pkg["installed"] = self._check_installed(pkg["install_id"], pkg["install_type"])
+                            if r:
+                                fallback_map[ob] = r
+                        except Exception:
+                            pass
+                fallback = [(ob, fallback_map[ob]) for ob in other_branches if ob in fallback_map]
+                GLib.idle_add(self._display_pkg_results, fallback, True)
+        finally:
+            def _unlock_search():
+                self._pkg_search_busy = False
+                self._branch_combo.set_sensitive(True)
+                self._search_entry.set_sensitive(True)
 
-        GLib.idle_add(_unlock_search)
+            GLib.idle_add(_unlock_search)
+
+    def on_tab_visible(self):
+        # Защитный сброс состояния: если фоновый поток оборвался, поле поиска не должно "залипать".
+        self._pkg_search_busy = False
+        self._search_entry.set_sensitive(True)
+        self._branch_combo.set_sensitive(True)
 
     def _fetch_flathub(self, query):
         body = json.dumps({"query": query, "locale": "ru"}).encode()

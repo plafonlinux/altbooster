@@ -610,39 +610,42 @@ class ExtensionsPage(Gtk.Box):
         if hasattr(win, "start_progress"): win.start_progress(f"Установка расширения {ext_id}...")
 
         def _do():
-            gext = self._ensure_gext()
-            
-            fixed, broken_system = _fix_float_versions_in_metadata(self._log)
-            if fixed:
-                GLib.idle_add(self._log, f"⚠  Исправлены float-версии в metadata.json: {', '.join(fixed)}\n")
-
             ok = False
             err_msg = ""
-            if gext and not broken_system:
-                r = subprocess.run([gext, "install", ext_id], capture_output=True, text=True)
-                if r.stdout:
-                    GLib.idle_add(self._log, r.stdout)
-                ok = (r.returncode == 0)
+            try:
+                gext = self._ensure_gext()
+
+                fixed, broken_system = _fix_float_versions_in_metadata(self._log)
+                if fixed:
+                    GLib.idle_add(self._log, f"⚠  Исправлены float-версии в metadata.json: {', '.join(fixed)}\n")
+
+                if gext and not broken_system:
+                    r = subprocess.run([gext, "install", ext_id], capture_output=True, text=True)
+                    if r.stdout:
+                        GLib.idle_add(self._log, r.stdout)
+                    ok = (r.returncode == 0)
+                    if not ok:
+                        err_msg = r.stderr.strip()
+
                 if not ok:
-                    err_msg = r.stderr.strip()
+                    ok, _ = self._install_native_fallback(ext_id)
+            except Exception as e:
+                err_msg = str(e)
+            finally:
+                def _finish():
+                    if ok:
+                        self._log("✔  Расширение установлено!\n")
+                        if hasattr(win, "stop_progress"): win.stop_progress(True)
+                        set_status_ok(self._id_status)
+                        self._id_entry.set_text("")
+                        self._refresh_installed()
+                    else:
+                        self._log(f"✘  Ошибка: {err_msg}\n")
+                        if hasattr(win, "stop_progress"): win.stop_progress(False)
+                        set_status_error(self._id_status)
+                    self._id_entry.set_sensitive(True)
 
-            if not ok:
-                ok, _ = self._install_native_fallback(ext_id)
-
-            def _finish():
-                if ok:
-                    self._log("✔  Расширение установлено!\n")
-                    if hasattr(win, "stop_progress"): win.stop_progress(True)
-                    set_status_ok(self._id_status)
-                    self._id_entry.set_text("")
-                    self._refresh_installed()
-                else:
-                    self._log(f"✘  Ошибка: {err_msg}\n")
-                    if hasattr(win, "stop_progress"): win.stop_progress(False)
-                    set_status_error(self._id_status)
-                self._id_entry.set_sensitive(True)
-
-            GLib.idle_add(_finish)
+                GLib.idle_add(_finish)
 
         threading.Thread(target=_do, daemon=True).start()
 
@@ -680,13 +683,18 @@ class ExtensionsPage(Gtk.Box):
             except Exception as e:
                 GLib.idle_add(self._log, f"✘ Ошибка поиска: {e}\n")
                 GLib.idle_add(set_status_error, self._id_status)
-            
-            GLib.idle_add(self._finish_search_request)
+            finally:
+                GLib.idle_add(self._finish_search_request)
 
         threading.Thread(target=_do, daemon=True).start()
 
     def _finish_search_request(self):
         self._search_busy = False
+
+    def on_tab_visible(self):
+        # Подстраховка: поле поиска всегда должно оставаться доступным.
+        self._search_busy = False
+        self._id_entry.set_sensitive(True)
 
     def _display_search_results(self, results, installed_uuids=None):
         if installed_uuids is None:
