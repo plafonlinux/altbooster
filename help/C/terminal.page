@@ -3,63 +3,43 @@
       id="terminal">
   <info>
     <link type="guide" xref="index" group="terminal"/>
-    <desc>Настройка терминального окружения: Ptyxis, ZSH, Fastfetch и алиасы.</desc>
+    <desc>Подготовка терминального окружения: Ptyxis, ZSH, плагины, Fastfetch и алиасы.</desc>
   </info>
 
   <title>Терминал</title>
 
   <p>
-    Вкладка настраивает терминальное окружение: современный терминал Ptyxis,
-    оболочку ZSH с плагинами, отображение системной информации и алиасы команд.
+    Вкладка предназначена для быстрой сборки удобного терминального профиля
+    для повседневной разработки и администрирования.
   </p>
 
-  <section id="components">
-    <title>Компоненты</title>
-    <terms>
-      <item>
-        <title>Ptyxis</title>
-        <p>
-          Современный терминал для GNOME. Устанавливается вместо
-          gnome-terminal и назначается терминалом по умолчанию.
-        </p>
-      </item>
-      <item>
-        <title>Горячие клавиши</title>
-        <p>
-          Создание системных сочетаний клавиш для открытия терминала:
-          <key>Ctrl</key>+<key>Alt</key>+<key>T</key> и
-          <key>Super</key>+<key>Enter</key>.
-        </p>
-      </item>
-      <item>
-        <title>ZSH + zplug</title>
-        <p>
-          Замена bash на ZSH с менеджером плагинов zplug.
-          Назначение ZSH оболочкой по умолчанию.
-        </p>
-      </item>
-      <item>
-        <title>Fastfetch</title>
-        <p>
-          Отображение информации о системе при запуске терминала.
-          Включает установку шрифта FiraCode Nerd Font и кастомный конфиг.
-        </p>
-      </item>
-      <item>
-        <title>Алиасы</title>
-        <p>
-          Набор удобных псевдонимов команд, добавляемых в
-          <file>~/.zshrc</file>.
-        </p>
-      </item>
-      <item>
-        <title>Применить всё</title>
-        <p>
-          Настраивает всё терминальное окружение за один шаг:
-          Ptyxis, ZSH, Fastfetch и алиасы.
-        </p>
-      </item>
-    </terms>
+  <section id="features">
+    <title>Что настраивается</title>
+    <list>
+      <item><p><em>Ptyxis</em> как основной терминал GNOME.</p></item>
+      <item><p>Горячие клавиши запуска терминала (<key>Ctrl</key>+<key>Alt</key>+<key>T</key>, <key>Super</key>+<key>Enter</key>).</p></item>
+      <item><p><em>ZSH + zplug</em> с плагинами и установкой оболочки по умолчанию.</p></item>
+      <item><p><em>Fastfetch</em> и шрифт Nerd Font для информативного старта терминала.</p></item>
+      <item><p>Набор алиасов для ускорения частых команд.</p></item>
+    </list>
+  </section>
+
+  <section id="howto">
+    <title>Рекомендуемая последовательность</title>
+    <list>
+      <item><p>Сначала установите/примените Ptyxis и горячие клавиши.</p></item>
+      <item><p>Далее включите ZSH и плагины, перезапустите терминал.</p></item>
+      <item><p>После этого добавьте Fastfetch и алиасы.</p></item>
+      <item><p>Если хотите развернуть всё сразу — используйте кнопку <em>Применить всё</em>.</p></item>
+    </list>
+  </section>
+
+  <section id="notes">
+    <title>Примечания</title>
+    <list>
+      <item><p>Некоторые изменения вступают в силу только в новом терминальном сеансе.</p></item>
+      <item><p>Если используете собственный <file>~/.zshrc</file>, проверьте конфликты алиасов вручную.</p></item>
+    </list>
   </section>
 
 </page>

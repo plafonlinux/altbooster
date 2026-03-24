@@ -4,15 +4,26 @@
   <info>
     <title type="link">ALT Booster</title>
     <title type="text">ALT Booster</title>
+    <desc>Подробная справка по вкладкам ALT Booster и безопасным сценариям использования.</desc>
   </info>
 
   <title>Справка ALT Booster</title>
 
   <p>
-    ALT Booster — утилита-компаньон для настройки <em>ALT Рабочая станция (GNOME)</em>.
-    Выберите раздел ниже, чтобы узнать о возможностях соответствующей вкладки.
+    ALT Booster — утилита для настройки и обслуживания ALT Linux с интерфейсом GTK4/Adwaita.
+    Эта справка описывает каждую вкладку в практическом формате:
+    <em>что делает</em>, <em>когда применять</em>, <em>какие шаги выполнить</em>.
   </p>
 
-  <links type="topic" groups="setup apps extensions flatpak terminal amd intel davinci maintenance timesync"/>
+  <p>
+    Перед системными изменениями рекомендуется:
+  </p>
+  <list>
+    <item><p>обновить систему и убедиться, что есть интернет;</p></item>
+    <item><p>закрыть тяжелые фоновые задачи;</p></item>
+    <item><p>сделать резервную копию важных данных (вкладка <em>TimeSync</em>).</p></item>
+  </list>
+
+  <links type="topic" groups="setup apps extensions flatpak terminal amd intel davinci maintenance tweaks timesync"/>
 
 </page>

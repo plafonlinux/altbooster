@@ -3,68 +3,40 @@
       id="davinci">
   <info>
     <link type="guide" xref="index" group="davinci"/>
-    <desc>Установка и настройка DaVinci Resolve на ALT Linux.</desc>
+    <desc>Подготовка DaVinci Resolve: установка, зависимости, аудио и вспомогательные фиксы.</desc>
   </info>
 
   <title>DaVinci Resolve</title>
 
   <p>
-    Вкладка упрощает установку и настройку профессионального
-    видеоредактора DaVinci Resolve на ALT Linux.
+    Вкладка автоматизирует типовые шаги для запуска DaVinci Resolve на ALT Linux:
+    установка, проверка окружения и исправление частых проблем.
   </p>
 
   <section id="install">
     <title>Установка</title>
-    <terms>
-      <item>
-        <title>Выбор инсталлятора</title>
-        <p>
-          Укажите путь к официальному файлу установщика
-          (<file>.zip</file> или <file>.run</file>) от Blackmagic Design.
-        </p>
-      </item>
-      <item>
-        <title>Установка</title>
-        <p>
-          Запускает инсталлятор с автоматическим разрешением
-          системных зависимостей.
-        </p>
-      </item>
-      <item>
-        <title>ROCm для AMD</title>
-        <p>
-          Устанавливает ROCm runtime для аппаратного ускорения
-          на видеокартах AMD Radeon.
-        </p>
-      </item>
-    </terms>
+    <list>
+      <item><p>Укажите официальный установщик DaVinci (<file>.zip</file> или <file>.run</file>).</p></item>
+      <item><p>Запустите установку и дождитесь завершения всех зависимостей.</p></item>
+      <item><p>Для AMD при необходимости установите ROCm runtime.</p></item>
+    </list>
   </section>
 
   <section id="setup">
-    <title>Настройка</title>
-    <terms>
-      <item>
-        <title>Fairlight Audio</title>
-        <p>
-          Настройка звукового модуля Fairlight через
-          PulseAudio/ALSA для корректной работы звука.
-        </p>
-      </item>
-      <item>
-        <title>Очистка кэша</title>
-        <p>
-          Удаление временных файлов медиакэша и базы данных проектов
-          для освобождения дискового пространства.
-        </p>
-      </item>
-      <item>
-        <title>DaVinci Ready</title>
-        <p>
-          Применяет все необходимые настройки для корректной работы
-          DaVinci Resolve одним нажатием.
-        </p>
-      </item>
-    </terms>
+    <title>После установки</title>
+    <list>
+      <item><p>Используйте <em>Fairlight Audio</em>, если есть проблемы со звуком в аудио-модуле.</p></item>
+      <item><p>При накоплении временных файлов очистите медиакэш.</p></item>
+      <item><p>Кнопка <em>DaVinci Ready</em> выполняет комплекс типовых подготовительных шагов.</p></item>
+    </list>
+  </section>
+
+  <section id="notes">
+    <title>Советы</title>
+    <list>
+      <item><p>Перед крупными изменениями в системе/драйверах делайте бэкап проекта и кэша.</p></item>
+      <item><p>После изменения GPU/ROCm параметров рекомендуется перезагрузка сеанса.</p></item>
+    </list>
   </section>
 
 </page>

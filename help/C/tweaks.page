@@ -1,0 +1,48 @@
+<page xmlns="http://projectmallard.org/1.0/"
+      type="topic"
+      id="tweaks">
+  <info>
+    <link type="guide" xref="index" group="tweaks"/>
+    <desc>Системные твики и экспериментальные оптимизации: sched_ext, ananicy-cpp, переход на Sisyphus.</desc>
+  </info>
+
+  <title>Твики</title>
+
+  <note style="warning">
+    <p>
+      Многие действия на этой вкладке относятся к продвинутой настройке.
+      Перед применением рекомендуется сделать бэкап.
+    </p>
+  </note>
+
+  <p>
+    Вкладка объединяет производительные и экспериментальные настройки,
+    которые раньше были разбросаны по другим разделам.
+  </p>
+
+  <section id="scheduler">
+    <title>Планировщики и производительность</title>
+    <list>
+      <item><p>Проверка и включение поддержки <code>sched_ext</code> в ядре.</p></item>
+      <item><p>SCX LAVD (AMD Ryzen) и SCX Meteor (Intel) для тонкой настройки поведения CPU.</p></item>
+      <item><p>System76 Scheduler как альтернативный профиль планирования задач.</p></item>
+    </list>
+  </section>
+
+  <section id="priorities">
+    <title>Приоритеты процессов</title>
+    <list>
+      <item><p><em>ananicy-cpp</em> устанавливает и применяет правила приоритезации процессов.</p></item>
+      <item><p>Поддерживаются игровые и мультимедийные сценарии с динамической подстройкой приоритетов.</p></item>
+    </list>
+  </section>
+
+  <section id="sisyphus">
+    <title>Переход на Sisyphus</title>
+    <list>
+      <item><p>Мастер переводит систему с p10/p11 на rolling-ветку Sisyphus.</p></item>
+      <item><p>Перед применением показывается симуляция обновления и объём загрузки.</p></item>
+      <item><p>Предусмотрены предупреждения и кнопка отката репозиториев.</p></item>
+    </list>
+  </section>
+</page>
