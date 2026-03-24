@@ -347,9 +347,17 @@ def _detect_install_error(stdout: str, stderr: str) -> str:
     )
     lowered = combined.lower()
     if any(re.search(p, lowered) for p in patterns):
-        # Возвращаем короткую причину для лога.
-        line = next((ln.strip() for ln in combined.splitlines() if ln.strip()), "")
-        return line or "Не удалось установить расширение"
+        # Популярный кейс gext: "Cannot find extension 12345"
+        m = re.search(r"cannot find extension\s+([^\s]+)", lowered)
+        if m:
+            return f"Расширение с ID {m.group(1)} не найдено"
+        if "not found" in lowered or "no extension" in lowered:
+            return "Расширение не найдено"
+        if "failed" in lowered:
+            return "Сбой установки расширения"
+        if "error" in lowered:
+            return "Ошибка установки расширения"
+        return "Не удалось установить расширение"
     return ""
 
 
