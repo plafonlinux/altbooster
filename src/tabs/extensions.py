@@ -334,6 +334,25 @@ def _get_enabled_uuids() -> set[str]:
         return set()
 
 
+def _detect_install_error(stdout: str, stderr: str) -> str:
+    combined = "\n".join([stdout or "", stderr or ""]).strip()
+    if not combined:
+        return ""
+    patterns = (
+        r"cannot find extension",
+        r"not found",
+        r"no extension",
+        r"error",
+        r"failed",
+    )
+    lowered = combined.lower()
+    if any(re.search(p, lowered) for p in patterns):
+        # Возвращаем короткую причину для лога.
+        line = next((ln.strip() for ln in combined.splitlines() if ln.strip()), "")
+        return line or "Не удалось установить расширение"
+    return ""
+
+
 def _make_info_button(desc: str) -> Gtk.Button:
     info_btn = Gtk.Button()
     info_btn.set_icon_name("dialog-information-symbolic")
@@ -623,9 +642,10 @@ class ExtensionsPage(Gtk.Box):
                     r = subprocess.run([gext, "install", ext_id], capture_output=True, text=True)
                     if r.stdout:
                         GLib.idle_add(self._log, r.stdout)
-                    ok = (r.returncode == 0)
-                    if not ok:
-                        err_msg = r.stderr.strip()
+                    err_msg = _detect_install_error(r.stdout, r.stderr)
+                    ok = (r.returncode == 0) and not err_msg
+                    if not ok and not err_msg:
+                        err_msg = r.stderr.strip() or "Не удалось установить расширение"
 
                 if not ok:
                     ok, _ = self._install_native_fallback(ext_id)
@@ -948,8 +968,10 @@ class ExtensionsPage(Gtk.Box):
             if gext and not broken_system:
                 r = subprocess.run([gext, "install", target], capture_output=True, text=True)
                 if r.stdout: GLib.idle_add(self._log, r.stdout)
-                ok = (r.returncode == 0)
-                if not ok: err_msg = r.stderr.strip()
+                err_msg = _detect_install_error(r.stdout, r.stderr)
+                ok = (r.returncode == 0) and not err_msg
+                if not ok and not err_msg:
+                    err_msg = r.stderr.strip() or "Не удалось установить расширение"
             
             if not ok:
                 ok, _ = self._install_native_fallback(target, uuid_hint=uuid)
