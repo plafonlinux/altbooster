@@ -36,6 +36,7 @@ class AppsPage(Gtk.Box):
         self._group_checkboxes = []
         self._app_row_by_id: dict[str, AppRow] = {}
         self._busy = False
+        self._pkg_search_busy = False
         self._system_json_path = _MODULES_DIR / "apps.json"
         self._json_path = config.CONFIG_DIR / "apps.json"
         self._data = {}
@@ -155,9 +156,9 @@ class AppsPage(Gtk.Box):
 
     def _on_pkg_search(self, *_):
         text = self._search_entry.get_text().strip()
-        if not text:
+        if not text or self._pkg_search_busy:
             return
-        self._search_entry.set_sensitive(False)
+        self._pkg_search_busy = True
         self._branch_combo.set_sensitive(False)
         clear_status(self._search_status)
         self._clear_pkg_search_results()
@@ -232,8 +233,11 @@ class AppsPage(Gtk.Box):
             fallback = [(ob, fallback_map[ob]) for ob in other_branches if ob in fallback_map]
             GLib.idle_add(self._display_pkg_results, fallback, True)
         
-        GLib.idle_add(self._search_entry.set_sensitive, True)
-        GLib.idle_add(self._branch_combo.set_sensitive, True)
+        def _unlock_search():
+            self._pkg_search_busy = False
+            self._branch_combo.set_sensitive(True)
+
+        GLib.idle_add(_unlock_search)
 
     def _fetch_flathub(self, query):
         body = json.dumps({"query": query, "locale": "ru"}).encode()

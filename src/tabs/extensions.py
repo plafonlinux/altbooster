@@ -351,6 +351,7 @@ class ExtensionsPage(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._log = log_fn
         self._ext_row_by_uuid: dict[str, Adw.ActionRow] = {}
+        self._search_busy = False
 
         scroll, self._body = make_scrolled_page()
         self._scroll = scroll
@@ -646,7 +647,9 @@ class ExtensionsPage(Gtk.Box):
         threading.Thread(target=_do, daemon=True).start()
 
     def _search_extensions(self, query):
-        self._id_entry.set_sensitive(False)
+        if self._search_busy:
+            return
+        self._search_busy = True
         clear_status(self._id_status)
         
         if self._search_results_group:
@@ -678,9 +681,12 @@ class ExtensionsPage(Gtk.Box):
                 GLib.idle_add(self._log, f"✘ Ошибка поиска: {e}\n")
                 GLib.idle_add(set_status_error, self._id_status)
             
-            GLib.idle_add(self._id_entry.set_sensitive, True)
+            GLib.idle_add(self._finish_search_request)
 
         threading.Thread(target=_do, daemon=True).start()
+
+    def _finish_search_request(self):
+        self._search_busy = False
 
     def _display_search_results(self, results, installed_uuids=None):
         if installed_uuids is None:
