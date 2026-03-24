@@ -1116,16 +1116,29 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         d = Adw.AboutDialog()
         d.set_application_name("ALT Booster")
         d.set_application_icon("altbooster")
-        d.set_developer_name("PLAFON")
+        d.set_developer_name("plafonlinux")
         d.set_version(config.VERSION)
         d.set_issue_url("https://github.com/plafonlinux/altbooster/issues")
         d.set_support_url("https://plafon.gitbook.io/alt-zero")
         d.set_comments("ALT Booster — утилита-компаньон для настройки ALT Рабочая станция (GNOME)")
         d.set_license_type(Gtk.License.MIT_X11)
-        d.set_developers(["PLAFON"])
+        d.set_developers(
+            [
+                "plafonlinux (@plafonlinux)",
+                "Aleksandr Shamaraev (@AlexanderShad)",
+                "Anton Palgunov (@Toxblh)",
+                "Yauhen Charniauski (@culler127)",
+                "Vadim Totok (@VadimTotok)",
+            ]
+        )
         d.set_copyright("© 2026 PLAFON")
         d.add_link("📖 ALT Zero", "https://plafon.gitbook.io/alt-zero")
         d.add_link("💻 GitHub", "https://github.com/plafonlinux/altbooster")
+        d.add_link("👤 plafonlinux", "https://github.com/plafonlinux")
+        d.add_link("👥 AlexanderShad", "https://github.com/AlexanderShad")
+        d.add_link("👥 Toxblh", "https://github.com/Toxblh")
+        d.add_link("👥 culler127", "https://github.com/culler127")
+        d.add_link("👥 VadimTotok", "https://github.com/VadimTotok")
         d.add_link("✈ Telegram", "https://t.me/plafonyoutube")
         d.add_link("✈ Чат", "https://t.me/plafonchat")
         d.present(self)
