@@ -942,8 +942,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             borg_tab = self._BORG_TAB
 
             def _build():
-                result = build_all_search_items(main_tabs, borg_tab)
-                GLib.idle_add(self._on_search_items_ready, result)
+                try:
+                    result = build_all_search_items(main_tabs, borg_tab)
+                    GLib.idle_add(self._on_search_items_ready, result)
+                except Exception as e:
+                    GLib.idle_add(self._on_search_items_build_failed, e)
 
             threading.Thread(target=_build, daemon=True).start()
         return False
@@ -1019,8 +1022,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             borg_tab = self._BORG_TAB
 
             def _build():
-                result = build_all_search_items(main_tabs, borg_tab)
-                GLib.idle_add(self._on_search_items_ready, result)
+                try:
+                    result = build_all_search_items(main_tabs, borg_tab)
+                    GLib.idle_add(self._on_search_items_ready, result)
+                except Exception as e:
+                    GLib.idle_add(self._on_search_items_build_failed, e)
 
             threading.Thread(target=_build, daemon=True).start()
 
@@ -1030,6 +1036,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._search_items_built_at = time.time()
         if self._global_search_panel and self._global_search_panel.get_visible():
             self._global_search_panel.update_items(items)
+
+    def _on_search_items_build_failed(self, err: Exception) -> None:
+        self._search_items_building = False
+        self._log(f"⚠  Ошибка сборки индекса поиска: {err}\n")
 
     def _on_global_search_pick(self, tab_id: str, focus_spec: str | None = None):
         self._stack.set_visible_child_name(tab_id)
@@ -1142,7 +1152,9 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             if r == "reset":
                 config.reset_state()
                 self._log("🔄 Кэш статусов очищен.\n")
-                GLib.timeout_add(1500, self.close)
+                # Не закрываем окно автоматически: пользователь может продолжить работу.
+                if hasattr(self, "_maint") and self._maint is not None:
+                    self._maint.refresh_checks()
 
         d.connect("response", _on_response)
         d.present(self)
