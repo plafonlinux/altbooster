@@ -59,18 +59,36 @@
 
 ## Установка
 
-### 1. Установите git
+### 1. Установка из GitHub (рекомендуется, самая свежая версия)
+
+#### 1.1 Установите git
 
 ```bash
 su - -c 'apt-get install git'
 ```
 
-### 2. Клонировать и установить
+#### 1.2 Клонировать и установить
 
 ```bash
 git clone https://github.com/plafonlinux/altbooster.git
 cd altbooster
 ./install.sh
+```
+
+### 2. Установка из репозитория ALT Linux (альтернатива)
+
+<p><em>Примечание:</em> версия в репозитории может отставать от GitHub-релиза.</p>
+
+#### Вариант A: через apt-get
+
+```bash
+sudo apt-get update && sudo apt-get install plafon-altbooster
+```
+
+#### Вариант B: через EPM
+
+```bash
+epmi plafon-altbooster
 ```
 
 ### 3. Запустить
