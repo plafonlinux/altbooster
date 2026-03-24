@@ -72,6 +72,11 @@ def get_root_partition_disk(device: str) -> str:
     return re.sub(r"p?\d+$", "", device)
 
 
+def _partition_path(device: str, number: int) -> str:
+    suffix = f"p{number}" if re.search(r"(nvme\d+n\d+|mmcblk\d+)$", device) else str(number)
+    return f"{device}{suffix}"
+
+
 def list_btrfs_subvolumes() -> list[dict]:
     try:
         out = subprocess.check_output(
@@ -581,15 +586,15 @@ def _build_auto_restore_script(mirror_dir: str, target_device: str, info: dict) 
     ]
 
     if uefi:
-        root_part = target_device + "2"
-        efi_part = target_device + "1"
+        root_part = _partition_path(target_device, 2)
+        efi_part = _partition_path(target_device, 1)
         lines += [
             f"mkfs.fat -F32 {efi_part}",
             f"mkfs.{'btrfs -f' if is_btrfs else 'ext4 -F'} {root_part}",
             "",
         ]
     else:
-        root_part = target_device + "1"
+        root_part = _partition_path(target_device, 1)
         lines += [
             f"mkfs.{'btrfs -f' if is_btrfs else 'ext4 -F'} {root_part}",
             "",

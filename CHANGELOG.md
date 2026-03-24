@@ -7,6 +7,18 @@
 
 _Текущая ветка разработки. Изменения уточняются до финального релиза._
 
+### Исправлено
+- **Приложения — Gemini CLI**: установка в `~/.local` (`npm install -g --prefix ~/.local`), без записи в `/usr/lib/node_modules` и ошибки EACCES; проверка «установлено» учитывает `~/.local/bin/gemini`; после успешной установки в rc-файл оболочки из `passwd` дописывается `~/.local/bin` в `PATH` (zsh / bash или fish), без дублирования блока
+- **TimeSync Mirror — автовосстановление на NVMe/MMC**: корректное формирование имён разделов (`p1/p2`) в авто-сценарии восстановления, чтобы избежать ошибок на `nvme*` и `mmcblk*`
+- **Borg/Flatpak restore — корректный статус результата**: восстановление Flatpak теперь возвращает ошибку, если `remote-add` или `install` завершились неуспешно
+- **Borg env-file — безопасная сериализация passphrase**: парольная фраза сохраняется в shell-safe формате, чтобы спецсимволы не ломали `EnvironmentFile`
+
+### Добавлено
+- **Автотесты (первый пакет)**: добавлен `pytest`-каркас и unit-тесты для критичных участков (`core.mirror`, `core.borg`)
+- **Вкладка «Расширения»**: в рекомендуемые добавлено **UPower Battery** ([extensions.gnome.org/extension/5165/upower-battery/](https://extensions.gnome.org/extension/5165/upower-battery/)) — индикатор батареи на основе UPower
+- **Вкладка «Приложения» — Программирование**: **Cursor** (`epm play`), **context7 MCP сервер** (скрипт `npx ctx7 setup --cursor` от имени пользователя)
+- **Вкладка «Приложения» — Нейросети и вайбкодинг**: **Gemini CLI** (`npm install -g @google/gemini-cli`), **Claude Code** (скрипт с claude.ai), **Warp** (`epm play warp-terminal`)
+
 ## [5.6.9] — 2026-03-23
 
 ### Добавлено

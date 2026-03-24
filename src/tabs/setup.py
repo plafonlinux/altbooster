@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from gi.repository import Adw, GLib, Gtk
 
 from core import backend
 from core import config
+from core import update_security
 from ui.install_preview_dialog import InstallPreviewDialog
 from ui.widgets import make_button, make_icon, make_scrolled_page, scroll_child_into_view
 from ui.rows import SettingRow
@@ -229,17 +231,10 @@ class SetupPage(Gtk.Box):
             self._log("✘  wget и curl не найдены — обновление невозможно\n")
             return
 
-        cmd_str = (
-            f"TMP=$(mktemp -d) && "
-            f"{downloader} $TMP/update.tar.gz {url} && "
-            f"tar xf $TMP/update.tar.gz -C $TMP && "
-            f"cd $TMP/altbooster-* && "
-            f"chmod +x install.sh && ./install.sh && "
-            f"rm -rf $TMP"
-        )
-
         def _done(ok):
             def _ui():
+                btn.set_sensitive(True)
+                btn.set_label("Установить")
                 if hasattr(self, "_update_group") and self._update_group:
                     try:
                         self._body.remove(self._update_group)
@@ -258,15 +253,44 @@ class SetupPage(Gtk.Box):
             GLib.idle_add(_ui)
 
         root_dir = Path(__file__).resolve().parent.parent.parent
-        if os.access(root_dir, os.W_OK):
-            def _user_run():
-                r = subprocess.run(["bash", "-c", cmd_str], capture_output=True, text=True)
-                if r.stdout: GLib.idle_add(self._log, r.stdout)
-                if r.stderr: GLib.idle_add(self._log, r.stderr)
+        def _update_worker():
+            tmp = tempfile.mkdtemp(prefix="altbooster-update-")
+            tar_path = os.path.join(tmp, "update.tar.gz")
+            dl = subprocess.run(
+                ["bash", "-c", f"{downloader} {tar_path} {url}"],
+                capture_output=True,
+                text=True,
+            )
+            if dl.stdout:
+                GLib.idle_add(self._log, dl.stdout)
+            if dl.stderr:
+                GLib.idle_add(self._log, dl.stderr)
+            if dl.returncode != 0:
+                GLib.idle_add(_done, False)
+                return
+
+            ok_verify, verify_msg = update_security.verify_release_tarball(version, tar_path)
+            GLib.idle_add(self._log, f"▶  Проверка релиза: {verify_msg}\n")
+            if not ok_verify:
+                GLib.idle_add(_done, False)
+                return
+
+            install_cmd = (
+                f"tar xf {tar_path} -C {tmp} && "
+                f"cd {tmp}/altbooster-* && "
+                f"chmod +x install.sh && ./install.sh"
+            )
+            if os.access(root_dir, os.W_OK):
+                r = subprocess.run(["bash", "-c", install_cmd], capture_output=True, text=True)
+                if r.stdout:
+                    GLib.idle_add(self._log, r.stdout)
+                if r.stderr:
+                    GLib.idle_add(self._log, r.stderr)
                 GLib.idle_add(_done, r.returncode == 0)
-            threading.Thread(target=_user_run, daemon=True).start()
-        else:
-            backend.run_privileged(["bash", "-c", cmd_str], self._log, _done)
+                return
+            backend.run_privileged(["bash", "-c", install_cmd], self._log, _done)
+
+        threading.Thread(target=_update_worker, daemon=True).start()
 
     def _restart_app(self):
         try:

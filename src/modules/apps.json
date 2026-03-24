@@ -954,6 +954,106 @@
               "code"
             ]
           }
+        },
+        {
+          "id": "cursor",
+          "label": "Cursor",
+          "desc": "AI-first редактор кода; установка через EPM Play",
+          "source": {
+            "label": "EPM play",
+            "cmd": [
+              "epm",
+              "play",
+              "cursor"
+            ],
+            "check": [
+              "which",
+              "cursor"
+            ]
+          }
+        },
+        {
+          "id": "context7_mcp",
+          "label": "context7 MCP сервер",
+          "desc": "Подключает Context7 к Cursor (MCP, правило и skill в ~/.cursor/). В терминале откроется браузер для входа; в чате: «use context7 …». Требуются Node.js/npx и сеть",
+          "source": {
+            "label": "Скрипт",
+            "cmd": [
+              "bash",
+              "-c",
+              "if [ -z \"$PKEXEC_UID\" ]; then echo \"Ошибка: запускайте из графической сессии ALT Booster\"; exit 1; fi; U=$(getent passwd \"$PKEXEC_UID\" | cut -d: -f1); H=$(getent passwd \"$PKEXEC_UID\" | cut -d: -f6); runuser -u \"$U\" -- bash -lc \"cd \\\"$H\\\" && npx -y ctx7@0.3.6 setup --cursor\""
+            ],
+            "check": [
+              "path",
+              "~/.cursor/rules/context7.mdc"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "нейросети_и_вайбкодинг",
+      "title": "Нейросети и вайбкодинг",
+      "items": [
+        {
+          "id": "gemini_cli",
+          "label": "Gemini CLI",
+          "desc": "Терминальный помощник на базе моделей Google. Как пользоваться после установки: (1) Откройте любой терминал. (2) Введите команду gemini и нажмите Enter. (3) Первый раз откроется браузер — войдите в аккаунт Google. Вместо браузера можно ключ API с aistudio.google.com/apikey: в терминале выполните export GEMINI_API_KEY=ваш_ключ и снова gemini. После успешной установки ALT Booster по полю shell в учётной записи дописывает ~/.local/bin в PATH (zsh — ~/.zshrc, bash — ~/.bashrc или ~/.profile, fish — ~/.config/fish/config.fish), если такого блока ещё нет; затем откройте новый терминал или source профиль. Если всё же «команда не найдена» — добавьте вручную тот же PATH в свой rc-файл. Установка в домашний каталог без root; нужны Node.js, npm и сеть.",
+          "source": {
+            "label": "Скрипт",
+            "cmd": [
+              "bash",
+              "-c",
+              "if [ -z \"$PKEXEC_UID\" ]; then echo \"Ошибка: выполните установку из приложения ALT Booster в графической сессии.\"; exit 1; fi; U=$(getent passwd \"$PKEXEC_UID\" | cut -d: -f1); H=$(getent passwd \"$PKEXEC_UID\" | cut -d: -f6); runuser -u \"$U\" -- bash -lc \"cd \\\"$H\\\" || exit 1; if ! command -v npm >/dev/null; then echo \\\"Не найден npm. Установите Node.js и npm (например: epm install nodejs npm).\\\"; exit 1; fi; mkdir -p \\\"$H/.local/bin\\\" \\\"$H/.local/lib\\\"; echo \\\"▶ Устанавливаю Gemini CLI в ~/.local (подождите)…\\\"; export NPM_CONFIG_LOGLEVEL=error NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false NPM_CONFIG_UPDATE_NOTIFIER=false; if ! npm install -g --prefix \\\"$H/.local\\\" --no-fund --no-audit --loglevel=error --progress=false @google/gemini-cli@latest; then echo \\\"Ошибка: не удалось выполнить npm install. Смотрите лог выше.\\\"; exit 1; fi; echo \\\"✔ npm install завершён. В логе ALT Booster — дописывание ~/.local/bin в PATH профиля оболочки; затем новый терминал и команда: gemini\\\"\""
+            ],
+            "check": [
+              "any_of",
+              [
+                [
+                  "which",
+                  "gemini"
+                ],
+                [
+                  "path",
+                  "~/.local/bin/gemini"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "id": "claude_code",
+          "label": "Claude Code",
+          "desc": "CLI Anthropic: терминальный агент Claude. Установка официальным скриптом; первый запуск — вход в браузере. Нужны curl и сеть",
+          "source": {
+            "label": "Скрипт",
+            "cmd": [
+              "bash",
+              "-c",
+              "if [ -z \"$PKEXEC_UID\" ]; then echo \"Ошибка: запускайте из графической сессии ALT Booster\"; exit 1; fi; U=$(getent passwd \"$PKEXEC_UID\" | cut -d: -f1); H=$(getent passwd \"$PKEXEC_UID\" | cut -d: -f6); runuser -u \"$U\" -- bash -lc \"cd \\\"$H\\\" && command -v curl >/dev/null || { echo \\\"Нужен curl\\\"; exit 1; }; curl -fsSL https://claude.ai/install.sh | bash\""
+            ],
+            "check": [
+              "which",
+              "claude"
+            ]
+          }
+        },
+        {
+          "id": "warp_terminal",
+          "label": "Warp",
+          "desc": "Терминал Warp с AI-функциями; установка через EPM Play",
+          "source": {
+            "label": "EPM play",
+            "cmd": [
+              "epm",
+              "play",
+              "warp-terminal"
+            ],
+            "check": [
+              "which",
+              "warp-terminal"
+            ]
+          }
         }
       ]
     },

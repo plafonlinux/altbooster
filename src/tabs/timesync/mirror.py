@@ -513,6 +513,9 @@ class MirrorPage(Gtk.Box):
         self._btrfs_restore_btn.connect("clicked", self._on_inline_restore_clicked)
         btns_row.append(self._btrfs_restore_btn)
 
+        # Re-run state sync now that restore button exists.
+        self._update_btrfs_dest_info(dest_row.get_text().strip())
+
         body.append(btns_row)
 
         body.append(self._sv_snap_group)

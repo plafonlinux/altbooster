@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import threading
@@ -896,6 +897,8 @@ def restore_flatpak_meta(meta_dir: Path, on_line, on_done) -> None:
                     ["flatpak", "remote-add", "--user", "--if-not-exists", name, url],
                     capture_output=True, text=True, encoding="utf-8", timeout=30,
                 )
+                if r.returncode != 0:
+                    ok = False
                 GLib.idle_add(on_line, f"   {'✔' if r.returncode == 0 else '⚠'} {name}\n")
         apps_file = meta_dir / "flatpak-apps.txt"
         if apps_file.exists():
@@ -908,6 +911,8 @@ def restore_flatpak_meta(meta_dir: Path, on_line, on_done) -> None:
                     ["flatpak", "install", "-y", "--user", app_id],
                     capture_output=True, text=True, encoding="utf-8", timeout=300,
                 )
+                if r.returncode != 0:
+                    ok = False
                 GLib.idle_add(on_line, f"   {'✔' if r.returncode == 0 else '⚠'} {app_id}\n")
         GLib.idle_add(on_done, ok)
 
@@ -943,7 +948,7 @@ def _write_borg_env_file() -> bool:
     passphrase = config.state_get("borg_passphrase", "") or ""
     ssh_key = borg_ssh_key_path()
     content = (
-        f"BORG_PASSPHRASE={passphrase}\n"
+        f'BORG_PASSPHRASE={shlex.quote(passphrase)}\n'
         f"BORG_RSH=ssh -i {ssh_key} -o StrictHostKeyChecking=accept-new\n"
     )
     try:

@@ -43,6 +43,12 @@ RECOMMENDED = [
         "1460",
     ),
     (
+        "upower-battery@codilia.com",
+        "UPower Battery",
+        "Индикатор батареи в панели на основе UPower.",
+        "5165",
+    ),
+    (
         "just-perfection-desktop@just-perfection",
         "Just Perfection",
         "Тонкая настройка множества элементов интерфейса GNOME.",

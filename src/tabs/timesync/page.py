@@ -94,11 +94,14 @@ class BorgPage(Gtk.Box):
         self._page_btrfs = self._stack.get_page(btrfs_top) if btrfs_top else None
 
         self._update_sections_visibility()
-        threading.Thread(target=self._refresh_status_thread, daemon=True).start()
+        self._refresh_status_async()
 
     @property
     def view_stack(self) -> Adw.ViewStack:
         return self._stack
+
+    def _refresh_status_async(self) -> None:
+        threading.Thread(target=self._refresh_status_thread, daemon=True).start()
 
     def _build_manual_container(self) -> tuple[Gtk.Box, Adw.ViewStack]:
         container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -152,7 +155,7 @@ class BorgPage(Gtk.Box):
     def _build_info_page(self):
         scroll, self._body = make_scrolled_page()
         self._build_status_group()
-        self._info_repo_slot = Gtk.Box()
+        self._info_repo_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self._body.append(self._info_repo_slot)
         self._build_repo_group()
         self._info_repo_slot.append(self._repo_group)
@@ -1381,25 +1384,25 @@ class BorgPage(Gtk.Box):
         self._expander_monthdays.add_row(grid)
         self._update_monthdays_subtitle()
 
-        self._row_time = Adw.ActionRow()
-        self._row_time.set_title("Время запуска")
-        time_box = Gtk.Box(spacing=4)
-        time_box.set_valign(Gtk.Align.CENTER)
-        self._spin_hour = Gtk.SpinButton.new_with_range(0, 23, 1)
+        self._spin_hour = Adw.SpinRow.new_with_range(0, 23, 1)
+        self._spin_hour.set_title("Час запуска")
+        self._spin_hour.set_subtitle("0–23")
         self._spin_hour.set_value(config.state_get("borg_schedule_hour", 3))
-        self._spin_hour.set_width_chars(2)
-        self._spin_hour.connect("value-changed", lambda s: config.state_set("borg_schedule_hour", int(s.get_value())))
-        colon = Gtk.Label(label=":")
-        colon.add_css_class("heading")
-        self._spin_minute = Gtk.SpinButton.new_with_range(0, 59, 5)
+        self._spin_hour.connect(
+            "notify::value",
+            lambda r, _p: config.state_set("borg_schedule_hour", int(r.get_value())),
+        )
+        self._schedule_group.add(self._spin_hour)
+
+        self._spin_minute = Adw.SpinRow.new_with_range(0, 59, 5)
+        self._spin_minute.set_title("Минута")
+        self._spin_minute.set_subtitle("Шаг 5 минут")
         self._spin_minute.set_value(config.state_get("borg_schedule_minute", 0))
-        self._spin_minute.set_width_chars(2)
-        self._spin_minute.connect("value-changed", lambda s: config.state_set("borg_schedule_minute", int(s.get_value())))
-        time_box.append(self._spin_hour)
-        time_box.append(colon)
-        time_box.append(self._spin_minute)
-        self._row_time.add_suffix(time_box)
-        self._schedule_group.add(self._row_time)
+        self._spin_minute.connect(
+            "notify::value",
+            lambda r, _p: config.state_set("borg_schedule_minute", int(r.get_value())),
+        )
+        self._schedule_group.add(self._spin_minute)
 
         self._update_schedule_mode_ui()
 
@@ -1437,14 +1440,11 @@ class BorgPage(Gtk.Box):
         group.add(self._spin_weekly)
         group.add(self._spin_monthly)
 
-    def _make_spin_row(self, title: str, state_key: str, default: int) -> Adw.ActionRow:
-        row = Adw.ActionRow()
+    def _make_spin_row(self, title: str, state_key: str, default: int) -> Adw.SpinRow:
+        row = Adw.SpinRow.new_with_range(0, 365, 1)
         row.set_title(title)
-        spin = Gtk.SpinButton.new_with_range(0, 365, 1)
-        spin.set_value(config.state_get(state_key, default))
-        spin.set_valign(Gtk.Align.CENTER)
-        spin.connect("value-changed", lambda s: config.state_set(state_key, int(s.get_value())))
-        row.add_suffix(spin)
+        row.set_value(config.state_get(state_key, default))
+        row.connect("notify::value", lambda r, _p: config.state_set(state_key, int(r.get_value())))
         return row
 
     def _update_schedule_mode_ui(self):
@@ -1908,7 +1908,7 @@ class BorgPage(Gtk.Box):
         self._save_repo_settings()
         if not backend.is_borg_installed():
             self._log("ℹ Borg не установлен: выбрана папка хранилища, инициализация будет доступна после установки Borg.\n")
-            self._refresh_status_thread()
+            self._refresh_status_async()
             return
         self._start_repo_init(repo_path, auto=True)
 
@@ -2007,7 +2007,7 @@ class BorgPage(Gtk.Box):
                 self._log("✔ Borg установлен\n" if ok else "✘ Ошибка установки\n"),
                 self._btn_install.set_sensitive(True),
                 hasattr(win, "stop_progress") and win.stop_progress(ok),
-                self._refresh_status_thread(),
+                self._refresh_status_async(),
             )
         )
 
@@ -2023,7 +2023,7 @@ class BorgPage(Gtk.Box):
         if backend.is_repo_initialized(repo_path):
             prefix = "ℹ " if auto else "✔ "
             self._log(f"{prefix}Хранилище уже инициализировано: {repo_path}\n")
-            GLib.idle_add(self._refresh_status_thread)
+            GLib.idle_add(self._refresh_status_async)
             return
         win = self.get_root()
         if hasattr(win, "start_progress"):
@@ -2036,7 +2036,7 @@ class BorgPage(Gtk.Box):
                 self._log("✘ Ошибка инициализации\n")
             if hasattr(win, "stop_progress"):
                 win.stop_progress(ok)
-            self._refresh_status_thread()
+            self._refresh_status_async()
 
         backend.borg_init(repo_path, self._log, _on_init_done)
 
@@ -2125,7 +2125,7 @@ class BorgPage(Gtk.Box):
             self._log(f"{'✔  Архив создан' if ok else '✘  Ошибка при создании архива'}\n")
             if ok:
                 config.state_set("borg_last_backup", GLib.DateTime.new_now_local().format("%d.%m.%Y %H:%M"))
-                self._refresh_status_thread()
+                self._refresh_status_async()
                 GLib.idle_add(self._tm_refresh_archives)
 
         excludes = []
@@ -2397,7 +2397,7 @@ class BorgPage(Gtk.Box):
             ok = backend.disable_systemd_timer()
         sw.set_active(ok if active else not ok)
         self._log(f"✔  Готово\n" if ok else "✘  Ошибка\n")
-        self._refresh_status_thread()
+        self._refresh_status_async()
         
     def _build_btrfs_tab(self):
         scroll, body = make_scrolled_page()
