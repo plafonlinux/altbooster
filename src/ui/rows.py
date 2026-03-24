@@ -55,6 +55,10 @@ _badge_css.load_from_data(b"""
         color: @warning_color;
         background-color: alpha(@warning_color, 0.15);
     }
+    .ab-source-badge.accent {
+        color: @accent_color;
+        background-color: alpha(@accent_color, 0.18);
+    }
     .ab-source-badge.error {
         color: @error_color;
         background-color: alpha(@error_color, 0.15);

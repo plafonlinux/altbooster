@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import threading
+import time
+from datetime import datetime
 from pathlib import Path
 
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, Gdk, GLib, Gtk
 
 from core import backend, config
 from core.mirror import (
@@ -21,6 +24,37 @@ from core.mirror import (
     restore_to_disk, save_partition_table,
 )
 from ui.widgets import make_button, make_icon, make_scrolled_page
+
+
+_mirror_warn_css = Gtk.CssProvider()
+_mirror_warn_css.load_from_data(b"""
+    banner.ab-mirror-floating-warning {
+        border-radius: 14px;
+        background-color: alpha(@error_color, 0.80);
+        color: @window_fg_color;
+        margin: 10px 16px 6px 16px;
+        padding: 2px 8px;
+    }
+    banner.ab-mirror-floating-warning label {
+        font-weight: 600;
+    }
+""")
+_mirror_warn_css_registered = False
+
+
+def ensure_mirror_warning_styles() -> None:
+    global _mirror_warn_css_registered
+    if _mirror_warn_css_registered:
+        return
+    display = Gdk.Display.get_default()
+    if not display:
+        return
+    Gtk.StyleContext.add_provider_for_display(
+        display,
+        _mirror_warn_css,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
+    )
+    _mirror_warn_css_registered = True
 
 
 def _load_optional() -> list[str]:
@@ -35,6 +69,36 @@ def _load_optional() -> list[str]:
 
 def _save_optional(keys: list[str]):
     config.state_set("mirror_optional_includes", json.dumps(keys))
+
+
+def _translate_btrfs_log_line(line: str) -> str:
+    # Переводим наиболее частые англоязычные строки из btrfs-progs.
+    raw = line.rstrip("\n")
+
+    m_create = re.match(r"^Create readonly snapshot of '(.+)' in '(.+)'$", raw)
+    if m_create:
+        src, dst = m_create.group(1), m_create.group(2)
+        return f"Создан snapshot (только чтение): '{src}' -> '{dst}'\n"
+
+    m_delete = re.match(r"^Delete subvolume\s+(\d+)\s+\(([^)]+)\):\s+'(.+)'$", raw)
+    if m_delete:
+        subvol_id, mode, path = m_delete.group(1), m_delete.group(2), m_delete.group(3)
+        mode_ru = "без commit" if mode == "no-commit" else mode
+        return f"Удаление субволюма {subvol_id} ({mode_ru}): '{path}'\n"
+
+    return line
+
+
+def _fmt_bytes(n: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    size = float(n)
+    idx = 0
+    while size >= 1024.0 and idx < len(units) - 1:
+        size /= 1024.0
+        idx += 1
+    if idx == 0:
+        return f"{int(size)} {units[idx]}"
+    return f"{size:.1f} {units[idx]}"
 
 
 class MirrorPage(Gtk.Box):
@@ -69,9 +133,6 @@ class MirrorPage(Gtk.Box):
         btrfs_page = self._build_btrfs_page(fs)
         self._stack.add_titled_with_icon(btrfs_page, "btrfs", "Btrfs", "drive-harddisk-symbolic")
 
-        restore_page = self._build_restore_page()
-        self._stack.add_titled_with_icon(restore_page, "restore", "Восстановить", "edit-redo-symbolic")
-
         if fs == "btrfs":
             self._stack.set_visible_child_name("btrfs")
 
@@ -79,6 +140,7 @@ class MirrorPage(Gtk.Box):
         row = Adw.EntryRow()
         row.set_title("Папка назначения")
         row.set_text(config.state_get(state_key, "") or "")
+        row.set_show_apply_button(False)
         row.connect("changed", lambda r: config.state_set(state_key, r.get_text()))
 
         btn = Gtk.Button()
@@ -139,10 +201,12 @@ class MirrorPage(Gtk.Box):
 
     def _build_ext4_page(self, fs: str | None = None) -> Gtk.Widget:
         wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        ensure_mirror_warning_styles()
 
         if fs and fs != "ext4":
             banner = Adw.Banner()
             banner.set_title(f"Недоступно: корневая файловая система — {fs.upper()}, а не EXT4")
+            banner.add_css_class("ab-mirror-floating-warning")
             banner.set_revealed(True)
             wrapper.append(banner)
 
@@ -199,6 +263,18 @@ class MirrorPage(Gtk.Box):
         dest_group.add(dest_row)
         dest_group.add(fmt_row)
         body.append(dest_group)
+        self._ext4_restore_source = ""
+
+        def _update_ext4_restore_state():
+            info = detect_mirror_type(dest_row.get_text().strip())
+            if info and info.get("type") in ("rsync", "tar"):
+                self._ext4_restore_source = dest_row.get_text().strip()
+                self._ext4_restore_btn.set_visible(True)
+            else:
+                self._ext4_restore_source = ""
+                self._ext4_restore_btn.set_visible(False)
+
+        dest_row.connect("changed", lambda _r: _update_ext4_restore_state())
 
         body.append(self._make_content_expander())
 
@@ -222,15 +298,28 @@ class MirrorPage(Gtk.Box):
 
         body.append(params_group)
 
+        btns_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btns_row.set_halign(Gtk.Align.CENTER)
+        btns_row.set_margin_top(16)
+        btns_row.set_margin_bottom(16)
+
         btn_create = Gtk.Button(label="Создать зеркало EXT4")
         btn_create.add_css_class("suggested-action")
         btn_create.add_css_class("pill")
-        btn_create.set_halign(Gtk.Align.CENTER)
-        btn_create.set_margin_top(16)
-        btn_create.set_margin_bottom(16)
         btn_create.set_size_request(240, 48)
         btn_create.connect("clicked", lambda _: self._on_create_ext4(dest_row, fmt_row, sw_pt))
-        body.append(btn_create)
+        btns_row.append(btn_create)
+
+        self._ext4_restore_btn = Gtk.Button(label="Восстановить")
+        self._ext4_restore_btn.add_css_class("success")
+        self._ext4_restore_btn.add_css_class("pill")
+        self._ext4_restore_btn.set_size_request(190, 48)
+        self._ext4_restore_btn.set_visible(False)
+        self._ext4_restore_btn.connect("clicked", self._on_ext4_restore_clicked)
+        btns_row.append(self._ext4_restore_btn)
+        body.append(btns_row)
+
+        _update_ext4_restore_state()
 
         if fs and fs != "ext4":
             wrapper.set_sensitive(False)
@@ -238,10 +327,12 @@ class MirrorPage(Gtk.Box):
 
     def _build_btrfs_page(self, fs: str | None = None) -> Gtk.Widget:
         wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        ensure_mirror_warning_styles()
 
         if fs and fs != "btrfs":
             banner = Adw.Banner()
             banner.set_title(f"Недоступно: корневая файловая система — {fs.upper()}, а не Btrfs")
+            banner.add_css_class("ab-mirror-floating-warning")
             banner.set_revealed(True)
             wrapper.append(banner)
 
@@ -284,6 +375,12 @@ class MirrorPage(Gtk.Box):
         dest_group = Adw.PreferencesGroup()
         dest_group.set_title("Назначение")
         dest_row, dest_btn = self._make_dest_row("mirror_btrfs_dest")
+        self._btrfs_dest_info_row = Adw.ActionRow()
+        self._btrfs_dest_info_row.set_title("Зеркало системы")
+        self._btrfs_dest_info_row.set_subtitle("Выберите папку")
+        self._btrfs_dest_info_icon = make_icon("dialog-information-symbolic")
+        self._btrfs_dest_info_icon.set_valign(Gtk.Align.CENTER)
+        self._btrfs_dest_info_row.add_suffix(self._btrfs_dest_info_icon)
 
         fmt_model = Gtk.StringList.new([
             "Живое зеркало",
@@ -342,10 +439,13 @@ class MirrorPage(Gtk.Box):
                     _check_dest_fs(dest)
 
         fmt_row.connect("notify::selected", _on_fmt_changed)
+        dest_row.connect("changed", lambda r: self._update_btrfs_dest_info(r.get_text().strip()))
 
         dest_group.add(dest_row)
         dest_group.add(fmt_row)
+        dest_group.add(self._btrfs_dest_info_row)
         body.append(dest_group)
+        self._update_btrfs_dest_info(dest_row.get_text().strip())
 
         self._btrfs_subvol_checks: list[tuple[str, Gtk.CheckButton]] = []
         self._sv_rows: list[Adw.ActionRow] = []
@@ -393,15 +493,27 @@ class MirrorPage(Gtk.Box):
 
         body.append(params_group)
 
+        btns_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btns_row.set_halign(Gtk.Align.CENTER)
+        btns_row.set_margin_top(16)
+        btns_row.set_margin_bottom(16)
+
         btn_create = Gtk.Button(label="Создать зеркало Btrfs")
         btn_create.add_css_class("suggested-action")
         btn_create.add_css_class("pill")
-        btn_create.set_halign(Gtk.Align.CENTER)
-        btn_create.set_margin_top(16)
-        btn_create.set_margin_bottom(16)
         btn_create.set_size_request(240, 48)
         btn_create.connect("clicked", lambda _: self._on_create_btrfs(dest_row, sw_pt, None, fmt_row))
-        body.append(btn_create)
+        btns_row.append(btn_create)
+
+        self._btrfs_restore_btn = Gtk.Button(label="Восстановить")
+        self._btrfs_restore_btn.add_css_class("success")
+        self._btrfs_restore_btn.add_css_class("pill")
+        self._btrfs_restore_btn.set_size_request(190, 48)
+        self._btrfs_restore_btn.set_visible(False)
+        self._btrfs_restore_btn.connect("clicked", self._on_inline_restore_clicked)
+        btns_row.append(self._btrfs_restore_btn)
+
+        body.append(btns_row)
 
         body.append(self._sv_snap_group)
 
@@ -529,6 +641,311 @@ class MirrorPage(Gtk.Box):
             GLib.idle_add(_populate)
 
         backend.run_privileged(["btrfs", "subvolume", "list", "/"], _on_line, _on_done)
+
+    def _update_btrfs_dest_info(self, path: str):
+        if not hasattr(self, "_btrfs_dest_info_row"):
+            return
+        has_restore_btn = hasattr(self, "_btrfs_restore_btn")
+        if not path:
+            self._btrfs_dest_info_icon.set_from_icon_name("dialog-information-symbolic")
+            self._btrfs_dest_info_icon.remove_css_class("success")
+            if has_restore_btn:
+                self._btrfs_restore_btn.set_visible(False)
+            self._btrfs_restore_source = ""
+            self._btrfs_dest_info_row.set_subtitle("Выберите папку")
+            return
+        info = detect_mirror_type(path)
+        if not info:
+            self._btrfs_dest_info_icon.set_from_icon_name("dialog-warning-symbolic")
+            self._btrfs_dest_info_icon.remove_css_class("success")
+            if has_restore_btn:
+                self._btrfs_restore_btn.set_visible(False)
+            self._btrfs_restore_source = ""
+            self._btrfs_dest_info_row.set_subtitle("Зеркало в папке не найдено")
+            return
+        t = info.get("type", "")
+        subvols = info.get("subvols", []) or []
+
+        p = Path(path)
+        date_str = "дата неизвестна"
+        size_str = "размер неизвестен"
+        try:
+            if t == "btrfs":
+                files = list(p.glob("*.btrfs"))
+                if files:
+                    total_bytes = sum(f.stat().st_size for f in files if f.exists())
+                    newest_ts = max(f.stat().st_mtime for f in files if f.exists())
+                    date_str = datetime.fromtimestamp(newest_ts).strftime("%d.%m.%Y %H:%M")
+                    size_str = _fmt_bytes(total_bytes)
+            elif t == "btrfs_recv":
+                snaps = [d for d in p.glob(".snap_*") if d.is_dir()]
+                if snaps:
+                    newest_ts = max(d.stat().st_mtime for d in snaps if d.exists())
+                    date_str = datetime.fromtimestamp(newest_ts).strftime("%d.%m.%Y %H:%M")
+                    size_str = "инкрементальный набор"
+        except Exception:
+            pass
+
+        self._btrfs_dest_info_icon.set_from_icon_name("object-select-symbolic")
+        self._btrfs_dest_info_icon.add_css_class("success")
+        self._btrfs_restore_source = path
+        if has_restore_btn:
+            self._btrfs_restore_btn.set_visible(t in ("btrfs", "btrfs_recv"))
+        if t == "btrfs":
+            self._btrfs_dest_info_row.set_subtitle(
+                f"Доступно для восстановления со следующими субволюмами: {', '.join(subvols)} - {size_str} - дата создания: {date_str}"
+            )
+        elif t == "btrfs_recv":
+            self._btrfs_dest_info_row.set_subtitle(
+                f"Доступно для восстановления со следующими субволюмами: {', '.join(subvols)} - {size_str} - дата создания: {date_str}"
+            )
+        else:
+            self._btrfs_dest_info_icon.set_from_icon_name("dialog-information-symbolic")
+            self._btrfs_dest_info_icon.remove_css_class("success")
+            if has_restore_btn:
+                self._btrfs_restore_btn.set_visible(False)
+            self._btrfs_restore_source = ""
+            self._btrfs_dest_info_row.set_subtitle("Папка содержит зеркало другого типа")
+
+    def _on_inline_restore_clicked(self, _btn):
+        src = (getattr(self, "_btrfs_restore_source", "") or "").strip()
+        if not src:
+            self._show_error("Не удалось определить папку с зеркалом")
+            return
+        self._start_restore_flow(src)
+
+    def _on_ext4_restore_clicked(self, _btn):
+        src = (getattr(self, "_ext4_restore_source", "") or "").strip()
+        if not src:
+            self._show_error("Не удалось определить папку с зеркалом")
+            return
+        self._start_restore_flow(src)
+
+    def _start_restore_flow(self, src: str):
+        self._open_restore_disk_picker(src)
+
+    def _open_restore_disk_picker(self, src: str):
+        disks = backend.list_available_disks(exclude_root=True)
+        if not disks:
+            self._show_no_disks_help_dialog(src)
+            return
+        self._inline_restore_disks = disks
+
+        labels = []
+        for d in disks:
+            model = (d.get("model") or "").strip()
+            device = d.get("device", "")
+            size = d.get("size", "?")
+            labels.append(f"{device} · {size}" + (f" · {model}" if model else ""))
+
+        model = Gtk.StringList.new(labels)
+        dd = Gtk.DropDown(model=model)
+        dd.set_hexpand(True)
+
+        warn = Gtk.Label(
+            label=(
+                "Выберите накопитель для восстановления.\n"
+                "Внимание: все данные на выбранном накопителе будут удалены."
+            )
+        )
+        warn.set_wrap(True)
+        warn.set_halign(Gtk.Align.START)
+        warn.add_css_class("caption")
+        warn.add_css_class("dim-label")
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.append(warn)
+        box.append(dd)
+
+        dlg = Adw.AlertDialog(
+            heading="Восстановить из зеркала?",
+            body="Выберите целевой накопитель.",
+        )
+        dlg.set_extra_child(box)
+        dlg.add_response("cancel", "Отмена")
+        dlg.add_response("prepare", "Подготовить диск")
+        dlg.add_response("next", "Продолжить")
+        dlg.set_default_response("next")
+        dlg.set_close_response("cancel")
+        dlg.connect("response", self._on_inline_restore_pick_disk_done, src, dd)
+        dlg.present(self.get_root())
+
+    def _show_no_disks_help_dialog(self, src: str):
+        dlg = Adw.AlertDialog(
+            heading="Не найдено доступных накопителей",
+            body=(
+                "Чтобы продолжить восстановление, подключите второй диск.\n\n"
+                "Как подготовить диск:\n"
+                "1) Подключите новый SSD/HDD/USB.\n"
+                "2) Закройте программы, которые могут использовать диск.\n"
+                "3) Нажмите «Повторить поиск».\n\n"
+                "Форматировать вручную не нужно — при восстановлении диск "
+                "будет подготовлен автоматически."
+            ),
+        )
+        dlg.add_response("cancel", "Отмена")
+        dlg.add_response("retry", "Повторить поиск")
+        dlg.set_default_response("retry")
+        dlg.set_close_response("cancel")
+
+        def _on_resp(_d, resp: str):
+            if resp == "retry":
+                self._open_restore_disk_picker(src)
+
+        dlg.connect("response", _on_resp)
+        dlg.present(self.get_root())
+
+    def _on_inline_restore_pick_disk_done(self, _dialog, response: str, src: str, dd: Gtk.DropDown):
+        if response == "prepare":
+            idx = dd.get_selected()
+            disks = getattr(self, "_inline_restore_disks", [])
+            if idx >= len(disks):
+                self._show_error("Не удалось определить выбранный диск")
+                return
+            device = disks[idx].get("device", "")
+            self._confirm_prepare_disk(src, device)
+            return
+        if response != "next":
+            return
+        idx = dd.get_selected()
+        disks = getattr(self, "_inline_restore_disks", [])
+        if idx >= len(disks):
+            self._show_error("Не удалось определить выбранный диск")
+            return
+        device = disks[idx].get("device", "")
+        size = disks[idx].get("size", "?")
+
+        confirm = Adw.AlertDialog(
+            heading="Внимание: диск будет перезаписан",
+            body=(
+                f"Источник: {src}\n"
+                f"Диск: {device} ({size})\n\n"
+                "Все данные на выбранном диске будут уничтожены.\n"
+                "Продолжить восстановление?"
+            ),
+        )
+        confirm.add_response("cancel", "Отмена")
+        confirm.add_response("restore", "Восстановить")
+        confirm.set_response_appearance("restore", Adw.ResponseAppearance.DESTRUCTIVE)
+        confirm.set_default_response("cancel")
+        confirm.connect("response", self._on_inline_restore_confirmed, src, device)
+        confirm.present(self.get_root())
+
+    def _on_inline_restore_confirmed(self, _dialog, response: str, src: str, target_device: str):
+        if response != "restore":
+            return
+        if not target_device.startswith("/dev/"):
+            self._show_error("Для восстановления нужно выбрать реальный диск (/dev/...), а не папку")
+            return
+        self._busy = True
+        self._start_progress("Восстановление из зеркала...")
+        self._log(f"Восстановление из {src} на {target_device}...\n")
+
+        def _done(ok):
+            self._busy = False
+            self._stop_progress(ok)
+            self._log(f"Восстановление {'завершено' if ok else 'завершено с ошибкой'}.\n")
+
+        restore_to_disk(src, target_device, self._log, _done)
+
+    def _confirm_prepare_disk(self, src: str, device: str):
+        if not device.startswith("/dev/"):
+            self._show_error("Можно подготовить только реальный диск (/dev/...)")
+            return
+        d1 = Adw.AlertDialog(
+            heading="Подготовить диск?",
+            body=(
+                f"Будет подготовлен диск {device}.\n"
+                "Все разделы и данные на нём будут удалены."
+            ),
+        )
+        d1.add_response("cancel", "Отмена")
+        d1.add_response("continue", "Продолжить")
+        d1.set_response_appearance("continue", Adw.ResponseAppearance.DESTRUCTIVE)
+        d1.set_default_response("cancel")
+        d1.set_close_response("cancel")
+
+        def _on_first(_d, resp):
+            if resp != "continue":
+                return
+            d2 = Adw.AlertDialog(
+                heading="Последнее подтверждение",
+                body=(
+                    f"Подтвердите подготовку диска {device}.\n\n"
+                    "Операция необратима."
+                ),
+            )
+            d2.add_response("cancel", "Отмена")
+            d2.add_response("prepare", "Подготовить")
+            d2.set_response_appearance("prepare", Adw.ResponseAppearance.DESTRUCTIVE)
+            d2.set_default_response("cancel")
+            d2.set_close_response("cancel")
+            d2.connect("response", lambda _d2, r2: self._run_prepare_disk(src, device) if r2 == "prepare" else None)
+            d2.present(self.get_root())
+
+        d1.connect("response", _on_first)
+        d1.present(self.get_root())
+
+    def _run_prepare_disk(self, src: str, device: str):
+        info = detect_mirror_type(src) or {}
+        mirror_type = info.get("type", "")
+        use_btrfs = mirror_type in ("btrfs", "btrfs_recv")
+        uefi = backend.is_uefi()
+        sep = "p" if device[-1].isdigit() else ""
+        p1 = f"{device}{sep}1"
+        p2 = f"{device}{sep}2"
+        fs_cmd = "mkfs.btrfs -f" if use_btrfs else "mkfs.ext4 -F"
+
+        part_script = (
+            "label: gpt\n"
+            ",512M,U,*\n"
+            ",,L\n"
+        ) if uefi else (
+            "label: gpt\n"
+            ",,L,*\n"
+        )
+
+        script = [
+            "set -e",
+            f'TARGET="{device}"',
+            'echo "▶  Размонтирование разделов..."',
+            'for p in $(lsblk -nr -o PATH "$TARGET" | tail -n +2); do umount "$p" 2>/dev/null || true; done',
+            'echo "▶  Очистка сигнатур..."',
+            'wipefs -a "$TARGET"',
+            'echo "▶  Создание новой таблицы разделов GPT..."',
+            f"cat <<'EOF' | sfdisk \"$TARGET\"",
+            part_script.rstrip("\n"),
+            "EOF",
+            "partprobe \"$TARGET\" || true",
+            "sleep 1",
+        ]
+        if uefi:
+            script += [
+                'echo "▶  Форматирование EFI..."',
+                f"mkfs.fat -F32 {p1}",
+                'echo "▶  Форматирование системного раздела..."',
+                f"{fs_cmd} {p2}",
+            ]
+        else:
+            script += [
+                'echo "▶  Форматирование системного раздела..."',
+                f"{fs_cmd} {p1}",
+            ]
+        script += ['echo "✔  Диск подготовлен."']
+        cmd = ["bash", "-c", "\n".join(script)]
+
+        self._start_progress("Подготовка диска...")
+        self._log(f"Подготовка диска {device}...\n")
+
+        def _done(ok):
+            self._stop_progress(ok)
+            if ok:
+                self._log("✔  Подготовка диска завершена. Можно запускать восстановление.\n")
+                self._open_restore_disk_picker(src)
+            else:
+                self._log("✘  Подготовка диска завершилась с ошибкой.\n")
+
+        backend.run_privileged(cmd, self._log, _done)
 
     def _fetch_subvol_sizes(self, rows_by_subvol: dict):
         import subprocess
@@ -845,9 +1262,41 @@ class MirrorPage(Gtk.Box):
         self._log(f"Субволюмы: {', '.join(subvols)}\n")
 
         _at_subvol_state = {"last": None, "count": 0}
+        _progress_state = {
+            "active": True,
+            "phase": "Подготовка",
+            "last_log_ts": time.monotonic(),
+            "last_heartbeat_ts": 0.0,
+            "pulse_idx": 0,
+        }
+
+        def _start_log_heartbeat():
+            pulse = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
+
+            def _tick():
+                if not _progress_state["active"]:
+                    return False
+                now = time.monotonic()
+                idle_for = now - _progress_state["last_log_ts"]
+                since_hb = now - _progress_state["last_heartbeat_ts"]
+                if idle_for >= 8.0 and since_hb >= 8.0:
+                    symbol = pulse[_progress_state["pulse_idx"] % len(pulse)]
+                    _progress_state["pulse_idx"] += 1
+                    self._log(
+                        f"⏳ [{symbol}] { _progress_state['phase'] }... "
+                        f"{int(idle_for)}с без новых строк, процесс продолжается\n"
+                    )
+                    _progress_state["last_heartbeat_ts"] = now
+                return True
+
+            GLib.timeout_add(3000, _tick)
+
+        _start_log_heartbeat()
 
         def _filtered_log(line):
+            _progress_state["last_log_ts"] = time.monotonic()
             if line.startswith("At subvol "):
+                _progress_state["phase"] = "Приём потока btrfs"
                 name = line.strip()
                 if name != _at_subvol_state["last"]:
                     if _at_subvol_state["last"] is not None:
@@ -858,13 +1307,21 @@ class MirrorPage(Gtk.Box):
                 else:
                     _at_subvol_state["count"] += 1
             else:
+                text = line.strip()
+                if text.startswith("Субволюм "):
+                    _progress_state["phase"] = "Обработка субволюма"
+                elif text.startswith("Объём данных:"):
+                    _progress_state["phase"] = "Сохранение потока в файл"
+                elif text.startswith("✔  Субволюм"):
+                    _progress_state["phase"] = "Переход к следующему субволюму"
                 if _at_subvol_state["last"] is not None and _at_subvol_state["count"] > 1:
                     self._log(f"  → получено объектов: {_at_subvol_state['count']}\n")
                 _at_subvol_state["last"] = None
                 _at_subvol_state["count"] = 0
-                self._log(line)
+                self._log(_translate_btrfs_log_line(line))
 
         def _after_mirror(ok):
+            _progress_state["active"] = False
             if not ok:
                 GLib.idle_add(self._log, "Ошибка при btrfs send\n")
                 GLib.idle_add(self._stop_progress, False)
@@ -879,6 +1336,15 @@ class MirrorPage(Gtk.Box):
                         ok2 = save_partition_table(disk, dest)
                         GLib.idle_add(self._log, f"Таблица разделов: {'OK' if ok2 else 'ошибка'}\n")
                 GLib.idle_add(self._log, "Зеркало готово.\n")
+                # Сразу подставляем созданное зеркало в блок "Восстановить",
+                # чтобы пользователь без перезапуска видел распознанный тип и субволюмы.
+                GLib.idle_add(config.state_set, "mirror_restore_src", dest)
+                if hasattr(self, "_restore_src_row"):
+                    GLib.idle_add(self._restore_src_row.set_text, dest)
+                if hasattr(self, "_update_restore_info"):
+                    GLib.idle_add(self._update_restore_info, dest)
+                if hasattr(self, "_update_btrfs_dest_info"):
+                    GLib.idle_add(self._update_btrfs_dest_info, dest)
                 GLib.idle_add(self._stop_progress, True)
                 GLib.idle_add(setattr, self, "_busy", False)
 

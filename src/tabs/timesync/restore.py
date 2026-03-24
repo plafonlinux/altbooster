@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import tempfile
 import threading
 from pathlib import Path
 
@@ -428,12 +430,14 @@ class BorgRestoreDialog(Adw.AlertDialog):
             heading="Восстановить архив",
             body="Файлы будут распакованы в указанную папку.",
         )
+        self._cleanup_dir: Path | None = None
         self._repo_path = repo_path
         self._archive_name = archive_name
         self._log = log_fn
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         box.set_margin_top(8)
+        box.set_size_request(560, -1)
 
         info_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         icon = make_icon("drive-harddisk-symbolic", 16)
@@ -470,6 +474,11 @@ class BorgRestoreDialog(Adw.AlertDialog):
         box.append(self._cb_packages)
         box.append(self._cb_packages_only_missing)
         box.append(self._cb_dconf)
+        self._rpm_meta_hint = Gtk.Label(label="Проверка наличия списка RPM-пакетов в архиве...")
+        self._rpm_meta_hint.set_halign(Gtk.Align.START)
+        self._rpm_meta_hint.add_css_class("caption")
+        self._rpm_meta_hint.add_css_class("dim-label")
+        box.append(self._rpm_meta_hint)
 
         sep2 = Gtk.Separator()
         sep2.set_margin_top(4)
@@ -490,7 +499,7 @@ class BorgRestoreDialog(Adw.AlertDialog):
         path_row.append(pick_btn)
         box.append(path_row)
 
-        warn = Gtk.Label(label="⚠ Borg извлечёт файлы относительно выбранной папки")
+        warn = Gtk.Label(label="⚠ TimeSync извлечёт файлы относительно выбранной папки")
         warn.add_css_class("dim-label")
         warn.add_css_class("caption")
         warn.set_halign(Gtk.Align.START)
@@ -503,6 +512,38 @@ class BorgRestoreDialog(Adw.AlertDialog):
         self.set_response_appearance("restore", Adw.ResponseAppearance.DESTRUCTIVE)
         self.set_default_response("cancel")
         self.connect("response", self._on_response)
+        self._check_rpm_meta_async()
+
+    def _check_rpm_meta_async(self):
+        def _worker():
+            has_packages_meta = False
+            try:
+                items = backend.borg_list_archive(self._repo_path, self._archive_name)
+                for item in items:
+                    p = (item.get("path") or "").rstrip("/")
+                    if p.endswith("tmp/altbooster-backup-meta/packages.txt") or p.endswith("altbooster-backup-meta/packages.txt"):
+                        has_packages_meta = True
+                        break
+            except Exception:
+                has_packages_meta = False
+            GLib.idle_add(self._apply_rpm_meta_state, has_packages_meta)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _apply_rpm_meta_state(self, has_packages_meta: bool):
+        if has_packages_meta:
+            self._rpm_meta_hint.set_text("Список RPM-пакетов найден: можно включить переустановку.")
+            self._cb_packages.set_visible(True)
+            self._cb_packages_only_missing.set_visible(True)
+            self._cb_packages.set_sensitive(True)
+            self._cb_packages_only_missing.set_sensitive(self._cb_packages.get_active())
+            return
+
+        self._rpm_meta_hint.set_text("Список RPM-пакетов в архиве не найден: пункт переустановки скрыт.")
+        self._cb_packages.set_active(False)
+        self._cb_packages.set_visible(False)
+        self._cb_packages_only_missing.set_active(False)
+        self._cb_packages_only_missing.set_visible(False)
 
     def _on_pick_folder(self, _btn):
         try:
@@ -539,6 +580,95 @@ class BorgRestoreDialog(Adw.AlertDialog):
         if not target_dir:
             return
         Path(target_dir).mkdir(parents=True, exist_ok=True)
+        self._ask_user_rename_and_restore(target_dir)
+
+    def _ask_user_rename_and_restore(self, target_dir: str):
+        current_user = Path.home().name
+        detected_target_user = self._detect_home_user_from_path(target_dir)
+        if detected_target_user and detected_target_user != current_user:
+            self._prompt_archive_user_dialog(
+                target_dir,
+                detected_target_user=detected_target_user,
+                suggested_archive_user=current_user,
+            )
+            return
+
+        ask = Adw.AlertDialog(
+            heading="Проверка пользователя",
+            body=(
+                "Имя пользователя в архиве совпадает с текущим?\n\n"
+                "Если нет, ALT Booster выполнит безопасную временную распаковку "
+                "и перенесёт данные в текущий HOME без изменения исходного архива."
+            ),
+        )
+        ask.add_response("cancel", "Отмена")
+        ask.add_response("same", "Да, совпадает")
+        ask.add_response("other", "Нет, другое имя")
+        ask.set_default_response("same")
+        ask.set_close_response("cancel")
+
+        def _on_ask_response(_d, resp):
+            if resp == "cancel":
+                return
+            if resp == "same":
+                self._start_restore(target_dir, archive_user=None)
+                return
+            self._prompt_archive_user_dialog(target_dir)
+
+        ask.connect("response", _on_ask_response)
+        ask.present(self.get_root())
+
+    def _detect_home_user_from_path(self, target_dir: str) -> str | None:
+        try:
+            parts = Path(target_dir).expanduser().parts
+            if len(parts) >= 3 and parts[0] == "/" and parts[1] == "home":
+                return parts[2]
+        except Exception:
+            pass
+        return None
+
+    def _prompt_archive_user_dialog(
+        self,
+        target_dir: str,
+        detected_target_user: str | None = None,
+        suggested_archive_user: str | None = None,
+    ):
+        if detected_target_user:
+            body = (
+                f"Вы выбрали путь «/home/{detected_target_user}», он отличается от текущего пользователя.\n\n"
+                "Укажите имя пользователя, под которым был создан архив."
+            )
+        else:
+            body = "Укажите имя пользователя, под которым был создан архив (например: olduser)."
+
+        prompt = Adw.AlertDialog(
+            heading="Введите старое имя пользователя",
+            body=body,
+        )
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("olduser")
+        if suggested_archive_user:
+            entry.set_text(suggested_archive_user)
+            entry.select_region(0, -1)
+        prompt.set_extra_child(entry)
+        prompt.add_response("cancel", "Отмена")
+        prompt.add_response("continue", "Продолжить")
+        prompt.set_default_response("continue")
+        prompt.set_close_response("cancel")
+
+        def _on_prompt_response(_p, r2):
+            if r2 != "continue":
+                return
+            archive_user = entry.get_text().strip()
+            if not archive_user:
+                self._log("✘  Имя пользователя не указано. Восстановление отменено.\n")
+                return
+            self._start_restore(target_dir, archive_user=archive_user)
+
+        prompt.connect("response", _on_prompt_response)
+        prompt.present(self.get_root())
+
+    def _start_restore(self, target_dir: str, archive_user: str | None = None):
         win = self.get_root()
         if hasattr(win, "start_progress"):
             win.start_progress("Восстановление архива...")
@@ -548,16 +678,9 @@ class BorgRestoreDialog(Adw.AlertDialog):
         restore_packages = self._cb_packages.get_active()
         restore_packages_only_missing = self._cb_packages_only_missing.get_active()
         restore_dconf = self._cb_dconf.get_active()
+        use_user_remap = bool(archive_user)
 
-        def _done(ok):
-            if not ok:
-                GLib.idle_add(self._finish, False, win)
-                return
-
-            meta_dir = Path(target_dir) / "tmp" / "altbooster-backup-meta"
-            if not meta_dir.exists():
-                meta_dir = Path(target_dir) / "altbooster-backup-meta"
-
+        def _run_post_steps(meta_dir: Path):
             def _step_dconf(ok_pkgs):
                 if restore_dconf and meta_dir.exists():
                     self._log("▶  Восстановление настроек GNOME (dconf)...\n")
@@ -584,13 +707,82 @@ class BorgRestoreDialog(Adw.AlertDialog):
             else:
                 _step_packages(True)
 
-        backend.borg_extract(
-            self._repo_path, self._archive_name, target_dir, [],
-            self._log, _done,
-        )
+        def _done(ok, extracted_root: Path):
+            if not ok:
+                GLib.idle_add(self._finish, False, win)
+                return
+
+            meta_dir = extracted_root / "tmp" / "altbooster-backup-meta"
+            if not meta_dir.exists():
+                meta_dir = extracted_root / "altbooster-backup-meta"
+
+            _run_post_steps(meta_dir)
+
+        def _copy_tree_merge(src: Path, dst: Path):
+            for item in src.iterdir():
+                target = dst / item.name
+                if item.is_dir():
+                    shutil.copytree(item, target, symlinks=True, dirs_exist_ok=True)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(item, target, follow_symlinks=False)
+
+        def _run_user_remap_flow(tmp_root: Path):
+            def _worker():
+                try:
+                    home_root = tmp_root / "home"
+                    src_home = home_root / archive_user if archive_user else None
+                    if (not src_home) or (not src_home.exists()):
+                        candidates = [d for d in home_root.iterdir() if d.is_dir()] if home_root.exists() else []
+                        if len(candidates) == 1:
+                            src_home = candidates[0]
+                    if not src_home or not src_home.exists():
+                        GLib.idle_add(self._log, "✘  Не удалось найти домашний каталог в архиве для переноса.\n")
+                        GLib.idle_add(self._finish, False, win)
+                        return
+                    GLib.idle_add(self._log, f"▶  Перенос данных пользователя из {src_home} в {target_dir}...\n")
+                    _copy_tree_merge(src_home, Path(target_dir))
+                    GLib.idle_add(self._log, "   ✔ Данные пользователя перенесены\n")
+                    self._cleanup_dir = tmp_root
+                    GLib.idle_add(_done, True, tmp_root)
+                except Exception as e:
+                    GLib.idle_add(self._log, f"✘  Ошибка переноса данных пользователя: {e}\n")
+                    GLib.idle_add(self._finish, False, win)
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+        if use_user_remap:
+            tmp_root = Path(tempfile.mkdtemp(prefix="altbooster-restore-"))
+            self._log(f"▶  Временная распаковка архива для переноса пользователя: {tmp_root}\n")
+
+            def _after_extract_tmp(ok):
+                if not ok:
+                    GLib.idle_add(self._finish, False, win)
+                    try:
+                        shutil.rmtree(tmp_root, ignore_errors=True)
+                    except Exception:
+                        pass
+                    return
+                _run_user_remap_flow(tmp_root)
+
+            backend.borg_extract(
+                self._repo_path, self._archive_name, str(tmp_root), [],
+                self._log, _after_extract_tmp,
+            )
+        else:
+            backend.borg_extract(
+                self._repo_path, self._archive_name, target_dir, [],
+                self._log, lambda ok: _done(ok, Path(target_dir)),
+            )
 
     def _finish(self, ok, win):
         msg = "✔  Восстановление завершено!\n" if ok else "✘  Ошибка при восстановлении\n"
         self._log(msg)
+        if self._cleanup_dir:
+            try:
+                shutil.rmtree(self._cleanup_dir, ignore_errors=True)
+            except Exception:
+                pass
+            self._cleanup_dir = None
         if hasattr(win, "stop_progress"):
             win.stop_progress(ok)

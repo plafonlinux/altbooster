@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import socket
 import subprocess
 import threading
@@ -94,7 +93,6 @@ class BorgPage(Gtk.Box):
         btrfs_top = self._stack.get_child_by_name("btrfs")
         self._page_btrfs = self._stack.get_page(btrfs_top) if btrfs_top else None
 
-        self._fastfetch_offer_shown = False
         self._update_sections_visibility()
         threading.Thread(target=self._refresh_status_thread, daemon=True).start()
 
@@ -119,6 +117,37 @@ class BorgPage(Gtk.Box):
         container.append(inner_switcher)
         container.append(inner_stack)
         return container, inner_stack
+
+    @staticmethod
+    def _filter_entryrow_suffix_icons(row, allowed_icons: set[str]) -> None:
+        # На некоторых версиях libadwaita кнопка apply отображается как "карандаш"
+        # и может появляться динамически. Оставляем только явно разрешённые иконки.
+        def _walk(widget):
+            cur = widget.get_first_child() if hasattr(widget, "get_first_child") else None
+            while cur is not None:
+                yield cur
+                yield from _walk(cur)
+                cur = cur.get_next_sibling() if hasattr(cur, "get_next_sibling") else None
+
+        def _apply_filter():
+            for child in _walk(row):
+                try:
+                    if not hasattr(child, "get_icon_name"):
+                        continue
+                    icon = child.get_icon_name() or ""
+                    if not icon:
+                        continue
+                    # Разрешаем только нужные иконки, карандаш скрываем принудительно.
+                    if icon == "document-edit-symbolic":
+                        child.set_visible(False)
+                    elif icon in allowed_icons:
+                        child.set_visible(True)
+                except Exception:
+                    continue
+            return False
+
+        GLib.idle_add(_apply_filter)
+        GLib.timeout_add(250, _apply_filter)
 
     def _build_info_page(self):
         scroll, self._body = make_scrolled_page()
@@ -161,52 +190,19 @@ class BorgPage(Gtk.Box):
         scroll.set_vexpand(True)
         scroll.set_child(clamp)
 
-        # ── блок «Этот компьютер» (fastfetch), строка-спойлер ────────────
-        sysinfo_group = Adw.PreferencesGroup()
-        sysinfo_expander = Adw.ExpanderRow()
-        sysinfo_expander.set_title("Этот компьютер")
-        sysinfo_expander.set_expanded(False)
-
-        sysinfo_card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        sysinfo_card.set_overflow(Gtk.Overflow.HIDDEN)
-
-        def _make_info_label():
-            lbl = Gtk.Label()
-            lbl.add_css_class("monospace")
-            lbl.set_halign(Gtk.Align.START)
-            lbl.set_valign(Gtk.Align.START)
-            lbl.set_hexpand(True)
-            lbl.set_selectable(True)
-            lbl.set_wrap(False)
-            lbl.set_margin_top(12)
-            lbl.set_margin_bottom(12)
-            lbl.set_margin_start(16)
-            lbl.set_margin_end(16)
-            return lbl
-
-        self._tm_sysinfo_label = _make_info_label()
-        self._tm_sysinfo_label.set_label("Загрузка...")
-        sysinfo_card.append(self._tm_sysinfo_label)
-
-        sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
-        sep.set_margin_top(12)
-        sep.set_margin_bottom(12)
-        sysinfo_card.append(sep)
-
-        self._tm_sysinfo_label2 = _make_info_label()
-        self._tm_sysinfo_label2.set_label("")
-        sysinfo_card.append(self._tm_sysinfo_label2)
-
-        sysinfo_content_row = Gtk.ListBoxRow()
-        sysinfo_content_row.set_selectable(False)
-        sysinfo_content_row.set_activatable(False)
-        sysinfo_content_row.set_child(sysinfo_card)
-        sysinfo_expander.add_row(sysinfo_content_row)
-
-        sysinfo_group.add(sysinfo_expander)
-        self._tm_box.append(sysinfo_group)
-
-        threading.Thread(target=self._tm_load_sysinfo, daemon=True).start()
+        about_group = Adw.PreferencesGroup()
+        about_group.set_title("О вкладке TimeSync")
+        about_row = Adw.ActionRow()
+        about_row.set_title("Что здесь можно сделать")
+        about_row.set_subtitle(
+            "TimeSync — это центр резервного копирования и восстановления в ALT Booster.\n"
+            "Здесь вы настраиваете место хранения, создаёте архивы и при необходимости быстро возвращаете систему к рабочему состоянию.\n"
+            "Этот режим подходит как для регулярных бэкапов, так и для переноса системы на другой диск."
+        )
+        about_row.set_activatable(False)
+        about_row.add_prefix(make_icon("dialog-information-symbolic"))
+        about_group.add(about_row)
+        self._tm_box.append(about_group)
 
         # ── хранилище Borg + экспорт .tar (одна карточка, выше списка архивов) ─
         self._tm_repo_slot = Gtk.Box()
@@ -297,83 +293,6 @@ class BorgPage(Gtk.Box):
         scroll.connect("map", lambda _: (self._tm_refresh_archives(), self._move_repo_group_to(self._tm_repo_slot)))
         return scroll
 
-    def _tm_load_sysinfo(self):
-        _ansi = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]')
-        for cmd in [
-            ["fastfetch", "--logo", "none", "--pipe"],
-            ["neofetch", "--off", "--stdout"],
-        ]:
-            try:
-                r = subprocess.run(cmd, capture_output=True, text=True,
-                                   encoding="utf-8", timeout=8)
-                if r.returncode == 0 and r.stdout.strip():
-                    text = _ansi.sub("", r.stdout).strip()
-                    col1, col2 = self._tm_split_sysinfo(text)
-                    GLib.idle_add(self._tm_sysinfo_label.set_label, col1)
-                    GLib.idle_add(self._tm_sysinfo_label2.set_label, col2)
-                    return
-            except Exception:
-                continue
-        GLib.idle_add(self._tm_sysinfo_label.set_label, "fastfetch не установлен")
-        GLib.idle_add(self._offer_fastfetch_install)
-
-    def _offer_fastfetch_install(self):
-        if self._fastfetch_offer_shown:
-            return
-        self._fastfetch_offer_shown = True
-        dialog = Adw.AlertDialog(
-            heading="fastfetch не установлен",
-            body="fastfetch используется для отображения информации о системе.\n\nУстановить его сейчас?",
-        )
-        dialog.add_response("later", "Не сейчас")
-        dialog.add_response("install", "Установить")
-        dialog.set_response_appearance("install", Adw.ResponseAppearance.SUGGESTED)
-        dialog.set_default_response("install")
-        dialog.connect("response", self._on_fastfetch_install_response)
-        dialog.present(self.get_root())
-
-    def _on_fastfetch_install_response(self, _dialog, response):
-        if response != "install":
-            return
-        win = self.get_root()
-        self._log("\n▶  Установка fastfetch...\n")
-        if hasattr(win, "start_progress"):
-            win.start_progress("Установка fastfetch...")
-
-        def _done(ok):
-            self._log("✔  fastfetch установлен!\n" if ok else "✘  Ошибка установки fastfetch\n")
-            if hasattr(win, "stop_progress"):
-                GLib.idle_add(win.stop_progress, ok)
-            if ok:
-                threading.Thread(target=self._tm_load_sysinfo, daemon=True).start()
-
-        backend.run_epm(["epm", "-i", "fastfetch"], self._log, _done)
-
-    @staticmethod
-    def _tm_split_sysinfo(text: str) -> tuple[str, str]:
-        lines = text.split("\n")
-        blocks, current = [], []
-        for line in lines:
-            if line.strip():
-                current.append(line)
-            elif current:
-                blocks.append(current)
-                current = []
-        if current:
-            blocks.append(current)
-        if len(blocks) <= 1:
-            return text, ""
-        _hw = re.compile(r'GHz|GiB|MiB|\d{3,4}x\d{3,4}|\d+ Hz|btrfs|ext4|xfs|ntfs')
-        hw, sw = [], []
-        for blk in blocks:
-            if any(_hw.search(l) for l in blk):
-                hw.append(blk)
-            else:
-                sw.append(blk)
-        col1 = "\n\n".join("\n".join(b) for b in hw)
-        col2 = "\n\n".join("\n".join(b) for b in sw)
-        return col2, col1
-
     def _move_repo_group_to(self, slot: Gtk.Box):
         parent = self._repo_group.get_parent()
         if parent is slot:
@@ -382,13 +301,9 @@ class BorgPage(Gtk.Box):
             parent.remove(self._repo_group)
         simple = (slot is self._tm_repo_slot)
         self._repo_group.set_title("Куда сохранять" if simple else "Расположение")
-        if simple:
-            self._repo_group.set_description(
-                "Создается архив резервной копии выбранных данных с возможностью переноса на другой ПК "
-                "для восстановления. Ниже можно включить опцию архивирования для удобного переноса."
-            )
-        else:
-            self._repo_group.set_description(None)
+        self._repo_group.set_description(None)
+        if hasattr(self, "_row_repo_hint"):
+            self._row_repo_hint.set_visible(simple)
         self._row_repo_path.set_title("Папка для резервных копий" if simple else "Путь к хранилищу")
         self._row_passphrase.set_visible(True)
         slot.append(self._repo_group)
@@ -489,8 +404,9 @@ class BorgPage(Gtk.Box):
             self._tm_show_placeholder("empty", error)
             return
 
-        for archive in archives:
-            card = self._tm_build_archive_card(archive)
+        total = len(archives)
+        for idx, archive in enumerate(archives, start=1):
+            card = self._tm_build_archive_card(archive, idx, total)
             self._tm_carousel.append(card)
 
         self._tm_spinner.set_spinning(False)
@@ -504,7 +420,7 @@ class BorgPage(Gtk.Box):
         self._tm_update_backup_actions(True)
         self._tm_update_nav_buttons()
 
-    def _tm_build_archive_card(self, archive: dict) -> Gtk.Widget:
+    def _tm_build_archive_card(self, archive: dict, idx: int = 0, total: int = 0) -> Gtk.Widget:
         name = archive.get("name", "")
         raw = archive.get("start") or archive.get("time") or ""
         date_part = raw[:10] if len(raw) >= 10 else raw
@@ -587,6 +503,18 @@ class BorgPage(Gtk.Box):
         badge.set_ellipsize(Pango.EllipsizeMode.END)
         badge.set_max_width_chars(22)
         overlay.add_overlay(badge)
+
+        if idx > 0 and total > 0:
+            num_badge = Gtk.Label(label=f"Архив {idx} из {total}")
+            num_badge.add_css_class("ab-source-badge")
+            num_badge.add_css_class("accent")
+            num_badge.set_halign(Gtk.Align.END)
+            num_badge.set_valign(Gtk.Align.END)
+            num_badge.set_margin_end(12)
+            num_badge.set_margin_bottom(12)
+            num_badge.set_hexpand(False)
+            num_badge.set_vexpand(False)
+            overlay.add_overlay(num_badge)
 
         return overlay
 
@@ -1065,8 +993,18 @@ class BorgPage(Gtk.Box):
         self._repo_group = Adw.PreferencesGroup()
         self._repo_group.set_title("Расположение")
 
+        self._row_repo_hint = Adw.ActionRow()
+        self._row_repo_hint.set_title("Выберите место хранения")
+        self._row_repo_hint.set_subtitle(
+            "Резервные копии TimeSync можно хранить локально, в сети или в облаке."
+        )
+        self._row_repo_hint.set_activatable(False)
+        self._row_repo_hint.add_prefix(make_icon("dialog-information-symbolic"))
+        self._row_repo_hint.set_visible(False)
+        self._repo_group.add(self._row_repo_hint)
+
         self._row_dest_type = Adw.ActionRow()
-        self._row_dest_type.set_title("Тип назначения")
+        self._row_dest_type.set_title("Место хранения архивов:")
         _dest_model = Gtk.StringList.new([
             "Локальная папка / NFS / SMB",
             "SSH / SFTP",
@@ -1082,8 +1020,15 @@ class BorgPage(Gtk.Box):
         self._row_repo_path = Adw.EntryRow()
         self._row_repo_path.set_title("Путь к хранилищу")
         self._row_repo_path.set_text(config.state_get("borg_repo_path", "") or "")
-        self._row_repo_path.set_show_apply_button(True)
+        self._row_repo_path.set_show_apply_button(False)
         self._row_repo_path.connect("apply", lambda _: self._save_repo_settings())
+
+        self._repo_ready_icon = make_icon("object-select-symbolic")
+        self._repo_ready_icon.add_css_class("success")
+        self._repo_ready_icon.set_valign(Gtk.Align.CENTER)
+        self._repo_ready_icon.set_visible(False)
+        self._repo_ready_icon.set_tooltip_text("Хранилище инициализировано")
+        self._row_repo_path.add_suffix(self._repo_ready_icon)
 
         pick_folder_btn = Gtk.Button()
         pick_folder_btn.set_icon_name("folder-open-symbolic")
@@ -1092,13 +1037,22 @@ class BorgPage(Gtk.Box):
         pick_folder_btn.set_tooltip_text("Выбрать папку")
         pick_folder_btn.connect("clicked", self._on_pick_repo_folder)
         self._row_repo_path.add_suffix(pick_folder_btn)
+        self._filter_entryrow_suffix_icons(
+            self._row_repo_path,
+            {"folder-open-symbolic", "object-select-symbolic"},
+        )
         self._repo_group.add(self._row_repo_path)
 
         self._row_passphrase = Adw.PasswordEntryRow()
         self._row_passphrase.set_title("Пароль шифрования (опционально)")
         self._row_passphrase.set_text(config.state_get("borg_passphrase", "") or "")
-        self._row_passphrase.set_show_apply_button(True)
+        self._row_passphrase.set_show_apply_button(False)
         self._row_passphrase.connect("apply", lambda _: self._save_repo_settings())
+        self._row_passphrase.connect("changed", lambda _: self._save_repo_settings())
+        self._filter_entryrow_suffix_icons(
+            self._row_passphrase,
+            {"view-reveal-symbolic", "view-conceal-symbolic"},
+        )
         self._repo_group.add(self._row_passphrase)
 
         self._row_pubkey = Adw.ActionRow()
@@ -1151,8 +1105,7 @@ class BorgPage(Gtk.Box):
         self._btn_init_repo.set_halign(Gtk.Align.CENTER)
         self._btn_init_repo.set_margin_top(16)
         self._btn_init_repo.connect("clicked", self._on_init_repo)
-
-        self._repo_group.add(self._btn_init_repo)
+        self._btn_init_repo.set_visible(False)
 
         self._sw_tar_export = Adw.SwitchRow()
         self._sw_tar_export.set_title("Сохранять .tar после бэкапа")
@@ -1167,9 +1120,12 @@ class BorgPage(Gtk.Box):
         self._row_tar_path = Adw.EntryRow()
         self._row_tar_path.set_title("Папка для .tar")
         self._row_tar_path.set_text(config.state_get("borg_tar_export_path", "") or "")
-        self._row_tar_path.set_show_apply_button(True)
+        self._row_tar_path.set_show_apply_button(False)
         self._row_tar_path.connect(
             "apply", lambda _: config.state_set("borg_tar_export_path", self._row_tar_path.get_text().strip())
+        )
+        self._row_tar_path.connect(
+            "changed", lambda _: config.state_set("borg_tar_export_path", self._row_tar_path.get_text().strip())
         )
         self._row_tar_path.set_visible(config.state_get("borg_tar_export_enabled", False))
         tar_pick_btn = Gtk.Button()
@@ -1178,6 +1134,10 @@ class BorgPage(Gtk.Box):
         tar_pick_btn.set_valign(Gtk.Align.CENTER)
         tar_pick_btn.connect("clicked", self._on_pick_tar_folder)
         self._row_tar_path.add_suffix(tar_pick_btn)
+        self._filter_entryrow_suffix_icons(
+            self._row_tar_path,
+            {"folder-open-symbolic"},
+        )
         self._repo_group.add(self._row_tar_path)
 
         pubkey = backend.borg_get_pubkey()
@@ -1320,7 +1280,7 @@ class BorgPage(Gtk.Box):
 
         add_row = Adw.EntryRow()
         add_row.set_title("Добавить путь")
-        add_row.set_show_apply_button(True)
+        add_row.set_show_apply_button(False)
         add_row.connect("apply", self._on_add_custom_path)
 
         folder_btn = Gtk.Button()
@@ -1330,6 +1290,10 @@ class BorgPage(Gtk.Box):
         folder_btn.set_tooltip_text("Выбрать папку")
         folder_btn.connect("clicked", self._on_pick_custom_path)
         add_row.add_suffix(folder_btn)
+        self._filter_entryrow_suffix_icons(
+            add_row,
+            {"folder-open-symbolic"},
+        )
 
         self._grp_custom.add(add_row)
         self._add_entry_row = add_row
@@ -1626,11 +1590,14 @@ class BorgPage(Gtk.Box):
             self._row_repo_status.set_subtitle(repo_path)
             if initialized:
                 set_status_ok(self._icon_repo)
+                self._repo_ready_icon.set_visible(True)
                 self._row_repo_status.set_subtitle(repo_path + " ✔")
             else:
                 set_status_error(self._icon_repo)
+                self._repo_ready_icon.set_visible(False)
                 self._row_repo_status.set_subtitle(repo_path + " — не инициализировано")
         else:
+            self._repo_ready_icon.set_visible(False)
             self._row_repo_status.set_subtitle("не настроено")
             clear_status(self._icon_repo)
 
@@ -1669,12 +1636,14 @@ class BorgPage(Gtk.Box):
             card.append(lbl)
             self._btrfs_carousel.append(card)
         else:
-            for snap in snapshots:
-                self._btrfs_carousel.append(self._btrfs_build_snapshot_card(snap))
+            total = len(snapshots)
+            for idx, snap in enumerate(snapshots, start=1):
+                display_idx = total - idx + 1
+                self._btrfs_carousel.append(self._btrfs_build_snapshot_card(snap, display_idx, total))
 
         self._btrfs_update_nav_buttons()
 
-    def _btrfs_build_snapshot_card(self, snap: dict) -> Gtk.Widget:
+    def _btrfs_build_snapshot_card(self, snap: dict, idx: int = 0, total: int = 0) -> Gtk.Widget:
         ensure_ab_source_badge_styles()
 
         overlay = Gtk.Overlay()
@@ -1729,6 +1698,18 @@ class BorgPage(Gtk.Box):
         badge.set_ellipsize(Pango.EllipsizeMode.END)
         badge.set_max_width_chars(22)
         overlay.add_overlay(badge)
+
+        if idx > 0 and total > 0:
+            num_badge = Gtk.Label(label=f"Снимок {idx} из {total}")
+            num_badge.add_css_class("ab-source-badge")
+            num_badge.add_css_class("accent")
+            num_badge.set_halign(Gtk.Align.END)
+            num_badge.set_valign(Gtk.Align.END)
+            num_badge.set_margin_end(12)
+            num_badge.set_margin_bottom(12)
+            num_badge.set_hexpand(False)
+            num_badge.set_vexpand(False)
+            overlay.add_overlay(num_badge)
 
         return overlay
 
@@ -1905,8 +1886,7 @@ class BorgPage(Gtk.Box):
             )
             def _resp(d, r):
                 if r == Gtk.ResponseType.ACCEPT:
-                    self._row_repo_path.set_text(d.get_file().get_path())
-                    self._save_repo_settings()
+                    self._auto_init_repo_for_selected_folder(d.get_file().get_path())
                 d.unref()
             fc.connect("response", _resp)
             fc.show()
@@ -1915,10 +1895,22 @@ class BorgPage(Gtk.Box):
         try:
             folder = dialog.select_folder_finish(result)
             if folder:
-                self._row_repo_path.set_text(folder.get_path())
-                self._save_repo_settings()
+                self._auto_init_repo_for_selected_folder(folder.get_path())
         except GLib.Error:
             pass
+
+    def _auto_init_repo_for_selected_folder(self, folder_path: str):
+        path = (folder_path or "").strip()
+        if not path:
+            return
+        repo_path = self._prepare_repo_path_for_init(path)
+        self._row_repo_path.set_text(repo_path)
+        self._save_repo_settings()
+        if not backend.is_borg_installed():
+            self._log("ℹ Borg не установлен: выбрана папка хранилища, инициализация будет доступна после установки Borg.\n")
+            self._refresh_status_thread()
+            return
+        self._start_repo_init(repo_path, auto=True)
 
     def _on_tar_export_toggled(self, sw, _):
         active = sw.get_active()
@@ -2025,16 +2017,23 @@ class BorgPage(Gtk.Box):
             return
         repo_path = self._prepare_repo_path_for_init(repo_path)
         self._save_repo_settings()
+        self._start_repo_init(repo_path, auto=False)
+
+    def _start_repo_init(self, repo_path: str, auto: bool = False):
         if backend.is_repo_initialized(repo_path):
-            self._log(f"✔ Хранилище уже инициализировано: {repo_path}\n")
+            prefix = "ℹ " if auto else "✔ "
+            self._log(f"{prefix}Хранилище уже инициализировано: {repo_path}\n")
             GLib.idle_add(self._refresh_status_thread)
             return
         win = self.get_root()
         if hasattr(win, "start_progress"):
             win.start_progress("Инициализация хранилища...")
-        self._log(f"\n▶  Инициализация хранилища в {repo_path}...\n")
+        self._log(f"\n▶  {'Автоинициализация' if auto else 'Инициализация'} хранилища в {repo_path}...\n")
         def _on_init_done(ok):
-            self._log("✔ Готово\n" if ok else "✘ Ошибка инициализации\n")
+            if ok:
+                self._log("✔ Готово\n")
+            else:
+                self._log("✘ Ошибка инициализации\n")
             if hasattr(win, "stop_progress"):
                 win.stop_progress(ok)
             self._refresh_status_thread()
@@ -2403,16 +2402,27 @@ class BorgPage(Gtk.Box):
     def _build_btrfs_tab(self):
         scroll, body = make_scrolled_page()
 
-        status_group = Adw.PreferencesGroup(title="Статус")
-        body.append(status_group)
+        info_group = Adw.PreferencesGroup(title="О режиме снимков")
+        body.append(info_group)
 
-        row_btrfs_ok = Adw.ActionRow(title="$HOME находится на Btrfs", subtitle=backend.get_btrfs_mount_for_home())
-        row_btrfs_ok.add_prefix(make_icon("emblem-ok-symbolic"))
-        status_group.add(row_btrfs_ok)
+        row_info = Adw.ActionRow()
+        row_info.set_title("Как работает этот режим")
+        row_info.set_subtitle(
+            "Снимок фиксирует текущее состояние системы и позволяет быстро откатиться к рабочей точке.\n\n"
+            "Параметр «эксклюзивно» — это уникальный объём данных, который хранится только в этом снимке. "
+            "Именно он показывает, сколько места снимок реально добавляет на диске."
+        )
+        row_info.set_activatable(False)
+        row_info.add_prefix(make_icon("dialog-information-symbolic"))
+        info_group.add(row_info)
 
-        self._btrfs_snapshots_dir_row = Adw.ActionRow(title="Папка для снимков", subtitle=str(backend.get_snapshots_dir()))
+        self._btrfs_snapshots_dir_row = Adw.ActionRow(
+            title="Расположение снимков",
+            subtitle=str(backend.get_snapshots_dir()),
+        )
+        self._btrfs_snapshots_dir_row.set_activatable(False)
         self._btrfs_snapshots_dir_row.add_prefix(make_icon("folder-symbolic"))
-        status_group.add(self._btrfs_snapshots_dir_row)
+        info_group.add(self._btrfs_snapshots_dir_row)
 
         snapshots_label = Gtk.Label(label="Снэпшоты")
         snapshots_label.add_css_class("heading")
@@ -2496,7 +2506,7 @@ class BorgPage(Gtk.Box):
         self._btrfs_keep_row.set_value(config.state_get("btrfs_keep_count", 24))
         self._btrfs_keep_row.connect("notify::value", self._btrfs_on_keep_count_changed)
         schedule_group.add(self._btrfs_keep_row)
-        
+
         self._btrfs_update_schedule_ui(self._btrfs_sw_auto.get_active())
         scroll.connect("map", lambda _: self._btrfs_refresh_list())
 
