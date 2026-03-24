@@ -610,7 +610,7 @@ class BorgPage(Gtk.Box):
             self._tm_action_row.set_visible(False)
             self._tm_placeholder.set_icon_name("drive-harddisk-symbolic")
             self._tm_placeholder.set_title("Хранилище не настроено")
-            self._tm_placeholder.set_description("Настройте Borg-хранилище в разделе «Ручной режим»")
+            self._tm_placeholder.set_description("Настройте хранилище TimeSync в разделе «Ручной режим»")
             btn = Gtk.Button(label="Перейти к настройке")
             btn.add_css_class("pill")
             btn.connect("clicked", lambda _: self._go_to_storage())
@@ -1030,7 +1030,7 @@ class BorgPage(Gtk.Box):
         self._body.append(group)
 
         self._row_borg = Adw.ActionRow()
-        self._row_borg.set_title("BorgBackup")
+        self._row_borg.set_title("Движок TimeSync")
         self._icon_borg = make_status_icon()
         self._btn_install = Gtk.Button(label="Установить")
         self._btn_install.add_css_class("suggested-action")
