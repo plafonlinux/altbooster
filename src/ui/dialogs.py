@@ -108,11 +108,13 @@ class AppEditDialog(Adw.PreferencesDialog):
 
             edit_btn = Gtk.Button(icon_name="document-edit-symbolic")
             edit_btn.set_valign(Gtk.Align.CENTER)
+            edit_btn.set_tooltip_text("Редактировать")
             edit_btn.add_css_class("flat")
             edit_btn.connect("clicked", lambda _, idx=i: self._on_edit_source(idx))
 
             del_btn = Gtk.Button(icon_name="user-trash-symbolic")
             del_btn.set_valign(Gtk.Align.CENTER)
+            del_btn.set_tooltip_text("Удалить")
             del_btn.add_css_class("flat")
             del_btn.add_css_class("destructive-action")
             del_btn.connect("clicked", lambda _, idx=i: self._on_delete_source(idx))

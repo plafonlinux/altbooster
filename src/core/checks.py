@@ -19,7 +19,7 @@ def _iter_xdg_desktop_files() -> list[Path]:
     global _desktop_files_cache
     with _desktop_files_lock:
         if _desktop_files_cache is not None:
-            return _desktop_files_cache
+            return list(_desktop_files_cache)
     home = Path.home()
     dirs = [
         home / ".local/share/applications",

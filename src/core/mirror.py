@@ -8,6 +8,10 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+import gi
+gi.require_version("GLib", "2.0")
+from gi.repository import GLib
+
 from core import config
 
 _ALWAYS_EXCLUDES = [
@@ -157,30 +161,25 @@ def _build_rsync_excludes(optional_includes: list[str]) -> list[str]:
 
 def _run_mirror_async(cmd: list[str], on_line, on_done, cwd: str | None = None):
     def _worker():
+        ok = False
         try:
-            proc = subprocess.Popen(
+            with subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace",
                 cwd=cwd,
-            )
-            for line in proc.stdout:
-                if on_line:
-                    import gi
-                    gi.require_version("GLib", "2.0")
-                    from gi.repository import GLib
-                    GLib.idle_add(on_line, line)
-            proc.wait()
-            ok = proc.returncode == 0
+            ) as proc:
+                for line in proc.stdout:
+                    if on_line:
+                        GLib.idle_add(on_line, line)
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                ok = proc.returncode == 0
         except Exception as e:
-            ok = False
             if on_line:
-                import gi
-                gi.require_version("GLib", "2.0")
-                from gi.repository import GLib
                 GLib.idle_add(on_line, f"Ошибка: {e}\n")
-        import gi
-        gi.require_version("GLib", "2.0")
-        from gi.repository import GLib
         GLib.idle_add(on_done, ok)
     threading.Thread(target=_worker, daemon=True).start()
 
@@ -523,47 +522,41 @@ def generate_newsync_btrfs(dest_dir: str, device: str, subvolumes: list[str], ue
 def restore_to_disk(mirror_dir: str, target_device: str, on_line, on_done):
     info = detect_mirror_type(mirror_dir)
     if not info:
-        import gi
-        gi.require_version("GLib", "2.0")
-        from gi.repository import GLib
         GLib.idle_add(on_line, "Ошибка: не удалось определить тип зеркала\n")
         GLib.idle_add(on_done, False)
         return
 
     script = Path(mirror_dir) / "newsync.sh"
     if not script.exists():
-        import gi
-        gi.require_version("GLib", "2.0")
-        from gi.repository import GLib
         GLib.idle_add(on_line, "Ошибка: newsync.sh не найден в папке зеркала\n")
         GLib.idle_add(on_done, False)
         return
 
     def _worker():
-        import gi
-        gi.require_version("GLib", "2.0")
-        from gi.repository import GLib
-
         env = os.environ.copy()
-        env["TARGET_DISK"] = target_device.lstrip("/dev/") if target_device.startswith("/dev/") else target_device
+        env["TARGET_DISK"] = target_device.removeprefix("/dev/") if target_device.startswith("/dev/") else target_device
         env["NEWSYNC_AUTO"] = "1"
 
         auto_script = _build_auto_restore_script(mirror_dir, target_device, info)
 
         GLib.idle_add(on_line, f"Восстановление на {target_device}...\n")
+        ok = False
         try:
-            proc = subprocess.Popen(
+            with subprocess.Popen(
                 ["sudo", "-n", "bash", "-c", auto_script],
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace",
-            )
-            for line in proc.stdout:
-                GLib.idle_add(on_line, line)
-            proc.wait()
-            ok = proc.returncode == 0
+            ) as proc:
+                for line in proc.stdout:
+                    GLib.idle_add(on_line, line)
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                ok = proc.returncode == 0
         except Exception as e:
             GLib.idle_add(on_line, f"Ошибка: {e}\n")
-            ok = False
         GLib.idle_add(on_done, ok)
 
     threading.Thread(target=_worker, daemon=True).start()
@@ -574,67 +567,81 @@ def _build_auto_restore_script(mirror_dir: str, target_device: str, info: dict) 
     uefi = is_uefi()
     is_btrfs = info["type"] in ("btrfs", "btrfs_recv")
 
+    q_mirror = shlex.quote(mirror_dir)
+    q_target = shlex.quote(target_device)
+    q_disk = shlex.quote(disk)
+
     lines = [
         "set -e",
-        f'MIRROR_DIR="{mirror_dir}"',
-        f'TARGET="{target_device}"',
+        f'MIRROR_DIR={q_mirror}',
+        f'TARGET={q_target}',
         "",
-        f'sfdisk < "$MIRROR_DIR/partition_table.sfdisk" "{disk}"',
+        f'sfdisk < "$MIRROR_DIR/partition_table.sfdisk" {q_disk}',
         "sleep 2",
-        f"partprobe {disk}",
+        f"partprobe {q_disk}",
         "",
     ]
 
     if uefi:
         root_part = _partition_path(target_device, 2)
         efi_part = _partition_path(target_device, 1)
+        q_root = shlex.quote(root_part)
+        q_efi = shlex.quote(efi_part)
         lines += [
-            f"mkfs.fat -F32 {efi_part}",
-            f"mkfs.{'btrfs -f' if is_btrfs else 'ext4 -F'} {root_part}",
+            f"mkfs.fat -F32 {q_efi}",
+            f"mkfs.{'btrfs -f' if is_btrfs else 'ext4 -F'} {q_root}",
             "",
         ]
     else:
         root_part = _partition_path(target_device, 1)
+        q_root = shlex.quote(root_part)
+        q_efi = None
         lines += [
-            f"mkfs.{'btrfs -f' if is_btrfs else 'ext4 -F'} {root_part}",
+            f"mkfs.{'btrfs -f' if is_btrfs else 'ext4 -F'} {q_root}",
             "",
         ]
 
     if info["type"] == "rsync":
-        lines += ["mkdir -p /mnt/target", f"mount {root_part} /mnt/target"]
+        lines += ["mkdir -p /mnt/target", f"mount {q_root} /mnt/target"]
         if uefi:
-            lines += [f"mkdir -p /mnt/target/boot/efi", f"mount {efi_part} /mnt/target/boot/efi"]
-        lines.append(f'rsync -aAX "$MIRROR_DIR/rootfs/" /mnt/target/')
+            lines += ["mkdir -p /mnt/target/boot/efi", f"mount {q_efi} /mnt/target/boot/efi"]
+        lines.append('rsync -aAX "$MIRROR_DIR/rootfs/" /mnt/target/')
 
     elif info["type"] == "tar":
-        lines += ["mkdir -p /mnt/target", f"mount {root_part} /mnt/target"]
+        lines += ["mkdir -p /mnt/target", f"mount {q_root} /mnt/target"]
         if uefi:
-            lines += [f"mkdir -p /mnt/target/boot/efi", f"mount {efi_part} /mnt/target/boot/efi"]
-        lines.append(f'tar -xzpf "$MIRROR_DIR"/rootfs-*.tar.gz -C /mnt/target/')
+            lines += ["mkdir -p /mnt/target/boot/efi", f"mount {q_efi} /mnt/target/boot/efi"]
+        lines.append('tar -xzpf "$MIRROR_DIR"/rootfs-*.tar.gz -C /mnt/target/')
 
     elif info["type"] == "btrfs":
-        lines += ["mkdir -p /mnt/target", f"mount {root_part} /mnt/target"]
+        lines += ["mkdir -p /mnt/target", f"mount {q_root} /mnt/target"]
         if uefi:
-            lines += [f"mkdir -p /mnt/target/boot/efi", f"mount {efi_part} /mnt/target/boot/efi"]
+            lines += ["mkdir -p /mnt/target/boot/efi", f"mount {q_efi} /mnt/target/boot/efi"]
         for subvol in info.get("subvols", []):
-            lines.append(f'btrfs receive /mnt/target < "$MIRROR_DIR/{subvol}.btrfs"')
+            q_sv = shlex.quote(subvol)
+            lines += [
+                f'SUBVOL={q_sv}',
+                'btrfs receive /mnt/target < "$MIRROR_DIR/${SUBVOL}.btrfs"',
+            ]
 
     elif info["type"] == "btrfs_recv":
         names = info.get("subvols", [])
-        lines += ["mkdir -p /mnt/btrfs_root", f"mount -o subvolid=5 {root_part} /mnt/btrfs_root", ""]
+        lines += ["mkdir -p /mnt/btrfs_root", f"mount -o subvolid=5 {q_root} /mnt/btrfs_root", ""]
         for name in names:
+            q_name = shlex.quote(name)
             lines += [
-                f'btrfs send "$MIRROR_DIR/.snap_{name}_prev" | btrfs receive /mnt/btrfs_root/',
-                f'mv /mnt/btrfs_root/.snap_{name}_prev /mnt/btrfs_root/{name}',
+                f'NAME={q_name}',
+                'btrfs send "$MIRROR_DIR/.snap_${NAME}_prev" | btrfs receive /mnt/btrfs_root/',
+                'mv /mnt/btrfs_root/.snap_${NAME}_prev /mnt/btrfs_root/$NAME',
             ]
         lines += ["", "umount /mnt/btrfs_root", "rmdir /mnt/btrfs_root", ""]
         root_name = next((n for n in names if n in ("@", "root")), names[0] if names else "@")
         home_name = next((n for n in names if n in ("@home", "home")), None)
-        lines += ["mkdir -p /mnt/target", f"mount -o subvol={root_name} {root_part} /mnt/target"]
+        lines += ["mkdir -p /mnt/target", f"mount -o subvol={shlex.quote(root_name)} {q_root} /mnt/target"]
         if home_name:
-            lines += ["mkdir -p /mnt/target/home", f"mount -o subvol={home_name} {root_part} /mnt/target/home"]
+            lines += ["mkdir -p /mnt/target/home", f"mount -o subvol={shlex.quote(home_name)} {q_root} /mnt/target/home"]
         if uefi:
-            lines += [f"mkdir -p /mnt/target/boot/efi", f"mount {efi_part} /mnt/target/boot/efi"]
+            lines += ["mkdir -p /mnt/target/boot/efi", f"mount {q_efi} /mnt/target/boot/efi"]
 
     lines += [
         "",
@@ -643,7 +650,7 @@ def _build_auto_restore_script(mirror_dir: str, target_device: str, info: dict) 
         "mount -t sysfs sysfs /mnt/target/sys",
         "[ -d /sys/firmware/efi ] && mount --bind /sys/firmware/efi/efivars /mnt/target/sys/firmware/efi/efivars || true",
         "",
-        f'chroot /mnt/target grub-install "{disk}"',
+        f'chroot /mnt/target grub-install {q_disk}',
         "chroot /mnt/target update-grub",
         "umount -R /mnt/target",
         'echo "Восстановление завершено."',

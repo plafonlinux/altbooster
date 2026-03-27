@@ -1,5 +1,6 @@
 
 import os
+import shlex
 import subprocess
 import tempfile
 import threading
@@ -36,11 +37,12 @@ def _build_fairlight_cmd() -> list:
         "}\\n"
         "ctl.!default pulse\\n"
     )
+    asoundrc = shlex.quote(os.path.join(user_home, ".asoundrc"))
     return [
         "bash", "-c",
         f"apt-get install -y alsa-plugins-pulse && "
         f"printf '{asound_content}' > /etc/asound.conf && "
-        f"printf '{asound_content}' > '{user_home}/.asoundrc'",
+        f"printf '{asound_content}' > {asoundrc}",
     ]
 
 
@@ -344,6 +346,11 @@ class DaVinciPage(Gtk.Box):
                 GLib.idle_add(self._log, "▶  Распаковка архива...\n")
                 with tempfile.TemporaryDirectory() as tmp:
                     with zipfile.ZipFile(path) as zf:
+                        real_tmp = os.path.realpath(tmp)
+                        for name in zf.namelist():
+                            dest = os.path.realpath(os.path.join(real_tmp, name))
+                            if not dest.startswith(real_tmp + os.sep) and dest != real_tmp:
+                                raise ValueError(f"Опасный путь в архиве: {name}")
                         zf.extractall(tmp)
                     run_files = [
                         os.path.join(root, fname)
@@ -435,7 +442,8 @@ class DaVinciPage(Gtk.Box):
             try:
                 with tempfile.TemporaryDirectory() as tmp:
                     arch = os.path.join(tmp, "aac.tar.gz")
-                    urllib.request.urlretrieve(_AAC_URL, arch)
+                    with urllib.request.urlopen(_AAC_URL, timeout=60) as resp, open(arch, "wb") as f:
+                        f.write(resp.read())
                     backend.install_aac_codec(
                         arch, self._log,
                         lambda ok: (
@@ -588,7 +596,8 @@ class DaVinciPage(Gtk.Box):
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 arch = os.path.join(tmp, "aac.tar.gz")
-                urllib.request.urlretrieve(_AAC_URL, arch)
+                with urllib.request.urlopen(_AAC_URL, timeout=60) as resp, open(arch, "wb") as f:
+                    f.write(resp.read())
                 return backend.run_privileged_sync(
                     ["bash", "-c",
                      f"tar xzf '{arch}' -C /tmp && "

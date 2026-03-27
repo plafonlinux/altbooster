@@ -3,10 +3,12 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import threading
+import traceback
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -259,7 +261,7 @@ def borg_version() -> str | None:
         if r.returncode == 0:
             return r.stdout.strip()
     except Exception:
-        pass
+        config.log_exception("borg_version")
     return None
 
 
@@ -305,24 +307,55 @@ def borg_repo_info(repo_path: str) -> dict | None:
         if r.returncode == 0:
             return json.loads(r.stdout)
     except Exception:
-        pass
+        config.log_exception("borg_repo_info")
     return None
+
+
+_current_borg_proc: subprocess.Popen | None = None
+_current_borg_proc_lock = threading.Lock()
+_borg_cancel_event = threading.Event()
+
+
+def cancel_borg() -> None:
+    _borg_cancel_event.set()
+    with _current_borg_proc_lock:
+        proc = _current_borg_proc
+    if proc and proc.poll() is None:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
 
 
 def _run_borg_async(cmd: list, on_line, on_done, cwd: str | None = None, env: dict | None = None) -> None:
     def _worker():
+        global _current_borg_proc
         ok = False
+        _borg_cancel_event.clear()
         try:
-            proc = subprocess.Popen(
+            with subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8",
                 cwd=cwd, env=env,
-            )
-            for line in proc.stdout:
-                GLib.idle_add(on_line, line)
-            proc.wait()
-            ok = proc.returncode in (0, 1)
+            ) as proc:
+                with _current_borg_proc_lock:
+                    _current_borg_proc = proc
+                try:
+                    for line in proc.stdout:
+                        if _borg_cancel_event.is_set():
+                            proc.terminate()
+                            break
+                        GLib.idle_add(on_line, line)
+                finally:
+                    with _current_borg_proc_lock:
+                        _current_borg_proc = None
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                ok = proc.returncode in (0, 1) and not _borg_cancel_event.is_set()
         except Exception as e:
             GLib.idle_add(on_line, f"✘ Ошибка: {e}\n")
         GLib.idle_add(on_done, ok)
@@ -426,8 +459,6 @@ def borg_estimate_create(
             env=_borg_env(repo_path),
         )
         text = (r.stdout or "") + "\n" + (r.stderr or "")
-        import re
-
         m = re.search(
             r"This archive:\s+([0-9][0-9.,]*\s+[A-Za-z]+)\s+([0-9][0-9.,]*\s+[A-Za-z]+)\s+([0-9][0-9.,]*\s+[A-Za-z]+)",
             text,
@@ -1034,15 +1065,25 @@ def is_timer_active() -> bool:
 
 
 def get_timer_next_run() -> str | None:
+    import time
     try:
-        r = _run_systemctl(["show", "altbooster-backup.timer", "--property=NextElapseUSecRealtime"])
+        r = _run_systemctl(["show", "altbooster-backup.timer",
+                            "--property=NextElapseUSecRealtime",
+                            "--property=NextElapseUSecMonotonic"])
+        if r.returncode != 0:
+            return None
+        props: dict[str, str] = {}
         for line in r.stdout.splitlines():
             if "=" in line:
-                val = line.split("=", 1)[1].strip()
-                if val and val != "0":
-                    usec = int(val)
-                    dt = datetime.datetime.fromtimestamp(usec / 1_000_000)
-                    return dt.strftime("%d.%m.%Y %H:%M")
+                k, v = line.split("=", 1)
+                props[k.strip()] = v.strip()
+        realtime = int(props.get("NextElapseUSecRealtime", "0") or "0")
+        if realtime:
+            return datetime.datetime.fromtimestamp(realtime / 1_000_000).strftime("%d.%m.%Y %H:%M")
+        monotonic = int(props.get("NextElapseUSecMonotonic", "0") or "0")
+        if monotonic:
+            realtime_usec = int((time.time() - time.monotonic()) * 1_000_000) + monotonic
+            return datetime.datetime.fromtimestamp(realtime_usec / 1_000_000).strftime("%d.%m.%Y %H:%M")
     except Exception:
         pass
     return None

@@ -108,6 +108,7 @@ class AppsPage(Gtk.Box):
 
         close_btn = Gtk.Button()
         close_btn.set_icon_name("window-close-symbolic")
+        close_btn.set_tooltip_text("Закрыть")
         close_btn.add_css_class("flat")
         close_btn.add_css_class("circular")
         close_btn.set_valign(Gtk.Align.CENTER)

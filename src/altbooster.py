@@ -8,9 +8,29 @@ import sys
 import traceback
 from pathlib import Path
 
+import gettext as _gettext
+
 _APP_DIR = str(Path(__file__).resolve().parent)
 if importlib.util.find_spec("core") is None:
     sys.path.insert(0, _APP_DIR)
+
+_LOCALE_DIRS = [
+    Path(__file__).resolve().parent.parent / "locale",
+    Path("/usr/share/locale"),
+    Path("/usr/local/share/locale"),
+]
+
+def _setup_i18n() -> None:
+    for locale_dir in _LOCALE_DIRS:
+        if (locale_dir / "ru" / "LC_MESSAGES" / "altbooster.mo").exists():
+            _gettext.bindtextdomain("altbooster", str(locale_dir))
+            break
+    _gettext.textdomain("altbooster")
+    builtins_module = sys.modules.get("builtins") or __import__("builtins")
+    if not hasattr(builtins_module, "_"):
+        builtins_module._ = _gettext.gettext
+
+_setup_i18n()
 
 _TAB_FLAGS = {
     "-s": "setup",

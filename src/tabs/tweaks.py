@@ -231,7 +231,8 @@ class TweaksPage(Gtk.Box):
 
     def _on_alt_zero_guide_clicked(self, _btn):
         try:
-            Gio.AppInfo.launch_default_for_uri(_ALT_ZERO_GUIDE_URL, None)
+            ctx = Gdk.Display.get_default().get_app_launch_context()
+            Gio.AppInfo.launch_default_for_uri(_ALT_ZERO_GUIDE_URL, ctx)
         except GLib.Error:
             pass
 

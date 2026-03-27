@@ -5,6 +5,7 @@ import pwd
 import shlex
 import subprocess
 import threading
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -224,17 +225,24 @@ def write_btrfs_systemd_units(interval_hours: int, keep_count: int) -> bool:
         return False
 
     prune_n = max(1, keep_count)
-    prune_cmd = (
-        f"ls -1dt {shlex.quote(str(snapshots_dir))}/home-* 2>/dev/null | "
-        f"tail -n +{prune_n + 1} | "
-        f"xargs -r btrfs subvolume delete"
+
+    def _esc_systemd(s: str) -> str:
+        return s.replace("\\", "\\\\").replace('"', '\\"').replace("$", "$$")
+
+    snaps_q = shlex.quote(str(snapshots_dir))
+    mount_q = shlex.quote(mount_point)
+
+    snapshot_cmd = (
+        f"SNAPSDIR={snaps_q}; "
+        f"mkdir -p \"$SNAPSDIR\" && "
+        f"btrfs subvolume snapshot -r {mount_q} "
+        f"\"$SNAPSDIR/home-$(date +'%Y-%m-%dT%H-%M-%S')\""
     )
 
-    timestamp_format = "$(date +'%Y-%m-%dT%H-%M-%S')"
-    snapshot_path = str(snapshots_dir / f"home-{timestamp_format}")
-    snapshot_cmd = (
-        f"mkdir -p {shlex.quote(str(snapshots_dir))} && "
-        f"btrfs subvolume snapshot -r {shlex.quote(mount_point)} {snapshot_path}"
+    prune_cmd = (
+        f"ls -1dt {snaps_q}/home-* 2>/dev/null | "
+        f"tail -n +{prune_n + 1} | "
+        f"xargs -r btrfs subvolume delete"
     )
 
     service_content = (
@@ -242,8 +250,8 @@ def write_btrfs_systemd_units(interval_hours: int, keep_count: int) -> bool:
         "Description=ALT Booster - Btrfs Snapshot\n\n"
         "[Service]\n"
         "Type=oneshot\n"
-        f"ExecStart=pkexec bash -c '{snapshot_cmd}'\n"
-        f"ExecStartPost=-pkexec bash -c '{prune_cmd}'\n"
+        f'ExecStart=pkexec bash -c "{_esc_systemd(snapshot_cmd)}"\n'
+        f'ExecStartPost=-pkexec bash -c "{_esc_systemd(prune_cmd)}"\n'
     )
 
     calendar_map = {1: "hourly", 6: "*-*-* 0/6:00:00", 24: "daily"}
@@ -291,16 +299,25 @@ def is_btrfs_timer_active() -> bool:
 
 
 def get_btrfs_timer_next_run() -> str | None:
+    import time
     try:
-        r = _run_systemctl(["show", "altbooster-btrfs.timer", "--property=NextElapseUSecRealtime"])
-        if r.returncode == 0:
-            for line in r.stdout.splitlines():
-                if "=" in line:
-                    val = line.split("=", 1)[1].strip()
-                    if val and val != "0":
-                        usec = int(val)
-                        dt = datetime.fromtimestamp(usec / 1_000_000)
-                        return dt.strftime("%d.%m.%Y %H:%M")
+        r = _run_systemctl(["show", "altbooster-btrfs.timer",
+                            "--property=NextElapseUSecRealtime",
+                            "--property=NextElapseUSecMonotonic"])
+        if r.returncode != 0:
+            return None
+        props: dict[str, str] = {}
+        for line in r.stdout.splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                props[k.strip()] = v.strip()
+        realtime = int(props.get("NextElapseUSecRealtime", "0") or "0")
+        if realtime:
+            return datetime.fromtimestamp(realtime / 1_000_000).strftime("%d.%m.%Y %H:%M")
+        monotonic = int(props.get("NextElapseUSecMonotonic", "0") or "0")
+        if monotonic:
+            realtime_usec = int((time.time() - time.monotonic()) * 1_000_000) + monotonic
+            return datetime.fromtimestamp(realtime_usec / 1_000_000).strftime("%d.%m.%Y %H:%M")
     except Exception:
-        pass
+        config.log_exception("get_timer_next_run")
     return None

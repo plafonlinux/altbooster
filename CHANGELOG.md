@@ -12,6 +12,45 @@ _Текущая ветка разработки. Изменения уточня
 - **TimeSync Mirror — автовосстановление на NVMe/MMC**: корректное формирование имён разделов (`p1/p2`) в авто-сценарии восстановления, чтобы избежать ошибок на `nvme*` и `mmcblk*`
 - **Borg/Flatpak restore — корректный статус результата**: восстановление Flatpak теперь возвращает ошибку, если `remote-add` или `install` завершились неуспешно
 - **Borg env-file — безопасная сериализация passphrase**: парольная фраза сохраняется в shell-safe формате, чтобы спецсимволы не ломали `EnvironmentFile`
+- **Mirror restore — потеря данных на virtio/NVMe**: `lstrip("/dev/")` заменён на `removeprefix("/dev/")` — `lstrip` удалял символы из набора, а не подстроку; `/dev/vda` давал `a`, `/dev/nvme0n1` давал `nme0n1`
+- **Mirror restore — shell injection в скрипте восстановления**: все пути (`mirror_dir`, `target_device`, `disk`, разделы) теперь экранируются через `shlex.quote()` перед подстановкой в bash-скрипт, запускаемый от root
+- **AMD — мёртвый код с NameError**: удалены методы `enable_overclock`, `_update_grub`, `confirm_reboot` из `amd.py` — использовали `tempfile`/`threading` без импортов; логика перенесена в `amd_actions.py`
+- **AppRow — удаление без подтверждения**: добавлен `Adw.AlertDialog` перед запуском `epm -e -y` / `flatpak uninstall -y`
+- **GLib таймеры — утечка при уничтожении виджета**: `GLib.timeout_add` в `AppRow` и `TaskRow` теперь сохраняет source ID; по сигналу `unrealize` вызывается `GLib.source_remove()`, когда операция ещё идёт
+- **Таймеры systemd — «следующий запуск» всегда пустой**: запрашиваются оба свойства `NextElapseUSecRealtime` и `NextElapseUSecMonotonic`; monotonic корректно конвертируется в realtime через `time.time() - time.monotonic()`
+- **Btrfs systemd-юнит — сломанный ExecStart**: `shlex.quote()` внутри строки оборачивал пути в одинарные кавычки, конфликтуя с внешними одинарными кавычками `ExecStart=pkexec bash -c '...'`; переход на двойные кавычки с systemd-escaping (`$`→`$$`, `"`→`\"`)
+- **`run_privileged_sync` / `run_epm_sync` — бесконечная блокировка**: `event.wait()` получил `timeout=300`; дублирующийся boilerplate вынесен в `_sync_wrapper()`
+- **`cancel_current` — race condition и отсутствие SIGKILL**: чтение `_pkexec_shell_proc` теперь под `_pkexec_shell_lock`; после `terminate()` добавлен `wait(timeout=3)` с fallback на `kill()`
+- **`config.py` — неатомарная запись state.json**: запись через временный файл + `tmp.replace(STATE_FILE)` (атомарный `rename`), устраняет повреждение при краше
+- **`config.py` — кодировка при чтении state.json**: `open(STATE_FILE)` заменён на `open(STATE_FILE, encoding="utf-8")`
+- **`config.py` — права на CONFIG_DIR**: `mkdir` теперь с `mode=0o700`, чтобы директория с чувствительными данными не была доступна другим пользователям
+- **`mirror.py` — повторный `import gi` на каждой строке вывода**: `gi`/`GLib` вынесены на уровень модуля; убраны локальные импорты внутри `_run_mirror_async` и `restore_to_disk`
+- **`borg.py` — `import re` внутри функции**: вынесен на уровень модуля
+- **`window.py` — `_log_writer_loop` без `finally`**: `log_f.close()` теперь гарантированно вызывается через `try/finally` при любом завершении цикла
+- **P0-1: `_get_pkexec_shell` без маркера готовности**: при пересоздании процесса теперь выполняется полная процедура handshake (маркер + ожидание); логика вынесена в `_create_and_verify_shell()`
+- **P0-2: бесконечное ожидание в `_run_borg_async`**: добавлены `cancel_borg()` и `_borg_cancel_event`; `proc.wait(timeout=10)` с fallback `kill()`; `subprocess.Popen` переведён на контекстный менеджер (`with`)
+- **P1-2: утечка temp-файла в `patch_drive_menu`**: добавлен `trap 'rm -f ...' EXIT` в bash-скрипт и `_on_done_cleanup` для случая когда pkexec не запускает скрипт
+- **P1-3: незакрытые `proc.stdout` в `_run_mirror_async` / `restore_to_disk`**: `subprocess.Popen` переведён на `with`-менеджер; `proc.wait(timeout=10)` с fallback `kill()`
+- **P1-5: мутируемый возврат кэша `_iter_xdg_desktop_files`**: возвращается `list(_desktop_files_cache)` вместо самого кэша
+- **EXT-9: `_apt_dedup_filter` — пустая строка не сбрасывала `in_warn`**: `in_warn = False` добавлен при пустой строке, нормальный вывод после блока предупреждений не подавляется
+- **NEW-6: `urlretrieve` без timeout в `davinci.py`**: заменён на `urllib.request.urlopen(..., timeout=60)` в обоих местах
+- **NEW-8: shell injection в `_build_fairlight_cmd`**: путь `~/.asoundrc` теперь экранируется через `shlex.quote()`, устраняя инъекцию при `$HOME` со спецсимволами
+- **Удалено самообновление**: механизм обновления через GitHub (скачивание tarball + `install.sh`) полностью удалён — пакет обновляется через репозитории ALT Linux (`epm upgrade altbooster`); удалены `check_for_updates`, `_do_update`, `update_security.py`, функции `check_update`/`check_update_beta` из `config.py`, баннер обновлений и строка «Обновления» в сайдбаре
+- **pyproject.toml**: добавлено поле `dependencies = ["PyGObject>=3.42"]`, исправлен формат `license = {text = "MIT"}` (PEP 621)
+- **Makefile**: добавлена поддержка `DESTDIR` для rpm-пакетирования; установка кастомных SVG-иконок в `$(SHAREDIR)/icons/hicolor/scalable/{apps,devices}/`; добавлена цель `uninstall`
+- **Иконки при пакетной установке**: копирование иконок в `~/.local/` теперь происходит только в dev-режиме; при системной установке GTK находит иконки в `/usr/share/icons/hicolor/`
+- **fstab — валидация перед записью**: добавлена проверка точки монтирования (абсолютный путь, не системный каталог), опасных опций (`suid`, `exec`, `bind`) и нераспознанного типа ФС; при нарушениях показывается предупреждающий диалог с деструктивной кнопкой подтверждения
+- **Accessibility**: добавлен `set_tooltip_text()` ко всем icon-only кнопкам (`window.py`, `dialogs.py`, `apps.py`, `maintenance.py`, `timesync/page.py`); GTK4 использует tooltip как accessible label
+- **Debug-логирование исключений**: добавлена `config.log_exception(context)` — выводит traceback при `--debug`; применена в критических путях `privileges.py`, `borg.py`, `btrfs.py`
+- **SEC-003: whitelist для root-shell команд**: добавлен `_CMD_WHITELIST` из 30+ разрешённых исполняемых файлов; команды вне списка отклоняются с сообщением `⛔` до отправки в pkexec-сессию
+- **Инфраструктура i18n/gettext**: `gettext.bindtextdomain("altbooster")` в точке входа; `_()` доступна глобально; каталог `po/` с `altbooster.pot` и `ru.po`; цели `make pot` (regenerate template) и `make install-locale` (компиляция `.po` → `.mo`) в Makefile
+- **Адаптивный layout — breakpoint для сайдбара**: добавлен `Adw.Breakpoint` (max-width: 680sp) — при узком окне сайдбар автоматически переходит в режим «иконки без подписей»; минимальная ширина окна снижена с 750 до 600px
+- **D-Bus API для расширений GNOME**: `gnome-extensions list/enable/disable/uninstall/prefs` и `gnome-shell --version` заменены на вызовы `org.gnome.Shell.Extensions` через `Gio.DBusProxy`; subprocess остаётся как fallback; операции переключения/удаления работают без внешней утилиты
+- **Race condition в `cancel_current()`**: `_pkexec_shell_proc = None` теперь выполняется под `_pkexec_shell_lock` до `terminate()`, исключая TOCTOU; добавлен `global _pkexec_shell_proc`
+- **Deadlock-защита в `_sync_wrapper`**: добавлена проверка `threading.current_thread() is threading.main_thread()` — при вызове из main thread бросает `RuntimeError` вместо зависания
+- **Асинхронное копирование иконок при запуске**: цикл `shutil.copy2` + `gtk-update-icon-cache` перенесены в фоновый поток; `add_search_path` вызывается немедленно, main thread не блокируется
+- **Клавиатурная навигация в поиске**: стрелка вниз из поля ввода переводит фокус в список результатов; стрелка вверх с первой строки возвращает фокус в поле ввода
+- **Toast при ошибке операции**: `stop_progress(False)` теперь показывает `Adw.Toast` «Операция завершилась с ошибкой. Смотрите лог ↙» — пользователь немедленно видит результат, даже если лог-панель свёрнута; добавлен публичный метод `show_toast(message, timeout)` в `AltBoosterWindow`
 
 ### Добавлено
 - **Автотесты (первый пакет)**: добавлен `pytest`-каркас и unit-тесты для критичных участков (`core.mirror`, `core.borg`)

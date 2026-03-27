@@ -2368,6 +2368,7 @@ class BorgPage(Gtk.Box):
     def _add_custom_path_row(self, path: str):
         row = Adw.ActionRow(title=path)
         del_btn = Gtk.Button(icon_name="user-trash-symbolic")
+        del_btn.set_tooltip_text("Удалить путь")
         del_btn.add_css_class("flat")
         del_btn.add_css_class("destructive-action")
         del_btn.set_valign(Gtk.Align.CENTER)

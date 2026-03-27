@@ -91,6 +91,7 @@ class CacheTaskRow(Adw.ExpanderRow):
                 row = Adw.ActionRow()
                 row.set_title(p)
                 btn = Gtk.Button(icon_name="user-trash-symbolic")
+                btn.set_tooltip_text("Убрать из списка")
                 btn.add_css_class("flat")
                 btn.set_valign(Gtk.Align.CENTER)
                 btn.connect("clicked", lambda _, path=p: self._remove_path(path))
@@ -266,6 +267,13 @@ class FstabRow(Adw.ExpanderRow):
         new_entries = [e for e in entries if e["mountpoint"] not in existing]
 
         if new_entries:
+            all_warnings = []
+            for e in new_entries:
+                for w in self._validate_fstab_entry(e):
+                    all_warnings.append(f"• {e['mountpoint']}: {w}")
+            if all_warnings:
+                self._show_fstab_warning_dialog(all_warnings, new_entries)
+                return
             self._start_add(new_entries)
             return
 
@@ -279,6 +287,16 @@ class FstabRow(Adw.ExpanderRow):
             )
         else:
             self._show_remount_dialog(entries)
+
+    def _show_fstab_warning_dialog(self, warnings, new_entries):
+        body = "Обнаружены потенциально опасные параметры:\n\n" + "\n".join(warnings)
+        dialog = Adw.AlertDialog(heading="Предупреждение fstab", body=body)
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("proceed", "Всё равно добавить")
+        dialog.set_response_appearance("proceed", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.connect("response", lambda d, r: self._start_add(new_entries) if r == "proceed" else None)
+        dialog.present(self.get_root())
 
     def _start_add(self, new_entries):
         self._new_mounts = [e["mountpoint"] for e in new_entries]
@@ -480,6 +498,37 @@ class FstabRow(Adw.ExpanderRow):
         dlg.set_close_response("ok")
         dlg.present(self.get_root())
 
+    _DANGEROUS_OPTIONS = frozenset({"suid", "exec", "bind", "rbind", "move"})
+    _SYSTEM_MOUNTPOINTS = frozenset({
+        "/", "/etc", "/bin", "/sbin", "/lib", "/lib64",
+        "/usr", "/boot", "/proc", "/sys", "/dev", "/run",
+    })
+    _KNOWN_FSTYPES = frozenset({
+        "ext2", "ext3", "ext4", "xfs", "btrfs", "f2fs", "vfat", "ntfs",
+        "ntfs-3g", "exfat", "iso9660", "udf", "tmpfs", "nfs", "nfs4",
+        "nfs3", "cifs", "smb3", "smbfs", "fuse", "fuse.sshfs", "overlay",
+        "squashfs", "swap", "auto", "none",
+    })
+
+    @staticmethod
+    def _validate_fstab_entry(entry):
+        mp = entry["mountpoint"]
+        fstype = entry["fstype"]
+        opts_field = entry.get("options", "")
+        opts = {o.strip() for o in opts_field.split(",")}
+
+        warnings = []
+        if not mp.startswith("/"):
+            warnings.append(f"точка монтирования «{mp}» не является абсолютным путём")
+        if mp in FstabSection._SYSTEM_MOUNTPOINTS:
+            warnings.append(f"«{mp}» — системный каталог, перекрытие опасно")
+        dangerous = opts & FstabSection._DANGEROUS_OPTIONS
+        if dangerous:
+            warnings.append(f"опасные опции: {', '.join(sorted(dangerous))}")
+        if fstype and fstype not in FstabSection._KNOWN_FSTYPES:
+            warnings.append(f"нераспознанный тип ФС: «{fstype}»")
+        return warnings
+
     @staticmethod
     def _parse_fstab_lines(text):
         entries = []
@@ -493,6 +542,7 @@ class FstabRow(Adw.ExpanderRow):
                     "line": stripped,
                     "mountpoint": parts[1],
                     "fstype": parts[2] if len(parts) >= 3 else "",
+                    "options": parts[3] if len(parts) >= 4 else "",
                 })
         return entries
 

@@ -640,6 +640,9 @@ class GlobalSearchPanel(Gtk.Overlay):
         self._list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self._list.add_css_class("boxed-list")
         self._list.connect("row-activated", self._on_row_activated)
+        list_keys = Gtk.EventControllerKey()
+        list_keys.connect("key-pressed", self._on_list_key_pressed)
+        self._list.add_controller(list_keys)
 
         self._result_scroll = Gtk.ScrolledWindow()
         self._result_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -709,6 +712,23 @@ class GlobalSearchPanel(Gtk.Overlay):
         if keyval == Gdk.KEY_Escape:
             self.dismiss()
             return True
+        if keyval == Gdk.KEY_Down:
+            first = self._list.get_row_at_index(0)
+            if first is not None and first.get_selectable():
+                self._list.select_row(first)
+                self._list.grab_focus()
+                return True
+        return False
+
+    def _on_list_key_pressed(self, _ctrl, keyval, _keycode, state):
+        if keyval == Gdk.KEY_Escape:
+            self.dismiss()
+            return True
+        if keyval == Gdk.KEY_Up:
+            selected = self._list.get_selected_row()
+            if selected is not None and selected.get_index() == 0:
+                self._entry.grab_focus()
+                return True
         return False
 
     def _on_key_pressed(self, _ctrl, keyval, _keycode, state):

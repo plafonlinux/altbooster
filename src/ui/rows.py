@@ -348,11 +348,13 @@ class AppRow(Adw.ActionRow):
         self._log = log_fn
         self._on_change = on_change_cb
         self._installing = False
+        self._pulse_id = 0
         self._install_event = threading.Event()
         self._install_event.set()
         self._state_key = f"app_{app['id']}"
         self._installed_source_index = -1
         self._selected_source_index = 0
+        self.connect("unrealize", self._on_unrealize)
 
         self.set_title(app["label"])
         self.set_subtitle(app["desc"])
@@ -695,7 +697,7 @@ class AppRow(Adw.ActionRow):
         self._btn.set_label("…")
         self._prog.set_visible(True)
         self._prog.set_fraction(0.0)
-        GLib.timeout_add(120, self._pulse)
+        self._pulse_id = GLib.timeout_add(120, self._pulse)
         self._log(f"\n▶  Установка {self._app['label']} ({src['label']})...\n")
 
         win = self.get_root()
@@ -737,16 +739,33 @@ class AppRow(Adw.ActionRow):
     def _on_uninstall(self, _):
         if self._installing:
             return
-            
+
+        name = self._app.get("label", "приложение")
+        dialog = Adw.AlertDialog(
+            heading=f"Удалить {name}?",
+            body="Это действие необратимо.",
+        )
+        dialog.add_response("cancel", "Отмена")
+        dialog.add_response("remove", "Удалить")
+        dialog.set_response_appearance("remove", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", lambda _d, r: self._do_uninstall() if r == "remove" else None)
+        dialog.present(self.get_root())
+
+    def _do_uninstall(self):
+        if self._installing:
+            return
+
         idx = self._installed_source_index
         if idx < 0:
             idx = self._selected_source_index
-        
+
         if idx < 0 or idx >= len(self._sources):
             idx = 0
-            
+
         if not self._sources:
-             return
+            return
 
         src = self._sources[idx]
 
@@ -754,8 +773,8 @@ class AppRow(Adw.ActionRow):
         self._trash_btn.set_sensitive(False)
         self._prog.set_visible(True)
         self._prog.set_fraction(0.0)
-        GLib.timeout_add(120, self._pulse)
-        
+        self._pulse_id = GLib.timeout_add(120, self._pulse)
+
         kind, pkg = src["check"]
         if kind == "flatpak":
             if isinstance(pkg, str):
@@ -796,10 +815,16 @@ class AppRow(Adw.ActionRow):
         else:
             backend.run_privileged(cmd, self._log, self._uninstall_done)
 
+    def _on_unrealize(self, _):
+        if self._pulse_id:
+            GLib.source_remove(self._pulse_id)
+            self._pulse_id = 0
+
     def _pulse(self):
         if self._installing:
             self._prog.pulse()
             return True
+        self._pulse_id = 0
         return False
 
     def _install_done(self, ok):
@@ -849,9 +874,11 @@ class TaskRow(Adw.ActionRow):
         self._on_log = on_log
         self._on_progress = on_progress
         self._running = False
+        self._pulse_id = 0
         self.result = None
         self._done_event = threading.Event()
         self._done_event.set()
+        self.connect("unrealize", self._on_unrealize)
 
         self.set_title(task["label"])
         self.set_subtitle(task["desc"])
@@ -941,7 +968,7 @@ class TaskRow(Adw.ActionRow):
             self._on_log(f"\n▶  {self._task['label']}...\n")
             win = self.get_root()
             if hasattr(win, "start_progress"): win.start_progress(f"Выполнение: {self._task['label']}...")
-            GLib.timeout_add(110, self._pulse)
+            self._pulse_id = GLib.timeout_add(110, self._pulse)
             threading.Thread(target=self._run_user, args=(cmd,), daemon=True).start()
             return
 
@@ -954,7 +981,7 @@ class TaskRow(Adw.ActionRow):
         self._on_log(f"\n▶  {self._task['label']}...\n")
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress(f"Выполнение: {self._task['label']}...")
-        GLib.timeout_add(110, self._pulse)
+        self._pulse_id = GLib.timeout_add(110, self._pulse)
         backend.run_privileged(cmd, self._on_log, self._finish)
 
     def _run_user(self, cmd):
@@ -969,10 +996,16 @@ class TaskRow(Adw.ActionRow):
             GLib.idle_add(self._on_log, f"Error: {e}\n")
             GLib.idle_add(self._finish, False)
 
+    def _on_unrealize(self, _):
+        if self._pulse_id:
+            GLib.source_remove(self._pulse_id)
+            self._pulse_id = 0
+
     def _pulse(self):
         if self._running:
             self._prog.pulse()
             return True
+        self._pulse_id = 0
         return False
 
     def _finish(self, ok):

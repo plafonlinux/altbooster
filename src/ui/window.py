@@ -65,40 +65,46 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         Gtk.Settings.get_default().set_property("gtk-icon-theme-name", icon_theme)
 
         _icons_base = Path(__file__).parent.parent.parent / "icons"
-
-        _hicolor_src = _icons_base / "hicolor"
-        _dst_hicolor = Path.home() / ".local" / "share" / "icons" / "hicolor"
-        _icons_copied = False
-        for _kind, _cat in (("scalable", "apps"), ("scalable", "devices"), ("symbolic", "devices")):
-            _src_cat = _hicolor_src / _kind / _cat
-            _dst_cat = _dst_hicolor / _kind / _cat
-            if not _src_cat.exists():
-                continue
-            _dst_cat.mkdir(parents=True, exist_ok=True)
-            for _svg in _src_cat.glob("*.svg"):
-                _dst = _dst_cat / _svg.name
-                try:
-                    _src_st = _svg.stat()
-                    _dst_st = _dst.stat() if _dst.exists() else None
-                    if not _dst_st or _dst_st.st_size != _src_st.st_size or _dst_st.st_mtime < _src_st.st_mtime:
-                        shutil.copy2(_svg, _dst)
-                        _icons_copied = True
-                except OSError:
-                    pass
-
-        if _icons_copied:
-            def _update_icon_cache(_dst_hicolor=_dst_hicolor):
-                try:
-                    subprocess.run(
-                        ["gtk-update-icon-cache", "-f", "-t", str(_dst_hicolor)],
-                        capture_output=True, timeout=5,
-                    )
-                except (OSError, subprocess.TimeoutExpired):
-                    pass
-            threading.Thread(target=_update_icon_cache, daemon=True).start()
-
         _it = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
-        _it.add_search_path(str(_icons_base))
+
+        # Копировать иконки в ~/.local только в dev-режиме (когда icons/altbooster.svg
+        # лежит рядом с src/). При установке через пакет (Makefile/rpm) иконки уже
+        # установлены в /usr/share/icons/hicolor и GTK найдёт их самостоятельно.
+        if (_icons_base / "altbooster.svg").exists():
+            _it.add_search_path(str(_icons_base))
+
+            def _copy_icons_bg(
+                _icons_base=_icons_base,
+                _dst_hicolor=Path.home() / ".local" / "share" / "icons" / "hicolor",
+            ):
+                _hicolor_src = _icons_base / "hicolor"
+                _icons_copied = False
+                for _kind, _cat in (("scalable", "apps"), ("scalable", "devices"), ("symbolic", "devices")):
+                    _src_cat = _hicolor_src / _kind / _cat
+                    _dst_cat = _dst_hicolor / _kind / _cat
+                    if not _src_cat.exists():
+                        continue
+                    _dst_cat.mkdir(parents=True, exist_ok=True)
+                    for _svg in _src_cat.glob("*.svg"):
+                        _dst = _dst_cat / _svg.name
+                        try:
+                            _src_st = _svg.stat()
+                            _dst_st = _dst.stat() if _dst.exists() else None
+                            if not _dst_st or _dst_st.st_size != _src_st.st_size or _dst_st.st_mtime < _src_st.st_mtime:
+                                shutil.copy2(_svg, _dst)
+                                _icons_copied = True
+                        except OSError:
+                            pass
+                if _icons_copied:
+                    try:
+                        subprocess.run(
+                            ["gtk-update-icon-cache", "-f", "-t", str(_dst_hicolor)],
+                            capture_output=True, timeout=5,
+                        )
+                    except (OSError, subprocess.TimeoutExpired):
+                        pass
+
+            threading.Thread(target=_copy_icons_bg, daemon=True).start()
 
         self._reset_status_timer_id = None
         self._last_app_detection_cache_flush = 0.0
@@ -122,8 +128,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         root.add_css_class("ab-main-content")
-        root.append(self._build_update_banner())
-
         self._pages = {}
         for name, title, icon, PageClass in self._MAIN_TABS:
             page = PageClass(self._log)
@@ -215,8 +219,15 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._toast_overlay.set_child(toolbar_view)
 
         bp_bin = Adw.BreakpointBin()
-        bp_bin.set_size_request(750, 200)
+        bp_bin.set_size_request(600, 200)
         bp_bin.set_child(self._toast_overlay)
+
+        _bp_narrow = Adw.Breakpoint.new(
+            Adw.BreakpointCondition.parse("max-width: 680sp")
+        )
+        _bp_narrow.connect("apply", lambda _: GLib.idle_add(self._apply_tab_label_visibility, False))
+        _bp_narrow.connect("unapply", lambda _: GLib.idle_add(self._apply_tab_label_visibility, True))
+        bp_bin.add_breakpoint(_bp_narrow)
 
         self.set_content(bp_bin)
 
@@ -367,7 +378,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         )
 
         actions = [
-            ("check_update",      self._check_for_updates),
             ("help",              self._show_help),
             ("about",             self._show_about),
             ("clear_log",         self._clear_log),
@@ -514,33 +524,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             box.set_margin_end(7)
             return box
 
-        upd_row = Gtk.ListBoxRow()
-        upd_row.set_name("update")
-        upd_row.set_activatable(True)
-        upd_row.set_tooltip_text("Проверить обновления")
-        upd_box = _make_row_box()
-
-        upd_icon = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
-        upd_icon.set_pixel_size(16)
-
-        upd_lbl = Gtk.Label(label="Обновления")
-        upd_lbl.set_xalign(0.0)
-        upd_lbl.set_hexpand(True)
-        upd_lbl.set_ellipsize(Pango.EllipsizeMode.END)
-
-        self._update_badge_dot = Gtk.Label(label="")
-        self._update_badge_dot.add_css_class("ab-update-dot")
-        self._update_badge_dot.set_valign(Gtk.Align.CENTER)
-        self._update_badge_dot.set_visible(False)
-
-        upd_box.append(upd_icon)
-        upd_box.append(upd_lbl)
-        upd_box.append(self._update_badge_dot)
-        upd_row.set_child(upd_box)
-        bottom_list.append(upd_row)
-        self._bottom_images.append(upd_icon)
-        self._bottom_labels.append(upd_lbl)
-
         menu_row = Gtk.ListBoxRow()
         menu_row.set_name("settings")
         menu_row.set_activatable(True)
@@ -571,17 +554,15 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         return container
 
     def _on_bottom_row_activated(self, _, row):
-        name = row.get_name()
-        if name == "update":
-            self._check_for_updates()
-        elif name == "settings":
+        if row.get_name() == "settings":
             self._settings_popover.popup()
 
     def _on_alt_zero_guide_sidebar_activated(self, _list, row):
         if row is None:
             return
         try:
-            Gio.AppInfo.launch_default_for_uri(_ALT_ZERO_GUIDE_URL, None)
+            ctx = Gdk.Display.get_default().get_app_launch_context()
+            Gio.AppInfo.launch_default_for_uri(_ALT_ZERO_GUIDE_URL, ctx)
         except GLib.Error:
             pass
 
@@ -669,59 +650,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         config.state_set("show_tab_labels", state.get_boolean())
         self._apply_tab_label_visibility()
 
-    def _build_update_banner(self):
-        outer = Gtk.Box()
-        outer.set_halign(Gtk.Align.CENTER)
-        outer.set_margin_top(6)
-        outer.set_margin_bottom(4)
-        outer.set_opacity(0.92)
-
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        box.add_css_class("ab-float-banner")
-
-        icon = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
-        icon.set_pixel_size(16)
-        box.append(icon)
-
-        self._update_banner_label = Gtk.Label()
-        self._update_banner_label.set_xalign(0.0)
-        box.append(self._update_banner_label)
-
-        go_btn = Gtk.Button(label="Обновить")
-        go_btn.add_css_class("suggested-action")
-        go_btn.add_css_class("pill")
-        go_btn.set_valign(Gtk.Align.CENTER)
-        go_btn.connect("clicked", self._go_to_update)
-        box.append(go_btn)
-
-        close_btn = Gtk.Button()
-        close_btn.set_icon_name("window-close-symbolic")
-        close_btn.add_css_class("flat")
-        close_btn.add_css_class("circular")
-        close_btn.set_valign(Gtk.Align.CENTER)
-        close_btn.connect("clicked", lambda _: self._update_banner_revealer.set_reveal_child(False))
-        box.append(close_btn)
-
-        outer.append(box)
-
-        self._update_banner_revealer = Gtk.Revealer()
-        self._update_banner_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
-        self._update_banner_revealer.set_transition_duration(300)
-        self._update_banner_revealer.set_child(outer)
-        self._update_banner_revealer.set_reveal_child(False)
-        return self._update_banner_revealer
-
-
-    def _on_update_found_global(self, version):
-        self._update_banner_label.set_text(f"Доступна новая версия {version}")
-        self._update_banner_revealer.set_reveal_child(True)
-        self._update_badge_dot.set_visible(True)
-
-    def _go_to_update(self, *_):
-        self._update_banner_revealer.set_reveal_child(False)
-        self._stack.set_visible_child_name("setup")
-
-
     def _build_log_panel(self):
         self._last_log_line = ""
         self._progress_nesting = 0
@@ -802,6 +730,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         title.set_halign(Gtk.Align.START)
         self._log_overlay_close_btn = Gtk.Button()
         self._log_overlay_close_btn.set_icon_name("window-close-symbolic")
+        self._log_overlay_close_btn.set_tooltip_text("Закрыть")
         self._log_overlay_close_btn.add_css_class("flat")
         self._log_overlay_close_btn.add_css_class("circular")
         self._log_overlay_close_btn.connect("clicked", lambda *_: self._close_log_overlay())
@@ -993,14 +922,6 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._log_queue.put(None)
         return False
 
-
-    def _check_for_updates(self, *_):
-        if self._stack.get_visible_child_name() == "setup":
-            if self._setup.dismiss_update_section():
-                return
-        self._stack.set_visible_child_name("setup")
-        self._update_badge_dot.set_visible(False)
-        self._setup.check_for_updates(manual=True, on_update_found=self._on_update_found_global)
 
     def _present_global_search(self, *_):
         from ui.global_search import GlobalSearchPanel, build_all_search_items
@@ -1365,6 +1286,10 @@ class AltBoosterWindow(Adw.ApplicationWindow):
                 if self._reset_status_timer_id:
                     GLib.source_remove(self._reset_status_timer_id)
                 self._reset_status_timer_id = GLib.timeout_add(4000, self._reset_status_label)
+                if not success:
+                    toast = Adw.Toast(title="Операция завершилась с ошибкой. Смотрите лог ↙")
+                    toast.set_timeout(5)
+                    self._toast_overlay.add_toast(toast)
 
         GLib.idle_add(_do)
 
@@ -1372,6 +1297,13 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         self._reset_status_timer_id = None
         self._hide_op_card_if_idle()
         return False
+
+    def show_toast(self, message: str, timeout: int = 4) -> None:
+        def _do():
+            toast = Adw.Toast(title=message)
+            toast.set_timeout(timeout)
+            self._toast_overlay.add_toast(toast)
+        GLib.idle_add(_do)
 
     def _log(self, text):
         GLib.idle_add(self._log_internal, text)
@@ -1466,21 +1398,22 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         except Exception:
             log_f = None
 
-        while True:
-            text = self._log_queue.get()
-            if text is None:
-                break
-            if log_f is None:
-                continue
-            try:
-                log_f.write(text)
-                log_f.flush()
-            except Exception:
-                pass
-
-        if log_f:
-            try:
-                log_f.close()
-            except Exception:
-                pass
+        try:
+            while True:
+                text = self._log_queue.get()
+                if text is None:
+                    break
+                if log_f is None:
+                    continue
+                try:
+                    log_f.write(text)
+                    log_f.flush()
+                except Exception:
+                    pass
+        finally:
+            if log_f:
+                try:
+                    log_f.close()
+                except Exception:
+                    pass
 

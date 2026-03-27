@@ -42,6 +42,7 @@ def patch_drive_menu(on_log: OnLine, on_done: OnDone) -> None:
 
     qpatch = shlex.quote(patch_path)
     script = f"""set -e
+trap 'rm -f {qpatch}' EXIT
 TARGET="/usr/share/gnome-shell/extensions/drive-menu@gnome-shell-extensions.gcampax.github.com/extension.js"
 BACKUP="$TARGET.bak"
 
@@ -49,13 +50,11 @@ echo "Проверяю наличие системного расширения.
 
 if [ ! -f "$TARGET" ]; then
     echo "Ошибка: файл $TARGET не найден."
-    rm -f {qpatch}
     exit 1
 fi
 
 if grep -q "this._mounts.some" "$TARGET"; then
     echo "Патч уже применён."
-    rm -f {qpatch}
     exit 0
 fi
 
@@ -72,11 +71,18 @@ echo "Патч успешно применён."
 echo "Очищаю кэш GNOME Shell..."
 rm -rf {shlex.quote(home)}/.cache/gnome-shell/*
 
-rm -f {qpatch}
 echo "Готово!"
 echo "Чтобы изменения вступили в силу, нажми Win+L и разблокируй экран."
 """
-    run_privileged(["bash", "-c", script], on_log, on_done)
+
+    def _on_done_cleanup(ok: bool) -> None:
+        try:
+            os.unlink(patch_path)
+        except OSError:
+            pass
+        on_done(ok)
+
+    run_privileged(["bash", "-c", script], on_log, _on_done_cleanup)
 
 def install_aac_codec(archive_path: str, on_line: OnLine, on_done: OnDone) -> None:
     cmd = ["bash", "-c", f"tar --no-symlinks -xzf {shlex.quote(archive_path)} -C /tmp && cp -r /tmp/aac_encoder_plugin.dvcp.bundle /opt/resolve/IOPlugins/"]

@@ -3,7 +3,6 @@ import os
 import subprocess
 import threading
 import traceback
-import urllib.request
 from pathlib import Path
 
 
@@ -16,6 +15,13 @@ VERSION = "5.7-alpha"
 
 DEBUG: bool = False
 INITIAL_TAB: str = ""
+
+
+def log_exception(context: str = "") -> None:
+    if DEBUG:
+        prefix = f"[DEBUG] {context}: " if context else "[DEBUG] "
+        print(prefix, end="")
+        traceback.print_exc()
 
 _STATE_SAVE_DEBOUNCE_S = 0.45
 _state_save_timer: threading.Timer | None = None
@@ -49,7 +55,7 @@ _state_lock = threading.Lock()
 def load_state() -> None:
     global _state
     try:
-        with open(STATE_FILE) as f:
+        with open(STATE_FILE, encoding="utf-8") as f:
             data = json.load(f)
         with _state_lock:
             _state = data
@@ -62,10 +68,12 @@ def save_state() -> None:
     with _state_lock:
         data = dict(_state)
     try:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+        tmp = STATE_FILE.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        os.chmod(STATE_FILE, 0o600)
+        os.chmod(tmp, 0o600)
+        tmp.replace(STATE_FILE)
     except OSError:
         pass
 
@@ -144,39 +152,3 @@ def is_btrfs() -> bool:
         return False
 
 
-_GITHUB_API = "https://api.github.com/repos/plafonlinux/altbooster"
-
-
-def _fetch_github(path: str) -> object:
-    url = f"{_GITHUB_API}/{path}"
-    req = urllib.request.Request(url, headers={"User-Agent": "ALTBooster"})
-    with urllib.request.urlopen(req, timeout=5) as response:
-        return json.loads(response.read().decode())
-
-
-def check_update(on_result):
-    def _worker():
-        try:
-            data = _fetch_github("releases/latest")
-            on_result(data.get("tag_name", "").lstrip("v"))
-        except Exception:
-            if DEBUG:
-                traceback.print_exc()
-            on_result(None)
-    threading.Thread(target=_worker, daemon=True).start()
-
-
-def check_update_beta(on_result):
-    def _worker():
-        try:
-            releases = _fetch_github("releases?per_page=10")
-            for r in releases:
-                if r.get("prerelease"):
-                    on_result(r.get("tag_name", "").lstrip("v"))
-                    return
-            on_result(None)
-        except Exception:
-            if DEBUG:
-                traceback.print_exc()
-            on_result(None)
-    threading.Thread(target=_worker, daemon=True).start()

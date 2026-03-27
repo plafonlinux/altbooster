@@ -1,11 +1,8 @@
 
 import ast
 import os
-import re
 import shutil
 import subprocess
-import sys
-import tempfile
 import threading
 from pathlib import Path
 
@@ -16,7 +13,6 @@ from gi.repository import Adw, GLib, Gtk
 
 from core import backend
 from core import config
-from core import update_security
 from ui.install_preview_dialog import InstallPreviewDialog
 from ui.widgets import make_button, make_icon, make_scrolled_page, scroll_child_into_view
 from ui.rows import SettingRow
@@ -28,19 +24,6 @@ _MIRRORS = [
     ("HEAnet",    "heanet.list", "HEAnet (ftp.heanet.ie) — Ирландия"),
     ("IPSL",      "ipsl.list",   "IPSL (distrib-coffee.ipsl.jussieu.fr) — Франция"),
 ]
-
-def _make_channel_badge(channel: str) -> Gtk.Label:
-    lbl = Gtk.Label(label=channel)
-    lbl.add_css_class("ab-source-badge")
-    if channel == "stable":
-        lbl.add_css_class("success")
-    elif channel == "beta":
-        lbl.add_css_class("warning")
-    elif channel == "alpha":
-        lbl.add_css_class("error")
-    lbl.set_valign(Gtk.Align.CENTER)
-    return lbl
-
 
 def _detect_active_mirror() -> str:
     for _, fname, _ in _MIRRORS:
@@ -89,214 +72,6 @@ class SetupPage(Gtk.Box):
                             return True
             except Exception:
                 continue
-        return False
-
-    @staticmethod
-    def _is_newer(version, current):
-        if not version:
-            return False
-        try:
-            def _nums(v):
-                return [int(x) for x in v.split("-")[0].split(".")]
-            cur, lat = _nums(current), _nums(version)
-            max_len = max(len(cur), len(lat))
-            cur += [0] * (max_len - len(cur))
-            lat += [0] * (max_len - len(lat))
-            return lat > cur
-        except ValueError:
-            return False
-
-    def check_for_updates(self, manual=False, on_update_found=None):
-        if manual:
-            self._log("\n▶  Проверка обновлений...\n")
-
-        _results = {}
-
-        def _maybe_show():
-            if "stable" not in _results or "beta" not in _results:
-                return
-            stable_ver = _results["stable"]
-            beta_ver   = _results["beta"]
-            has_stable_update = self._is_newer(stable_ver, config.VERSION)
-
-            if not manual:
-                if has_stable_update and on_update_found:
-                    GLib.idle_add(on_update_found, stable_ver)
-                return
-
-            GLib.idle_add(self._show_update_section, stable_ver, beta_ver)
-            if has_stable_update and on_update_found:
-                GLib.idle_add(on_update_found, stable_ver)
-
-        def on_stable(v):
-            _results["stable"] = v
-            _maybe_show()
-
-        def on_beta(v):
-            _results["beta"] = v
-            _maybe_show()
-
-        config.check_update(on_stable)
-        config.check_update_beta(on_beta)
-
-    def _show_no_update_dialog(self):
-        self._log("✔  Новых обновлений не найдено.\n")
-        dialog = Adw.AlertDialog(
-            heading="Обновлений не найдено",
-            body="У вас установлена последняя версия ALT Booster.",
-        )
-        dialog.add_response("ok", "OK")
-        dialog.set_default_response("ok")
-        dialog.present(self.get_root())
-
-    def dismiss_update_section(self):
-        if hasattr(self, "_update_group") and self._update_group:
-            try:
-                self._body.remove(self._update_group)
-            except Exception:
-                pass
-            self._update_group = None
-            return True
-        return False
-
-    def _show_update_section(self, stable_ver, beta_ver):
-        if hasattr(self, "_update_group") and self._update_group:
-            try:
-                self._body.remove(self._update_group)
-            except Exception:
-                pass
-            self._update_group = None
-
-        if not stable_ver and not beta_ver:
-            self._show_no_update_dialog()
-            return
-
-        self._update_group = Adw.PreferencesGroup()
-        self._update_group.set_title("Обновление ALT Booster")
-        self._body.prepend(self._update_group)
-
-        is_on_beta = "-" in config.VERSION or config.state_get("update_channel") == "beta"
-
-        if stable_ver:
-            row = Adw.ActionRow()
-            row.add_prefix(Gtk.Image.new_from_icon_name("software-update-available-symbolic"))
-            row.set_title(f"Стабильная  v{stable_ver}")
-            if not is_on_beta and not self._is_newer(stable_ver, config.VERSION):
-                row.set_subtitle("Установлена последняя версия")
-            else:
-                row.set_subtitle("Последняя стабильная версия")
-                row.add_suffix(_make_channel_badge("stable"))
-                btn = Gtk.Button(label="Установить")
-                btn.add_css_class("suggested-action")
-                btn.add_css_class("pill")
-                btn.set_valign(Gtk.Align.CENTER)
-                btn.connect("clicked", lambda b, v=stable_ver: self._do_update(b, v, "stable"))
-                row.add_suffix(btn)
-            self._update_group.add(row)
-
-        if beta_ver:
-            _channel = "alpha" if "alpha" in beta_ver.lower() else "beta"
-            _title = "Альфа" if _channel == "alpha" else "Бета"
-            row_b = Adw.ActionRow()
-            row_b.add_prefix(Gtk.Image.new_from_icon_name("software-update-available-symbolic"))
-            row_b.set_title(f"{_title}  v{beta_ver}")
-            if is_on_beta and not self._is_newer(beta_ver, config.VERSION):
-                row_b.set_subtitle("Установлена · переустановить?")
-            else:
-                row_b.set_subtitle("Тестовая версия с новыми функциями")
-            row_b.add_suffix(_make_channel_badge(_channel))
-            btn_b = Gtk.Button(label="Установить")
-            btn_b.add_css_class("suggested-action")
-            btn_b.add_css_class("pill")
-            btn_b.set_valign(Gtk.Align.CENTER)
-            btn_b.connect("clicked", lambda b, v=beta_ver: self._do_update(b, v, "beta"))
-            row_b.add_suffix(btn_b)
-            self._update_group.add(row_b)
-
-    def _do_update(self, btn, version, channel="stable"):
-        if not re.fullmatch(r"\d+\.\d+(\.\d+)*(-[a-zA-Z0-9]+)?", version):
-            self._log(f"✘  Неверный формат версии: {version!r}\n")
-            return
-
-        btn.set_sensitive(False)
-        btn.set_label("⏳ Загрузка...")
-        self._log(f"\n▶  Обновление до версии {version}...\n")
-
-        win = self.get_root()
-        if hasattr(win, "start_progress"):
-            win.start_progress("Обновление приложения...")
-
-        url = f"https://github.com/plafonlinux/altbooster/archive/refs/tags/v{version}.tar.gz"
-        if not (downloader := ("wget -O" if shutil.which("wget") else ("curl -L -o" if shutil.which("curl") else ""))):
-            self._log("✘  wget и curl не найдены — обновление невозможно\n")
-            return
-
-        def _done(ok):
-            def _ui():
-                btn.set_sensitive(True)
-                btn.set_label("Установить")
-                if hasattr(self, "_update_group") and self._update_group:
-                    try:
-                        self._body.remove(self._update_group)
-                    except Exception:
-                        pass
-                    self._update_group = None
-
-                if ok:
-                    config.state_set("update_channel", channel)
-                    self._log("✔  Готово! Перезапуск через 2 сек...\n")
-                    GLib.timeout_add(2000, self._restart_app)
-                else:
-                    self._log("✘  Ошибка обновления. Попробуйте вручную через терминал.\n")
-                if hasattr(win, "stop_progress"):
-                    win.stop_progress(ok)
-            GLib.idle_add(_ui)
-
-        root_dir = Path(__file__).resolve().parent.parent.parent
-        def _update_worker():
-            tmp = tempfile.mkdtemp(prefix="altbooster-update-")
-            tar_path = os.path.join(tmp, "update.tar.gz")
-            dl = subprocess.run(
-                ["bash", "-c", f"{downloader} {tar_path} {url}"],
-                capture_output=True,
-                text=True,
-            )
-            if dl.stdout:
-                GLib.idle_add(self._log, dl.stdout)
-            if dl.stderr:
-                GLib.idle_add(self._log, dl.stderr)
-            if dl.returncode != 0:
-                GLib.idle_add(_done, False)
-                return
-
-            ok_verify, verify_msg = update_security.verify_release_tarball(version, tar_path)
-            GLib.idle_add(self._log, f"▶  Проверка релиза: {verify_msg}\n")
-            if not ok_verify:
-                GLib.idle_add(_done, False)
-                return
-
-            install_cmd = (
-                f"tar xf {tar_path} -C {tmp} && "
-                f"cd {tmp}/altbooster-* && "
-                f"chmod +x install.sh && ./install.sh"
-            )
-            if os.access(root_dir, os.W_OK):
-                r = subprocess.run(["bash", "-c", install_cmd], capture_output=True, text=True)
-                if r.stdout:
-                    GLib.idle_add(self._log, r.stdout)
-                if r.stderr:
-                    GLib.idle_add(self._log, r.stderr)
-                GLib.idle_add(_done, r.returncode == 0)
-                return
-            backend.run_privileged(["bash", "-c", install_cmd], self._log, _done)
-
-        threading.Thread(target=_update_worker, daemon=True).start()
-
-    def _restart_app(self):
-        try:
-            os.execl(sys.executable, sys.executable, *sys.argv)
-        except OSError as e:
-            GLib.idle_add(self._log, f"✘  Не удалось перезапустить: {e}\nЗапустите altbooster вручную.\n")
         return False
 
     def _on_gnome_software_updates(self, row):

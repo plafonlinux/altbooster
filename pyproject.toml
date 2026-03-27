@@ -7,9 +7,12 @@ name = "altbooster"
 version = "5.7-alpha"
 description = "Утилита настройки и обслуживания ALT Linux"
 readme = "README.md"
-license = "MIT"
+license = { text = "MIT" }
 authors = [{ name = "PLAFON" }]
 requires-python = ">=3.11"
+dependencies = [
+    "PyGObject>=3.42",
+]
 
 [project.urls]
 Homepage   = "https://github.com/plafonlinux/altbooster"

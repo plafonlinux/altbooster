@@ -16,7 +16,7 @@ from pathlib import Path
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, GLib, Gio, Gtk
 
 from core import backend
 from core.config import CONFIG_DIR
@@ -27,6 +27,122 @@ from ui.widgets import (
     make_status_icon, set_status_ok, set_status_error, clear_status, make_suffix_box,
     scroll_child_into_view,
 )
+
+_SHELL_BUS_NAME  = "org.gnome.Shell"
+_SHELL_OBJ_PATH  = "/org/gnome/Shell"
+_SHELL_EXT_IFACE = "org.gnome.Shell.Extensions"
+_EXT_STATE_ENABLED = 1
+
+_ext_proxy: Gio.DBusProxy | None = None
+_ext_proxy_lock = threading.Lock()
+
+
+def _get_ext_proxy() -> Gio.DBusProxy | None:
+    global _ext_proxy
+    with _ext_proxy_lock:
+        if _ext_proxy is not None:
+            return _ext_proxy
+        try:
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            proxy = Gio.DBusProxy.new_sync(
+                bus, Gio.DBusProxyFlags.NONE, None,
+                _SHELL_BUS_NAME, _SHELL_OBJ_PATH, _SHELL_EXT_IFACE, None,
+            )
+            _ext_proxy = proxy
+            return proxy
+        except Exception:
+            return None
+
+
+def _dbus_list_extensions() -> dict | None:
+    proxy = _get_ext_proxy()
+    if proxy is None:
+        return None
+    try:
+        result = proxy.call_sync("ListExtensions", None, Gio.DBusCallFlags.NONE, 5000, None)
+        return result.unpack()[0]
+    except Exception:
+        return None
+
+
+def _dbus_shell_version() -> str | None:
+    proxy = _get_ext_proxy()
+    if proxy is None:
+        return None
+    try:
+        v = proxy.get_cached_property("ShellVersion")
+        if v is None:
+            result = proxy.call_sync(
+                "org.freedesktop.DBus.Properties.Get",
+                GLib.Variant("(ss)", (_SHELL_EXT_IFACE, "ShellVersion")),
+                Gio.DBusCallFlags.NONE, 5000, None,
+            )
+            v = result.unpack()[0]
+        else:
+            v = v.unpack()
+        return str(v).split(".")[0] if v else None
+    except Exception:
+        return None
+
+
+def _dbus_enable_ext(uuid: str) -> bool:
+    proxy = _get_ext_proxy()
+    if proxy is None:
+        return False
+    try:
+        proxy.call_sync(
+            "EnableExtension",
+            GLib.Variant("(s)", (uuid,)),
+            Gio.DBusCallFlags.NONE, 5000, None,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _dbus_disable_ext(uuid: str) -> bool:
+    proxy = _get_ext_proxy()
+    if proxy is None:
+        return False
+    try:
+        proxy.call_sync(
+            "DisableExtension",
+            GLib.Variant("(s)", (uuid,)),
+            Gio.DBusCallFlags.NONE, 5000, None,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _dbus_uninstall_ext(uuid: str) -> bool:
+    proxy = _get_ext_proxy()
+    if proxy is None:
+        return False
+    try:
+        result = proxy.call_sync(
+            "UninstallExtension",
+            GLib.Variant("(s)", (uuid,)),
+            Gio.DBusCallFlags.NONE, 5000, None,
+        )
+        return bool(result.unpack()[0])
+    except Exception:
+        return False
+
+
+def _dbus_open_prefs(uuid: str) -> bool:
+    proxy = _get_ext_proxy()
+    if proxy is None:
+        return False
+    try:
+        proxy.call_sync(
+            "OpenExtensionPrefs",
+            GLib.Variant("(ssa{sv})", (uuid, "", {})),
+            Gio.DBusCallFlags.NONE, 5000, None,
+        )
+        return True
+    except Exception:
+        return False
 
 
 RECOMMENDED = [
@@ -308,6 +424,9 @@ def _revert_shell_versions(log_fn=None) -> int:
 
 
 def _is_ext_installed(uuid: str) -> bool:
+    exts = _dbus_list_extensions()
+    if exts is not None:
+        return uuid in exts
     try:
         r = subprocess.run(["gnome-extensions", "list"], capture_output=True, text=True)
         return uuid in r.stdout
@@ -330,6 +449,9 @@ def _read_extensions_from(ext_dir: Path) -> list[tuple[str, str, str]]:
 
 
 def _get_enabled_uuids() -> set[str]:
+    exts = _dbus_list_extensions()
+    if exts is not None:
+        return {uuid for uuid, info in exts.items() if info.get("state") == _EXT_STATE_ENABLED}
     try:
         r = subprocess.run(
             ["gnome-extensions", "list", "--enabled"],
@@ -398,6 +520,9 @@ class ExtensionsPage(Gtk.Box):
 
 
     def _get_shell_version(self) -> str:
+        ver = _dbus_shell_version()
+        if ver:
+            return ver
         try:
             r = subprocess.run(["gnome-shell", "--version"], capture_output=True, text=True)
             m = re.search(r"(\d+)", r.stdout)
@@ -563,7 +688,8 @@ class ExtensionsPage(Gtk.Box):
             os.unlink(zip_path)
             
             if uuid:
-                subprocess.run(["gnome-extensions", "enable", uuid])
+                if not _dbus_enable_ext(uuid):
+                    subprocess.run(["gnome-extensions", "enable", uuid])
             return True, uuid
         except Exception as e:
             GLib.idle_add(self._log, f"✘  Нативный метод тоже не помог: {e}\n")
@@ -876,7 +1002,10 @@ class ExtensionsPage(Gtk.Box):
         prefs_btn.set_valign(Gtk.Align.CENTER)
         prefs_btn.set_tooltip_text("Настройки расширения")
         prefs_btn.set_sensitive(has_prefs)
-        prefs_btn.connect("clicked", lambda _, u=uuid: subprocess.Popen(["gnome-extensions", "prefs", u]))
+        def _open_prefs(_, u=uuid):
+            if not _dbus_open_prefs(u):
+                subprocess.Popen(["gnome-extensions", "prefs", u])
+        prefs_btn.connect("clicked", _open_prefs)
 
         del_btn = Gtk.Button()
         del_btn.set_icon_name("user-trash-symbolic")
@@ -1003,19 +1132,23 @@ class ExtensionsPage(Gtk.Box):
         threading.Thread(target=_do, daemon=True).start()
 
     def _toggle_extension(self, uuid: str, state: bool, switch: Gtk.Switch) -> None:
-        cmd = ["gnome-extensions", "enable" if state else "disable", uuid]
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress(f"{'Включение' if state else 'Отключение'} расширения...")
 
         def _do():
-            r = subprocess.run(cmd, capture_output=True, text=True)
-            ok = r.returncode == 0
+            ok = _dbus_enable_ext(uuid) if state else _dbus_disable_ext(uuid)
+            if not ok:
+                r = subprocess.run(
+                    ["gnome-extensions", "enable" if state else "disable", uuid],
+                    capture_output=True, text=True,
+                )
+                ok = r.returncode == 0
+                if not ok:
+                    GLib.idle_add(self._log, f"✘  Ошибка: {r.stderr.strip()}\n")
             if ok:
                 GLib.idle_add(switch.set_state, state)
                 action = "включено" if state else "выключено"
-                self._log(f"✔  {uuid.split('@')[0]} {action}\n")
-            else:
-                self._log(f"✘  Ошибка: {r.stderr.strip()}\n")
+                GLib.idle_add(self._log, f"✔  {uuid.split('@')[0]} {action}\n")
             if hasattr(win, "stop_progress"): win.stop_progress(ok)
 
         threading.Thread(target=_do, daemon=True).start()
@@ -1055,11 +1188,13 @@ class ExtensionsPage(Gtk.Box):
         def _do():
             ok = False
             try:
-                r = subprocess.run(
-                    ["gnome-extensions", "uninstall", uuid],
-                    capture_output=True, text=True,
-                )
-                ok = r.returncode == 0
+                ok = _dbus_uninstall_ext(uuid)
+                if not ok:
+                    r = subprocess.run(
+                        ["gnome-extensions", "uninstall", uuid],
+                        capture_output=True, text=True,
+                    )
+                    ok = r.returncode == 0
 
                 if not ok:
                     ext_path = _USER_EXT_DIR / uuid
@@ -1082,7 +1217,7 @@ class ExtensionsPage(Gtk.Box):
                     GLib.idle_add(self._log, f"✔  {uuid} удалён!\n")
                     GLib.idle_add(self._refresh_installed)
                 else:
-                    GLib.idle_add(self._log, f"✘  Не удалось удалить: {r.stderr.strip()}\n")
+                    GLib.idle_add(self._log, f"✘  Не удалось удалить расширение\n")
 
             except Exception as e:
                 GLib.idle_add(self._log, f"✘  Ошибка удаления: {e}\n")
