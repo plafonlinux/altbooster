@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Callable
+import zipfile
 import re
 import shutil
 import subprocess
@@ -683,7 +684,20 @@ class ExtensionsPage(Gtk.Box):
             with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
                 urllib.request.urlretrieve(full_url, tmp.name)
                 zip_path = tmp.name
-            
+
+            try:
+                with zipfile.ZipFile(zip_path) as zf:
+                    if "metadata.json" not in zf.namelist():
+                        raise ValueError("ZIP не содержит metadata.json")
+                    meta = json.loads(zf.read("metadata.json").decode("utf-8"))
+                    if uuid and meta.get("uuid") != uuid:
+                        raise ValueError(
+                            f"UUID не совпадает: ожидался {uuid!r}, получен {meta.get('uuid')!r}"
+                        )
+            except zipfile.BadZipFile as exc:
+                os.unlink(zip_path)
+                raise ValueError("Скачанный файл не является корректным ZIP-архивом") from exc
+
             subprocess.run(["gnome-extensions", "install", "--force", zip_path], check=True)
             os.unlink(zip_path)
             

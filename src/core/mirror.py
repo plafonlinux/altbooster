@@ -230,13 +230,15 @@ def mirror_btrfs_stream(subvolumes: list[str], dest_dir: str, on_line, on_done, 
         snap     = shlex.quote(f"{toplevel}/.snap_{name}")
         sv_path  = shlex.quote(f"{toplevel}/{subvol}")
         out_file = shlex.quote(str(dest / f"{name}.btrfs"))
+        name_q = shlex.quote(name)
+        subvol_q = shlex.quote(subvol)
         script_lines += [
             f'echo ""',
-            f'echo "Субволюм {idx}/{total}: {subvol}"',
+            f'printf "Субволюм {idx}/{total}: %s\\n" {subvol_q}',
             f'if [ -d {sv_path} ]; then',
             f'  btrfs subvolume snapshot -r {sv_path} {snap}',
             f'  _SZ=$(du -sh {snap} 2>/dev/null | cut -f1)',
-            f'  echo "Объём данных: $_SZ — сохранение в файл {name}.btrfs..."',
+            f'  printf "Объём данных: $_SZ — сохранение в файл %s.btrfs...\\n" {name_q}',
             f'  btrfs send {snap} > {out_file}',
             f'  btrfs subvolume delete {snap}',
             f'  echo "✔  Субволюм {idx}/{total} сохранён."',
@@ -533,30 +535,10 @@ def restore_to_disk(mirror_dir: str, target_device: str, on_line, on_done):
         return
 
     def _worker():
-        env = os.environ.copy()
-        env["TARGET_DISK"] = target_device.removeprefix("/dev/") if target_device.startswith("/dev/") else target_device
-        env["NEWSYNC_AUTO"] = "1"
-
+        from core.privileges import run_privileged_sync
         auto_script = _build_auto_restore_script(mirror_dir, target_device, info)
-
         GLib.idle_add(on_line, f"Восстановление на {target_device}...\n")
-        ok = False
-        try:
-            with subprocess.Popen(
-                ["sudo", "-n", "bash", "-c", auto_script],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace",
-            ) as proc:
-                for line in proc.stdout:
-                    GLib.idle_add(on_line, line)
-                try:
-                    proc.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
-                ok = proc.returncode == 0
-        except Exception as e:
-            GLib.idle_add(on_line, f"Ошибка: {e}\n")
+        ok = run_privileged_sync(["bash", "-c", auto_script], on_line)
         GLib.idle_add(on_done, ok)
 
     threading.Thread(target=_worker, daemon=True).start()

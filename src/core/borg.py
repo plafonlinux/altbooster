@@ -265,10 +265,19 @@ def borg_version() -> str | None:
     return None
 
 
+_BORG_BLOCKED_ENV: frozenset[str] = frozenset({
+    "LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONPATH", "PYTHONINSPECT",
+    "PYTHONSTARTUP", "PYTHONHOME", "PYTHONOPTIMIZE",
+    "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
+})
+
+
 def _borg_env(repo_path: str) -> dict:
-    env = os.environ.copy()
-    env["BORG_PASSPHRASE"] = config.state_get("borg_passphrase", "") or ""
-    env["BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK"] = "yes"
+    env = {k: v for k, v in os.environ.items() if k not in _BORG_BLOCKED_ENV}
+    passphrase = config.state_get("borg_passphrase", "") or ""
+    env["BORG_PASSPHRASE"] = passphrase
+    if not passphrase:
+        env["BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK"] = "yes"
     ssh_key = borg_ssh_key_path()
     if ("@" in repo_path or repo_path.startswith("ssh://")) and ssh_key.exists():
         try:
@@ -276,7 +285,11 @@ def _borg_env(repo_path: str) -> dict:
                 os.chmod(ssh_key, 0o600)
         except OSError:
             pass
-        env["BORG_RSH"] = f"ssh -i {ssh_key} -o StrictHostKeyChecking=accept-new"
+        env["BORG_RSH"] = (
+            f"ssh -i {shlex.quote(str(ssh_key))}"
+            f" -o StrictHostKeyChecking=accept-new"
+            f" -o BatchMode=yes"
+        )
     return env
 
 
@@ -980,12 +993,17 @@ def _write_borg_env_file() -> bool:
     ssh_key = borg_ssh_key_path()
     content = (
         f'BORG_PASSPHRASE={shlex.quote(passphrase)}\n'
-        f"BORG_RSH=ssh -i {ssh_key} -o StrictHostKeyChecking=accept-new\n"
+        f"BORG_RSH=ssh -i {shlex.quote(str(ssh_key))} -o StrictHostKeyChecking=accept-new -o BatchMode=yes\n"
     )
     try:
         config.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        _BORG_ENV_FILE.write_text(content, encoding="utf-8")
-        _BORG_ENV_FILE.chmod(0o600)
+        tmp = _BORG_ENV_FILE.with_suffix(".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, content.encode("utf-8"))
+        finally:
+            os.close(fd)
+        tmp.replace(_BORG_ENV_FILE)
         return True
     except Exception:
         return False
@@ -996,11 +1014,26 @@ def write_systemd_units(repo_path: str, paths: list[str], calendar_expr: str) ->
     d.mkdir(parents=True, exist_ok=True)
     if not _write_borg_env_file():
         return False
-    paths_str = " ".join(f'"{p}"' for p in paths)
-    excludes_str = " ".join(
-        f'--exclude "{os.path.expanduser(e)}"' for e in DEFAULT_EXCLUDES
-    )
     borg_exe = _borg_exe()
+
+    def _esc_systemd(s: str) -> str:
+        return s.replace("\\", "\\\\").replace('"', '\\"').replace("$", "$$")
+
+    paths_str = " ".join(shlex.quote(p) for p in paths)
+    excludes_str = " ".join(
+        f"--exclude {shlex.quote(os.path.expanduser(e))}" for e in DEFAULT_EXCLUDES
+    )
+    repo_archive = f"{shlex.quote(repo_path)}::$(hostname)-$(date +%%Y-%%m-%%dT%%H-%%M)"
+
+    backup_script = (
+        "mkdir -p /tmp/altbooster-backup-meta && "
+        "flatpak list --app --columns=application > /tmp/altbooster-backup-meta/flatpak-apps.txt 2>/dev/null; "
+        "flatpak remotes --columns=name,url > /tmp/altbooster-backup-meta/flatpak-remotes.txt 2>/dev/null; "
+        "rpm -qa --queryformat \"%%{NAME}\\n\" | sort -u > /tmp/altbooster-backup-meta/packages.txt 2>/dev/null; "
+        "dconf dump / > /tmp/altbooster-backup-meta/dconf-full.ini 2>/dev/null; "
+        f"{borg_exe} create --stats --compression lz4 {repo_archive} "
+        f"{paths_str} /tmp/altbooster-backup-meta {excludes_str}"
+    )
 
     service_content = (
         "[Unit]\n"
@@ -1008,14 +1041,7 @@ def write_systemd_units(repo_path: str, paths: list[str], calendar_expr: str) ->
         "[Service]\n"
         "Type=oneshot\n"
         f"EnvironmentFile={_BORG_ENV_FILE}\n"
-        "ExecStart=/bin/bash -c '"
-        "mkdir -p /tmp/altbooster-backup-meta && "
-        "flatpak list --app --columns=application > /tmp/altbooster-backup-meta/flatpak-apps.txt 2>/dev/null; "
-        "flatpak remotes --columns=name,url > /tmp/altbooster-backup-meta/flatpak-remotes.txt 2>/dev/null; "
-        "rpm -qa --queryformat \"%%{NAME}\\n\" | sort -u > /tmp/altbooster-backup-meta/packages.txt 2>/dev/null; "
-        "dconf dump / > /tmp/altbooster-backup-meta/dconf-full.ini 2>/dev/null; "
-        f'{borg_exe} create --stats --compression lz4 "{repo_path}::$(hostname)-$(date +%%Y-%%m-%%dT%%H-%%M)" '
-        f"{paths_str} /tmp/altbooster-backup-meta {excludes_str}'\n"
+        f'ExecStart=/bin/bash -c "{_esc_systemd(backup_script)}"\n'
     )
 
     timer_content = (

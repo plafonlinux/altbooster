@@ -236,7 +236,7 @@ def write_btrfs_systemd_units(interval_hours: int, keep_count: int) -> bool:
         f"SNAPSDIR={snaps_q}; "
         f"mkdir -p \"$SNAPSDIR\" && "
         f"btrfs subvolume snapshot -r {mount_q} "
-        f"\"$SNAPSDIR/home-$(date +'%Y-%m-%dT%H-%M-%S')\""
+        f"\"$SNAPSDIR/home-$(date +'%%Y-%%m-%%dT%%H-%%M-%%S')\""
     )
 
     prune_cmd = (

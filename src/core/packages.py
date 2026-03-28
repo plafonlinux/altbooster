@@ -247,9 +247,9 @@ def get_install_preview(
     )
 
     if is_dist_upgrade:
-        dry_cmd = ["env", "LC_ALL=C", "apt-get", "-s", "dist-upgrade"]
+        dry_cmd = ["apt-get", "-s", "dist-upgrade"]
     elif package_names:
-        dry_cmd = ["env", "LC_ALL=C", "apt-get", "-s", "install"] + package_names
+        dry_cmd = ["apt-get", "-s", "install"] + package_names
     else:
         return InstallPreview(
             source_type=source_type, dry_run_failed=True, package_names=package_names
@@ -268,7 +268,7 @@ def get_install_preview(
         env = {"LC_ALL": "C", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
         try:
             r = subprocess.run(
-                dry_cmd[1:],
+                dry_cmd,
                 capture_output=True, text=True, encoding="utf-8",
                 timeout=15, env=env,
             )

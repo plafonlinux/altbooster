@@ -150,19 +150,29 @@ class ActionDispatcher:
                 ok = backend.run_epm_sync(action["cmd"], page.log)
 
             elif kind == "shell":
-                r = subprocess.run(action["cmd"], capture_output=True, text=True, timeout=30)
-                if r.stdout:
-                    GLib.idle_add(page.log, r.stdout)
-                if r.stderr:
-                    GLib.idle_add(page.log, r.stderr)
-                ok = r.returncode == 0
+                cmd = action.get("cmd")
+                if not isinstance(cmd, list) or not cmd:
+                    GLib.idle_add(page.log, "✘  shell action: cmd должен быть непустым списком\n")
+                    ok = False
+                else:
+                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                    if r.stdout:
+                        GLib.idle_add(page.log, r.stdout)
+                    if r.stderr:
+                        GLib.idle_add(page.log, r.stderr)
+                    ok = r.returncode == 0
 
             elif kind == "gsettings":
                 ok = backend.run_gsettings(action["args"])
 
             elif kind == "open_url":
-                GLib.idle_add(Gio.AppInfo.launch_default_for_uri, action["url"], None)
-                ok = True
+                url = action.get("url", "")
+                if not isinstance(url, str) or not (url.startswith("https://") or url.startswith("http://")):
+                    GLib.idle_add(page.log, f"✘  open_url: недопустимая схема URL\n")
+                    ok = False
+                else:
+                    GLib.idle_add(Gio.AppInfo.launch_default_for_uri, url, None)
+                    ok = True
 
             elif kind == "builtin":
                 fn_name = action.get("fn", "")

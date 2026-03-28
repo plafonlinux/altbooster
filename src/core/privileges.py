@@ -19,12 +19,10 @@ from core import config
 OnLine = Callable[[str], None]
 OnDone = Callable[[bool], None]
 
-_CMD_WHITELIST: frozenset[str] = frozenset({
+_SAFE_CMDS: frozenset[str] = frozenset({
     "apt", "apt-get",
     "epm", "epmi",
     "flatpak",
-    "bash",
-    "sh",
     "systemctl",
     "btrfs",
     "rsync",
@@ -46,11 +44,75 @@ _CMD_WHITELIST: frozenset[str] = frozenset({
     "update-desktop-database",
     "journalctl",
     "fstrim",
+})
+
+_INTERNAL_CMDS: frozenset[str] = frozenset({
+    "bash",
+    "sh",
     "npm",
     "git",
     "tar",
     "find",
 })
+
+_CMD_WHITELIST: frozenset[str] = _SAFE_CMDS | _INTERNAL_CMDS
+
+_BLOCKED_RM_PATHS: frozenset[str] = frozenset({
+    "/", "/home", "/etc", "/boot", "/usr", "/var",
+    "/lib", "/lib64", "/bin", "/sbin", "/proc", "/sys",
+    "/run", "/dev", "/tmp",
+})
+
+
+def _check_args(cmd: Sequence[str]) -> str | None:
+    if not cmd:
+        return None
+    name, args = cmd[0], list(cmd[1:])
+
+    if name == "rm":
+        if "--no-preserve-root" in args:
+            return "rm: --no-preserve-root запрещён"
+        for arg in args:
+            if not arg.startswith("-") and os.path.normpath(arg) in _BLOCKED_RM_PATHS:
+                return f"rm: цель {arg!r} защищена"
+
+    elif name == "find":
+        for flag in ("-exec", "-execdir", "-delete", "-ok", "-okdir"):
+            if flag in args:
+                return f"find: флаг {flag!r} запрещён"
+
+    elif name == "tar":
+        for arg in args:
+            for flag in ("--to-command", "--use-compress-program", "--checkpoint-action"):
+                if arg == flag or arg.startswith(f"{flag}="):
+                    return f"tar: {flag!r} запрещён"
+
+    elif name == "git":
+        if args and args[0] == "config":
+            return "git: субкоманда 'config' запрещена"
+        if any(a == "--template" or a.startswith("--template=") for a in args):
+            return "git: --template запрещён"
+
+    elif name == "npm":
+        blocked = {"run", "exec", "x", "start", "test", "publish", "pack"}
+        if args and args[0] in blocked:
+            return f"npm: субкоманда {args[0]!r} запрещена"
+
+    elif name == "install":
+        for i, arg in enumerate(args):
+            mode_str: str | None = None
+            if arg in ("-m", "--mode") and i + 1 < len(args):
+                mode_str = args[i + 1]
+            elif arg.startswith("-m") and len(arg) > 2:
+                mode_str = arg[2:]
+            if mode_str is not None:
+                try:
+                    if int(mode_str, 8) & 0o6000:
+                        return f"install: режим {mode_str!r} содержит SUID/SGID биты"
+                except ValueError:
+                    pass
+
+    return None
 
 _current_proc: subprocess.Popen | None = None
 _current_proc_lock = threading.Lock()
@@ -59,10 +121,10 @@ _stdbuf: list[str] = ["stdbuf", "-oL"] if shutil.which("stdbuf") else []
 
 _pkexec_shell_proc: subprocess.Popen | None = None
 _pkexec_shell_lock = threading.Lock()
+_pkexec_io_lock = threading.Lock()
 
 
 def _create_and_verify_shell() -> subprocess.Popen | None:
-    global _pkexec_shell_proc
     try:
         proc = subprocess.Popen(
             ["pkexec", "bash"],
@@ -105,7 +167,6 @@ def _create_and_verify_shell() -> subprocess.Popen | None:
     reader.join(timeout=60)
 
     if found[0] is True:
-        _pkexec_shell_proc = proc
         return proc
 
     try:
@@ -126,7 +187,7 @@ def _get_pkexec_shell() -> subprocess.Popen | None:
         _pkexec_shell_proc = None
 
     if _pkexec_shell_proc is None:
-        return _create_and_verify_shell()
+        _pkexec_shell_proc = _create_and_verify_shell()
 
     return _pkexec_shell_proc
 
@@ -155,6 +216,7 @@ def start_pkexec_shell() -> tuple[bool, bool]:
             return True, False
 
         proc = _create_and_verify_shell()
+        _pkexec_shell_proc = proc
         if proc is not None:
             return True, False
         return False, False
@@ -233,7 +295,7 @@ def _wrap_epm_auto_install(cmd: Sequence[str]) -> Sequence[str]:
     )
     return ["bash", "-c", script, "--", *cmd]
 
-def _run_pkexec(cmd: Sequence[str], on_line: OnLine | None, on_done: OnDone) -> None:
+def _run_pkexec(cmd: Sequence[str], on_line: OnLine | None, on_done: OnDone, *, trusted: bool = True) -> None:
     def _emit(line: str) -> None:
         if on_line is not None:
             GLib.idle_add(on_line, line)
@@ -243,9 +305,24 @@ def _run_pkexec(cmd: Sequence[str], on_line: OnLine | None, on_done: OnDone) -> 
             GLib.idle_add(on_done, False)
             return
         if cmd[0] not in _CMD_WHITELIST:
-            msg = f"⛔  Команда отклонена (не в whitelist): {cmd[0]!r}\n"
-            _emit(msg)
+            _emit(f"⛔  Команда отклонена (не в whitelist): {cmd[0]!r}\n")
             config.log_exception(f"_run_pkexec: rejected command {cmd[0]!r}")
+            GLib.idle_add(on_done, False)
+            return
+        if not trusted and cmd[0] in _INTERNAL_CMDS:
+            _emit(
+                f"Операция заблокирована из соображений безопасности: запуск '{cmd[0]}' "
+                f"с правами администратора разрешён только встроенным функциям программы, "
+                f"но не командам из пользовательской конфигурации. "
+                f"Проверьте команду установки в настройках приложения.\n"
+            )
+            config.log_exception(f"_run_pkexec: untrusted call to internal command {cmd[0]!r}")
+            GLib.idle_add(on_done, False)
+            return
+        arg_error = _check_args(cmd)
+        if arg_error:
+            _emit(f"⛔  {arg_error}\n")
+            config.log_exception(f"_run_pkexec: blocked args: {arg_error}")
             GLib.idle_add(on_done, False)
             return
 
@@ -255,26 +332,32 @@ def _run_pkexec(cmd: Sequence[str], on_line: OnLine | None, on_done: OnDone) -> 
         elif cmd[0] == "bash" and len(cmd) >= 3:
             if "apt-get" in cmd[2] or "epm" in cmd[2] or "flatpak" in cmd[2]:
                 check_lock = True
-        if check_lock:
-            _wait_for_apt_lock(on_line)
+        if check_lock and not _wait_for_apt_lock(on_line):
+            _emit("⚠  Пакетный менеджер занят, операция отменена.\n")
+            GLib.idle_add(on_done, False)
+            return
 
         with _pkexec_shell_lock:
             proc = _get_pkexec_shell()
-
             if not proc or proc.poll() is not None:
                 _emit("⚠  Root-сессия не активна (pkexec).\n")
                 GLib.idle_add(on_done, False)
                 return
 
-            marker = f"__AB_EXIT__{uuid.uuid4().hex}__"
-            exit_line_re = re.compile(rf"^{re.escape(marker)}\s+(-?\d+)\s*$")
-            cmd_str = shlex.join(cmd)
-            script = (
-                f"(stdbuf -oL {cmd_str}) 2>&1; "
-                f"printf '%s %s\\n' '{marker}' \"$?\"\n"
-            )
+        marker = f"__AB_EXIT__{uuid.uuid4().hex}__"
+        exit_line_re = re.compile(rf"^{re.escape(marker)}\s+(-?\d+)\s*$")
+        cmd_str = shlex.join(cmd)
+        script = (
+            f"(stdbuf -oL {cmd_str}) 2>&1; "
+            f"printf '%s %s\\n' '{marker}' \"$?\"\n"
+        )
 
-            success = False
+        success = False
+        with _pkexec_io_lock:
+            if proc.poll() is not None:
+                _emit("⚠  Root-сессия была отменена.\n")
+                GLib.idle_add(on_done, False)
+                return
             try:
                 if proc.stdin:
                     proc.stdin.write(script)
@@ -299,13 +382,13 @@ def _run_pkexec(cmd: Sequence[str], on_line: OnLine | None, on_done: OnDone) -> 
             except (BrokenPipeError, OSError):
                 _emit("⚠  Root-сессия была прервана.\n")
 
-            GLib.idle_add(on_done, success)
+        GLib.idle_add(on_done, success)
 
     threading.Thread(target=_worker, daemon=True).start()
 
 
-def run_privileged(cmd: Sequence[str], on_line: OnLine | None, on_done: OnDone) -> None:
-    _run_pkexec(cmd, on_line, on_done)
+def run_privileged(cmd: Sequence[str], on_line: OnLine | None, on_done: OnDone, *, trusted: bool = True) -> None:
+    _run_pkexec(cmd, on_line, on_done, trusted=trusted)
 
 def _sync_wrapper(async_fn, cmd: Sequence[str], on_line: OnLine | None, timeout: int = 300) -> bool:
     if threading.current_thread() is threading.main_thread():
