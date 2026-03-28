@@ -158,6 +158,9 @@ class SetupPage(Gtk.Box):
             d.set_default_response("install")
 
             def _on_response(dialog, response):
+                if response == "cancel":
+                    self._log("ℹ  Установка EPM отменена — без eepm обновление системы из этой кнопки недоступно.\n")
+                    return
                 if response == "install":
                     self._r_epm_install.set_working()
                     self._log("\n▶ Установка EPM (eepm)...\n")
@@ -181,21 +184,16 @@ class SetupPage(Gtk.Box):
         row.set_working()
         win = self.get_root()
 
-        if backend.is_system_busy():
-            msg = "GNOME Software или PackageKit обновляет базу в фоне — операция будет ждать освобождения"
-            self._log(f"\n⚠  {msg}\n")
-            if hasattr(win, "add_toast"):
-                t = Adw.Toast(title=msg)
-                t.set_timeout(8)
-                GLib.idle_add(win.add_toast, t)
-
         self._log("\n▶  Обновление списка пакетов...\n")
         if hasattr(win, "start_progress"):
             win.start_progress("Обновление системы...")
 
         def on_full_upgrade_done(ok):
-            GLib.idle_add(row.set_done, False)
-            GLib.idle_add(row._btn.set_label, "Обновить")
+            def _restore_row():
+                row.set_done(False)
+                row._btn.set_label("Обновить")
+
+            GLib.idle_add(_restore_row)
             if ok:
                 self._log("\n✔  ALT Linux обновлён!\n")
             else:
@@ -209,7 +207,7 @@ class SetupPage(Gtk.Box):
 
         def _run_full_upgrade():
             self._log("\n▶  epm full-upgrade...\n")
-            backend.run_epm(["epm", "-y", "full-upgrade"], self._log, on_full_upgrade_done)
+            backend.run_epm(["epm", "full-upgrade", "-y"], self._log, on_full_upgrade_done)
 
         def on_update_done(ok):
             if not ok:
@@ -219,38 +217,50 @@ class SetupPage(Gtk.Box):
                     win.stop_progress(False)
                 return
 
+            # Иначе кнопка вечно «…», а оверлей прогресса остаётся поверх и мешает окну превью.
             def on_confirm():
+                row.set_working()
+                if hasattr(win, "start_progress"):
+                    win.start_progress("Обновление системы…")
                 _run_full_upgrade()
 
             def on_cancel():
                 self._log("\n⚠  Обновление отменено пользователем.\n")
                 _reset_row()
                 if hasattr(win, "stop_progress"):
-                    win.stop_progress(False)
+                    win.stop_progress(True)
 
             def on_no_changes():
                 _reset_row()
                 if hasattr(win, "stop_progress"):
                     win.stop_progress(True)
 
-            GLib.idle_add(
-                lambda: InstallPreviewDialog(
+            def _open_preview_after_update():
+                row.set_done(False)
+                row._btn.set_label("Обновить")
+                if hasattr(win, "stop_progress"):
+                    win.stop_progress(True)
+                self._log("\n▶  Формируется список обновлений (симуляция apt-get dist-upgrade)…\n")
+                InstallPreviewDialog(
                     parent=self.get_root(),
                     app_name="Обновление системы",
                     source_label="EPM",
-                    cmd=["apt-get", "dist-upgrade"],
+                    cmd=["epm", "full-upgrade", "-y"],
                     on_confirm=on_confirm,
                     on_cancel=on_cancel,
                     on_no_changes=on_no_changes,
-                    runner=backend.run_privileged_sync,
+                    runner=backend.run_epm_sync,
                     empty_message="Система и приложения обновлены",
                     log=self._log,
                     no_changes_message="ℹ  Система актуальна — обновлений нет.\n",
+                    window_title="Обновление системы",
+                    confirm_label="Продолжить обновление",
                 ).present()
-            )
+
+            GLib.idle_add(_open_preview_after_update)
 
         def _run_epm_update():
-            backend.run_privileged(["apt-get", "-y", "update"], self._log, on_update_done)
+            backend.run_epm(["epm", "update"], self._log, on_update_done)
 
         active_mirror = _detect_active_mirror()
         selected = getattr(self, "_selected_mirror", active_mirror)
@@ -298,7 +308,7 @@ class SetupPage(Gtk.Box):
 
         pkg_rows = [
             ("system-software-install-symbolic",   "Установить EPM",              "Пакетный менеджер eepm, необходим для утилиты", "Установить", self._on_install_epm, backend.is_epm_installed, "setting_epm_install", "Установлено", self._on_remove_epm, "Удалить", "user-trash-symbolic"),
-            ("software-update-available-symbolic", "Обновить систему (EPM)",      "Выполняет epm update и epm full-upgrade",       "Обновить",    self._on_epm,         lambda: False,            "", "Обновлено"),
+            ("software-update-available-symbolic", "Обновить систему (EPM)",      "Выполняет epm update и epm full-upgrade",       "Обновить",    self._on_epm,         lambda: False,            "setting_epm_system_update", "Обновлено"),
         ]
 
         self._r_epm_install, self._r_epm = [SettingRow(*r) for r in pkg_rows]

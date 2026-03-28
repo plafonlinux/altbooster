@@ -399,7 +399,7 @@ class TweaksPage(Gtk.Box):
 
         upgrade_row = Adw.ActionRow()
         upgrade_row.set_title("Обновление до Sisyphus")
-        upgrade_row.set_subtitle("apt-get dist-upgrade по репозиторию Sisyphus")
+        upgrade_row.set_subtitle("epm full-upgrade по репозиторию Sisyphus")
         upgrade_row.add_prefix(make_icon("system-software-update-symbolic"))
         upgrade_row.set_visible(False)
 
@@ -520,7 +520,7 @@ class TweaksPage(Gtk.Box):
     def _on_upgrade_clicked(self, btn):
         btn.set_sensitive(False)
         self._btn_revert.set_sensitive(False)
-        self._log("\n▶  Запуск dist-upgrade до Sisyphus...\n")
+        self._log("\n▶  Запуск epm full-upgrade до Sisyphus...\n")
         win = self.get_root()
         if win and hasattr(win, "start_progress"):
             win.start_progress("Обновление системы до Sisyphus...")
@@ -536,8 +536,8 @@ class TweaksPage(Gtk.Box):
             if win and hasattr(win, "stop_progress"):
                 win.stop_progress(ok)
 
-        backend.run_privileged(
-            ["apt-get", "dist-upgrade", "-y"],
+        backend.run_epm(
+            ["epm", "full-upgrade", "-y"],
             self._log, _on_done,
         )
 

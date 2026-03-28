@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -43,6 +44,27 @@ def _detect_source_type(cmd: list[str]) -> str:
     if cmd[0] == "bash":
         return "script"
     return "apt"
+
+
+def _first_non_option_arg(cmd: list[str]) -> str | None:
+    """Первый аргумент после команды, не являющийся флагом (-x, --foo)."""
+    for arg in cmd[1:]:
+        if not arg.startswith("-"):
+            return arg
+    return None
+
+
+def _is_dist_upgrade_command(cmd: list[str]) -> bool:
+    """Симуляция dist-upgrade для apt и для epm full-upgrade / upgrade (в т.ч. после глобальных флагов)."""
+    if not cmd:
+        return False
+    if cmd[0] in ("apt", "apt-get"):
+        sub = _first_non_option_arg(cmd)
+        return sub in ("dist-upgrade", "full-upgrade", "upgrade")
+    if cmd[0] in ("epm", "epmi"):
+        sub = _first_non_option_arg(cmd)
+        return sub in ("full-upgrade", "upgrade")
+    return False
 
 
 def _parse_apt_simulate_output(
@@ -240,16 +262,16 @@ def get_install_preview(
 
     package_names = _extract_pkg_names(cmd)
 
-    is_dist_upgrade = (
-        len(cmd) > 1 and cmd[1] in ("dist-upgrade", "full-upgrade", "upgrade")
-    ) or (
-        cmd[0] == "epm" and len(cmd) > 1 and cmd[1] in ("full-upgrade", "upgrade")
-    )
+    is_dist_upgrade = _is_dist_upgrade_command(cmd)
 
+    # Сухой прогон apt: локаль C нужна для строк в _parse_apt_simulate_output.
+    # — С runner (pkexec): ["env", "LC_ALL=C", "apt-get", …] — см. privileges whitelist для "env".
+    # — Без runner (subprocess): только argv apt-get, LC_ALL=C через env= os.environ + override
+    #   (раньше сюда передавали урезанный env только с PATH — ломало apt при нестандартных путях).
     if is_dist_upgrade:
-        dry_cmd = ["apt-get", "-s", "dist-upgrade"]
+        dry_argv = ["apt-get", "-s", "dist-upgrade"]
     elif package_names:
-        dry_cmd = ["apt-get", "-s", "install"] + package_names
+        dry_argv = ["apt-get", "-s", "install"] + package_names
     else:
         return InstallPreview(
             source_type=source_type, dry_run_failed=True, package_names=package_names
@@ -259,18 +281,25 @@ def get_install_preview(
     failed = False
 
     if runner is not None:
+        dry_cmd = ["env", "LC_ALL=C", *dry_argv]
         try:
             ok = runner(dry_cmd, lambda line: lines.append(line))
             failed = not ok
         except Exception:
             failed = True
     else:
-        env = {"LC_ALL": "C", "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
+        run_env = os.environ.copy()
+        run_env["LC_ALL"] = "C"
+        # simulate dist-upgrade может занимать заметное время на больших системах
+        timeout_s = 120 if is_dist_upgrade else 60
         try:
             r = subprocess.run(
-                dry_cmd,
-                capture_output=True, text=True, encoding="utf-8",
-                timeout=15, env=env,
+                dry_argv,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=timeout_s,
+                env=run_env,
             )
             lines = (r.stdout + r.stderr).splitlines(keepends=True)
             failed = r.returncode != 0
@@ -280,6 +309,9 @@ def get_install_preview(
     preview = _parse_apt_simulate_output(lines, source_type, package_names, failed)
 
     if is_dist_upgrade:
-        preview.flatpak_updates = get_flatpak_system_updates()
+        try:
+            preview.flatpak_updates = get_flatpak_system_updates()
+        except Exception:
+            preview.flatpak_updates = []
 
     return preview

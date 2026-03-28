@@ -8,7 +8,6 @@ dist/
 .DS_Store
 *.swp
 ~/.config/altbooster/
-Agent.md
-SKILL.md
-Audit.md
+skillsrules/
+CLAUDE.md
 docs/

@@ -241,12 +241,15 @@ class SettingRow(Adw.ActionRow):
         else:
             self.add_suffix(suffix_box)
 
-        if config.state_get(state_key) is True:
+        # Пустой state_key не используем для восстановления из state.json — иначе ключ ""
+        # совпадает с глобальным состоянием и блокирует кнопку без _refresh.
+        if state_key and config.state_get(state_key) is True:
             self._set_ui(True)
         elif check_fn is None:
             self._set_ui(False)
         else:
-            if "kbd" not in state_key:
+            # Пустой ключ: всегда подтягиваем UI через check_fn (см. комментарий к state_key выше).
+            if not state_key or "kbd" not in state_key:
                 threading.Thread(target=self._refresh, daemon=True).start()
 
     def _on_btn_clicked(self, _):
@@ -260,7 +263,8 @@ class SettingRow(Adw.ActionRow):
             enabled = self._check_fn()
         except Exception:
             enabled = False
-        config.state_set(self._state_key, enabled)
+        if self._state_key:
+            config.state_set(self._state_key, enabled)
         GLib.idle_add(self._set_ui, enabled)
 
     def _set_ui(self, enabled):
@@ -317,7 +321,7 @@ class SettingRow(Adw.ActionRow):
         self._btn.set_label("…")
 
     def set_done(self, ok):
-        if ok:
+        if ok and self._state_key:
             config.state_set(self._state_key, True)
         self._set_ui(ok)
         if not ok:
@@ -325,7 +329,7 @@ class SettingRow(Adw.ActionRow):
             self._btn.set_sensitive(True)
 
     def set_undo_done(self, ok):
-        if ok:
+        if ok and self._state_key:
             config.state_set(self._state_key, False)
             self._set_ui(False)
         else:

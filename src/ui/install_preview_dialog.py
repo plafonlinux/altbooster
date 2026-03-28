@@ -9,9 +9,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gdk, Gtk
 
+from core import config
 from core.packages import InstallPreview, get_install_preview
 
-_MAX_PKG_ROWS = 20
+_MAX_PKG_ROWS = 60
 
 
 class InstallPreviewDialog(Adw.Window):
@@ -29,13 +30,15 @@ class InstallPreviewDialog(Adw.Window):
         empty_message: str = "Нет изменений — пакет уже установлен.",
         log=None,
         no_changes_message: str | None = None,
+        window_title: str | None = None,
+        confirm_label: str | None = None,
     ):
         super().__init__()
         self.set_transient_for(parent)
         self.set_modal(True)
         self.set_default_size(580, 750)
         self.set_resizable(True)
-        self.set_title(f"Установка {app_name}")
+        self.set_title(window_title if window_title else f"Установка {app_name}")
 
         self._app_name = app_name
         self._source_label = source_label
@@ -49,7 +52,7 @@ class InstallPreviewDialog(Adw.Window):
         self._log = log
         self._no_changes_message = no_changes_message or f"ℹ  «{app_name}»: уже установлен, обновлять нечего.\n"
 
-        self._confirm_btn = Gtk.Button(label="Продолжить установку")
+        self._confirm_btn = Gtk.Button(label=confirm_label or "Продолжить установку")
         self._confirm_btn.add_css_class("suggested-action")
         self._confirm_btn.add_css_class("pill")
         self._confirm_btn.set_sensitive(False)
@@ -115,7 +118,11 @@ class InstallPreviewDialog(Adw.Window):
         self._scroll.set_child(box)
 
     def _run_preview_thread(self):
-        preview = get_install_preview(self._cmd, runner=self._runner)
+        try:
+            preview = get_install_preview(self._cmd, runner=self._runner)
+        except Exception as e:
+            config.log_exception("InstallPreviewDialog: get_install_preview")
+            preview = InstallPreview(dry_run_failed=True, errors=[str(e)])
         GLib.idle_add(self._on_preview_ready, preview)
 
     def _on_preview_ready(self, preview: InstallPreview):
@@ -307,10 +314,10 @@ class InstallPreviewDialog(Adw.Window):
         card.add_css_class("card")
 
         flow = Gtk.FlowBox()
-        flow.set_max_children_per_line(1)
-        flow.set_min_children_per_line(1)
+        flow.set_max_children_per_line(3)
+        flow.set_min_children_per_line(2)
         flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        flow.set_homogeneous(False)
+        flow.set_homogeneous(True)
         flow.set_row_spacing(0)
         flow.set_column_spacing(0)
         flow.set_margin_top(4)
@@ -330,16 +337,14 @@ class InstallPreviewDialog(Adw.Window):
                 icon = Gtk.Image.new_from_icon_name(icon_name)
                 icon.set_pixel_size(14)
                 icon.add_css_class("dim-label")
-                icon.set_valign(Gtk.Align.START)
-                icon.set_margin_top(2)
+                icon.set_valign(Gtk.Align.CENTER)
                 item.append(icon)
             except Exception:
                 pass
 
             lbl = Gtk.Label(label=pkg)
             lbl.set_halign(Gtk.Align.START)
-            lbl.set_hexpand(True)
-            lbl.set_wrap(True)
+            lbl.set_ellipsize(3)
             lbl.set_xalign(0)
             item.append(lbl)
 
@@ -375,10 +380,10 @@ class InstallPreviewDialog(Adw.Window):
         flow_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
         flow = Gtk.FlowBox()
-        flow.set_max_children_per_line(1)
-        flow.set_min_children_per_line(1)
+        flow.set_max_children_per_line(3)
+        flow.set_min_children_per_line(2)
         flow.set_selection_mode(Gtk.SelectionMode.NONE)
-        flow.set_homogeneous(False)
+        flow.set_homogeneous(True)
         flow.set_row_spacing(0)
         flow.set_column_spacing(0)
         flow.set_margin_top(4)
@@ -396,16 +401,14 @@ class InstallPreviewDialog(Adw.Window):
                 icon = Gtk.Image.new_from_icon_name("changes-prevent-symbolic")
                 icon.set_pixel_size(14)
                 icon.add_css_class("dim-label")
-                icon.set_valign(Gtk.Align.START)
-                icon.set_margin_top(2)
+                icon.set_valign(Gtk.Align.CENTER)
                 item.append(icon)
             except Exception:
                 pass
 
             lbl = Gtk.Label(label=pkg)
             lbl.set_halign(Gtk.Align.START)
-            lbl.set_hexpand(True)
-            lbl.set_wrap(True)
+            lbl.set_ellipsize(3)
             lbl.set_xalign(0)
             item.append(lbl)
 
@@ -522,8 +525,6 @@ class InstallPreviewDialog(Adw.Window):
 
     def _on_cancel_clicked(self, _):
         self.close()
-        if not self._confirmed:
-            self._on_cancel()
 
     def _on_close_request(self, _) -> bool:
         if not self._confirmed:

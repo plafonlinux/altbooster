@@ -59,6 +59,8 @@ def load_state() -> None:
             data = json.load(f)
         with _state_lock:
             _state = data
+            # Старые версии: пустой ключ в state.json блокировал кнопку «Обновить систему».
+            _state.pop("", None)
     except (OSError, json.JSONDecodeError):
         with _state_lock:
             _state = {}

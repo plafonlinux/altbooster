@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import threading
 import time
@@ -20,6 +19,8 @@ OnLine = Callable[[str], None]
 OnDone = Callable[[bool], None]
 
 _SAFE_CMDS: frozenset[str] = frozenset({
+    # Нужен для packages.get_install_preview → env LC_ALL=C apt-get -s …
+    "env",
     "apt", "apt-get",
     "epm", "epmi",
     "flatpak",
@@ -44,6 +45,8 @@ _SAFE_CMDS: frozenset[str] = frozenset({
     "update-desktop-database",
     "journalctl",
     "fstrim",
+    # /usr/sbin/control (ALT): tabs/setup.py run_privileged при отключении sudo
+    "control",
 })
 
 _INTERNAL_CMDS: frozenset[str] = frozenset({
@@ -68,6 +71,15 @@ def _check_args(cmd: Sequence[str]) -> str | None:
     if not cmd:
         return None
     name, args = cmd[0], list(cmd[1:])
+
+    if name == "env":
+        # Only allow "env LC_ALL=C <argv...>" for reproducible apt-get -s output.
+        if len(args) < 2 or args[0] != "LC_ALL=C":
+            return "env: разрешён только префикс LC_ALL=C для следующей команды"
+
+    if name == "control":
+        if len(args) < 2 or args[0] != "sudowheel":
+            return "control: разрешена только субкоманда sudowheel"
 
     if name == "rm":
         if "--no-preserve-root" in args:
@@ -117,7 +129,14 @@ def _check_args(cmd: Sequence[str]) -> str | None:
 _current_proc: subprocess.Popen | None = None
 _current_proc_lock = threading.Lock()
 
-_stdbuf: list[str] = ["stdbuf", "-oL"] if shutil.which("stdbuf") else []
+
+def _stdbuf_line_prefix() -> str:
+    """Префикс line-buffer для вывода в pkexec bash. PATH у root может не содержать stdbuf из user PATH."""
+    for p in ("/usr/bin/stdbuf", "/bin/stdbuf"):
+        if os.path.isfile(p):
+            return f"{p} -oL "
+    return ""
+
 
 _pkexec_shell_proc: subprocess.Popen | None = None
 _pkexec_shell_lock = threading.Lock()
@@ -226,8 +245,11 @@ def _is_apt_locked() -> bool:
     for lock_file in config.APT_LOCK_FILES:
         if not os.path.exists(lock_file):
             continue
-        if subprocess.run(["fuser", lock_file], capture_output=True, timeout=5).returncode == 0:
-            return True
+        try:
+            if subprocess.run(["fuser", lock_file], capture_output=True, timeout=5).returncode == 0:
+                return True
+        except (OSError, subprocess.TimeoutExpired):
+            pass
     return False
 
 def _wait_for_apt_lock(on_line: OnLine | None = None, timeout: int = 60) -> bool:
@@ -286,12 +308,14 @@ def _wrap_epm_auto_install(cmd: Sequence[str]) -> Sequence[str]:
     if not cmd or cmd[0] not in ("epm", "epmi"):
         return cmd
 
+    stdbuf_run = _stdbuf_line_prefix().rstrip()
+    tail = f'{stdbuf_run} \"$@\"' if stdbuf_run else "\"$@\""
     script = (
         "if ! rpm -q eepm >/dev/null 2>&1; then "
         "echo -e '▶ EPM не найден. Выполняется установка eepm...\\n'; "
         "export DEBIAN_FRONTEND=noninteractive; "
         "apt-get install -y eepm; "
-        "fi && stdbuf -oL \"$@\""
+        f"fi && {tail}"
     )
     return ["bash", "-c", script, "--", *cmd]
 
@@ -301,88 +325,101 @@ def _run_pkexec(cmd: Sequence[str], on_line: OnLine | None, on_done: OnDone, *, 
             GLib.idle_add(on_line, line)
 
     def _worker() -> None:
-        if not cmd:
-            GLib.idle_add(on_done, False)
-            return
-        if cmd[0] not in _CMD_WHITELIST:
-            _emit(f"⛔  Команда отклонена (не в whitelist): {cmd[0]!r}\n")
-            config.log_exception(f"_run_pkexec: rejected command {cmd[0]!r}")
-            GLib.idle_add(on_done, False)
-            return
-        if not trusted and cmd[0] in _INTERNAL_CMDS:
-            _emit(
-                f"Операция заблокирована из соображений безопасности: запуск '{cmd[0]}' "
-                f"с правами администратора разрешён только встроенным функциям программы, "
-                f"но не командам из пользовательской конфигурации. "
-                f"Проверьте команду установки в настройках приложения.\n"
-            )
-            config.log_exception(f"_run_pkexec: untrusted call to internal command {cmd[0]!r}")
-            GLib.idle_add(on_done, False)
-            return
-        arg_error = _check_args(cmd)
-        if arg_error:
-            _emit(f"⛔  {arg_error}\n")
-            config.log_exception(f"_run_pkexec: blocked args: {arg_error}")
-            GLib.idle_add(on_done, False)
-            return
-
-        check_lock = False
-        if cmd[0] in ("apt", "apt-get", "flatpak", "epm", "epmi"):
-            check_lock = True
-        elif cmd[0] == "bash" and len(cmd) >= 3:
-            if "apt-get" in cmd[2] or "epm" in cmd[2] or "flatpak" in cmd[2]:
-                check_lock = True
-        if check_lock and not _wait_for_apt_lock(on_line):
-            _emit("⚠  Пакетный менеджер занят, операция отменена.\n")
-            GLib.idle_add(on_done, False)
-            return
-
-        with _pkexec_shell_lock:
-            proc = _get_pkexec_shell()
-            if not proc or proc.poll() is not None:
-                _emit("⚠  Root-сессия не активна (pkexec).\n")
-                GLib.idle_add(on_done, False)
-                return
-
-        marker = f"__AB_EXIT__{uuid.uuid4().hex}__"
-        exit_line_re = re.compile(rf"^{re.escape(marker)}\s+(-?\d+)\s*$")
-        cmd_str = shlex.join(cmd)
-        script = (
-            f"(stdbuf -oL {cmd_str}) 2>&1; "
-            f"printf '%s %s\\n' '{marker}' \"$?\"\n"
-        )
-
         success = False
-        with _pkexec_io_lock:
-            if proc.poll() is not None:
-                _emit("⚠  Root-сессия была отменена.\n")
+        try:
+            if not cmd:
                 GLib.idle_add(on_done, False)
                 return
-            try:
-                if proc.stdin:
-                    proc.stdin.write(script)
-                    proc.stdin.flush()
+            if cmd[0] not in _CMD_WHITELIST:
+                _emit(f"⛔  Команда отклонена (не в whitelist): {cmd[0]!r}\n")
+                config.log_exception(f"_run_pkexec: rejected command {cmd[0]!r}")
+                GLib.idle_add(on_done, False)
+                return
+            if not trusted and cmd[0] in _INTERNAL_CMDS:
+                _emit(
+                    f"Операция заблокирована из соображений безопасности: запуск '{cmd[0]}' "
+                    f"с правами администратора разрешён только встроенным функциям программы, "
+                    f"но не командам из пользовательской конфигурации. "
+                    f"Проверьте команду установки в настройках приложения.\n"
+                )
+                config.log_exception(f"_run_pkexec: untrusted call to internal command {cmd[0]!r}")
+                GLib.idle_add(on_done, False)
+                return
+            arg_error = _check_args(cmd)
+            if arg_error:
+                _emit(f"⛔  {arg_error}\n")
+                config.log_exception(f"_run_pkexec: blocked args: {arg_error}")
+                GLib.idle_add(on_done, False)
+                return
 
-                if proc.stdout:
-                    while True:
-                        line = proc.stdout.readline()
-                        if not line:
-                            break
+            check_lock = False
+            if cmd[0] in ("apt", "apt-get", "flatpak", "epm", "epmi"):
+                check_lock = True
+            elif (
+                cmd[0] == "env"
+                and len(cmd) >= 4
+                and cmd[1] == "LC_ALL=C"
+                and cmd[2] in ("apt", "apt-get", "flatpak", "epm", "epmi")
+            ):
+                check_lock = True
+            elif cmd[0] == "bash" and len(cmd) >= 3:
+                if "apt-get" in cmd[2] or "epm" in cmd[2] or "flatpak" in cmd[2]:
+                    check_lock = True
+            if check_lock and not _wait_for_apt_lock(on_line):
+                _emit("⚠  Пакетный менеджер занят, операция отменена.\n")
+                GLib.idle_add(on_done, False)
+                return
 
-                        stripped = line.rstrip("\r\n")
-                        m = exit_line_re.match(stripped)
-                        if m:
-                            try:
-                                success = int(m.group(1)) == 0
-                            except ValueError:
-                                success = False
-                            break
+            with _pkexec_shell_lock:
+                proc = _get_pkexec_shell()
+                if not proc or proc.poll() is not None:
+                    _emit("⚠  Root-сессия не активна (pkexec).\n")
+                    GLib.idle_add(on_done, False)
+                    return
 
-                        _emit(line)
-            except (BrokenPipeError, OSError):
-                _emit("⚠  Root-сессия была прервана.\n")
+            marker = f"__AB_EXIT__{uuid.uuid4().hex}__"
+            exit_line_re = re.compile(rf"^{re.escape(marker)}\s+(-?\d+)\s*$")
+            cmd_str = shlex.join(cmd)
+            stdbuf_p = _stdbuf_line_prefix()
+            script = (
+                f"({stdbuf_p}{cmd_str}) 2>&1; "
+                f"printf '%s %s\\n' '{marker}' \"$?\"\n"
+            )
 
-        GLib.idle_add(on_done, success)
+            with _pkexec_io_lock:
+                if proc.poll() is not None:
+                    _emit("⚠  Root-сессия была отменена.\n")
+                    GLib.idle_add(on_done, False)
+                    return
+                try:
+                    if proc.stdin:
+                        proc.stdin.write(script)
+                        proc.stdin.flush()
+
+                    if proc.stdout:
+                        while True:
+                            line = proc.stdout.readline()
+                            if not line:
+                                break
+
+                            stripped = line.rstrip("\r\n")
+                            m = exit_line_re.match(stripped)
+                            if m:
+                                try:
+                                    success = int(m.group(1)) == 0
+                                except ValueError:
+                                    success = False
+                                break
+
+                            _emit(line)
+                except (BrokenPipeError, OSError):
+                    _emit("⚠  Root-сессия была прервана.\n")
+
+            GLib.idle_add(on_done, success)
+        except Exception:
+            config.log_exception("_run_pkexec: unexpected exception in _worker")
+            _emit("⚠  Внутренняя ошибка при выполнении команды. Смотрите лог.\n")
+            GLib.idle_add(on_done, False)
 
     threading.Thread(target=_worker, daemon=True).start()
 
