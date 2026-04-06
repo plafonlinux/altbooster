@@ -836,7 +836,7 @@ class AltBoosterWindow(Adw.ApplicationWindow):
             if ok:
                 GLib.idle_add(self._auth_ok)
             else:
-                GLib.idle_add(self.get_application().quit)
+                GLib.idle_add(self._show_pkexec_error)
 
         threading.Thread(target=_check, daemon=True).start()
 
@@ -860,6 +860,24 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         if config.INITIAL_TAB and config.INITIAL_TAB in self._pages:
             GLib.idle_add(self._stack.set_visible_child_name, config.INITIAL_TAB)
         GLib.timeout_add(2000, self._warmup_search_cache)
+
+    def _show_pkexec_error(self):
+        self._op_card.set_visible(False)
+        dialog = Adw.AlertDialog(
+            heading="Ошибка авторизации",
+            body=(
+                "Не удалось запустить pkexec.\n\n"
+                "Возможная причина: в вашем сеансе не запущен агент аутентификации Polkit "
+                "(polkit-gnome, xfce-polkit и др.).\n\n"
+                "Добавьте запуск агента в автостарт вашего окружения рабочего стола, "
+                "например:\n"
+                "<tt>polkit-gnome-authentication-agent-1</tt>"
+            ),
+        )
+        dialog.add_response("quit", "Закрыть")
+        dialog.set_default_response("quit")
+        dialog.connect("response", lambda d, _r: self.get_application().quit())
+        dialog.present(self)
 
     def _warmup_search_cache(self) -> bool:
         from ui.global_search import build_all_search_items

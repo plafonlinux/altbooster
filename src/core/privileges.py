@@ -142,6 +142,78 @@ _pkexec_shell_proc: subprocess.Popen | None = None
 _pkexec_shell_lock = threading.Lock()
 _pkexec_io_lock = threading.Lock()
 
+_polkit_agent_proc: subprocess.Popen | None = None
+
+_POLKIT_AGENTS = [
+    "/usr/libexec/polkit-1/polkit-gnome-authentication-agent-1",
+    "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1",
+    "/usr/libexec/polkit-gnome-authentication-agent-1",
+    "/usr/lib/x86_64-linux-gnu/polkit-gnome-authentication-agent-1",
+    "/usr/lib/aarch64-linux-gnu/polkit-gnome-authentication-agent-1",
+    "/usr/lib/xfce4/polkit-xfce-authentication-agent-1",
+    "/usr/libexec/xfce-polkit",
+    "lxpolkit",
+    "/usr/lib/lxqt-policykit/lxqt-policykit-agent",
+    "/usr/libexec/kf6/polkit-kde-authentication-agent-1",
+    "/usr/libexec/polkit-kde-authentication-agent-1",
+]
+
+
+def _is_polkit_agent_running() -> bool:
+    """Проверяет, зарегистрирован ли polkit authentication agent через D-Bus."""
+    try:
+        result = subprocess.run(
+            [
+                "busctl", "--user", "list", "--no-pager",
+            ],
+            capture_output=True, text=True, timeout=3,
+        )
+        return "org.freedesktop.PolicyKit1.AuthenticationAgent" in result.stdout
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            [
+                "gdbus", "call", "--session",
+                "--dest", "org.freedesktop.DBus",
+                "--object-path", "/org/freedesktop/DBus",
+                "--method", "org.freedesktop.DBus.ListNames",
+            ],
+            capture_output=True, text=True, timeout=3,
+        )
+        return "org.freedesktop.PolicyKit1.AuthenticationAgent" in result.stdout
+    except Exception:
+        return False
+
+
+def try_start_polkit_agent() -> bool:
+    """Пробует запустить один из известных polkit агентов. Возвращает True если агент стартовал."""
+    global _polkit_agent_proc
+
+    if _is_polkit_agent_running():
+        return True
+
+    for agent_path in _POLKIT_AGENTS:
+        exe = agent_path if os.path.isabs(agent_path) else None
+        if exe is None:
+            import shutil as _shutil
+            exe = _shutil.which(agent_path)
+        if exe and os.path.isfile(exe):
+            try:
+                _polkit_agent_proc = subprocess.Popen(
+                    [exe],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                # Дать агенту время зарегистрироваться в D-Bus
+                for _ in range(10):
+                    time.sleep(0.3)
+                    if _is_polkit_agent_running():
+                        return True
+            except Exception:
+                config.log_exception(f"try_start_polkit_agent: failed to start {exe!r}")
+    return False
+
 
 def _create_and_verify_shell() -> subprocess.Popen | None:
     try:
@@ -235,9 +307,19 @@ def start_pkexec_shell() -> tuple[bool, bool]:
             return True, False
 
         proc = _create_and_verify_shell()
-        _pkexec_shell_proc = proc
         if proc is not None:
+            _pkexec_shell_proc = proc
             return True, False
+
+        # pkexec не смог запустить диалог — попробуем запустить polkit agent
+        agent_started = try_start_polkit_agent()
+        if agent_started:
+            proc = _create_and_verify_shell()
+            if proc is not None:
+                _pkexec_shell_proc = proc
+                return True, False
+
+        _pkexec_shell_proc = None
         return False, False
 
 

@@ -357,7 +357,11 @@ class AppRow(Adw.ActionRow):
         self._install_event.set()
         self._state_key = f"app_{app['id']}"
         self._installed_source_index = -1
-        self._selected_source_index = 0
+        flathub_idx = next(
+            (i for i, s in enumerate(self._sources) if "flathub" in s.get("label", "").lower()),
+            None,
+        )
+        self._selected_source_index = flathub_idx if flathub_idx is not None else 0
         self.connect("unrealize", self._on_unrealize)
 
         self.set_title(app["label"])
@@ -667,6 +671,32 @@ class AppRow(Adw.ActionRow):
 
         dialog.connect("response", on_response)
         dialog.present(self.get_root())
+
+    def _on_install_batch(self):
+        """Установка без диалога предпросмотра — для массовой установки."""
+        if self._installing or self.is_installed():
+            self._install_event.set()
+            return
+
+        idx = self._selected_source_index
+        if idx < 0 or idx >= len(self._sources):
+            idx = 0
+
+        if not self._sources:
+            self._log("\n✘  Нет источников установки для этого приложения.\n")
+            self._install_event.set()
+            return
+
+        src = self._sources[idx]
+        cmd = list(src["cmd"])
+        is_epm = bool(cmd and cmd[0] == "epm")
+
+        self._btn.set_sensitive(False)
+        self._btn.set_label("…")
+        if self._src_menu_btn:
+            self._src_menu_btn.set_sensitive(False)
+
+        self._do_install(src, cmd, is_epm)
 
     def _show_preview_then_install(self, src, cmd, is_epm):
         def on_confirm():

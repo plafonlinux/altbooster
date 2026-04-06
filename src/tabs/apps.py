@@ -957,7 +957,7 @@ class AppsPage(Gtk.Box):
             if self._cancel_install:
                 break
             row._install_event.clear()
-            GLib.idle_add(row._on_install)
+            GLib.idle_add(row._on_install_batch)
             row._install_event.wait(timeout=300)
         GLib.idle_add(self._done)
 

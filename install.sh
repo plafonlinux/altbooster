@@ -10,6 +10,45 @@ BIN="/usr/local/bin/altbooster"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'; BOLD='\033[1m'
 
+# ── Обнаружение Niri (только в user-контексте) ──────────────────────────────
+_detect_niri() {
+    [[ "${XDG_SESSION_DESKTOP:-}" == "niri" ]] && return 0
+    [[ "${XDG_CURRENT_DESKTOP:-}" == *niri* ]] && return 0
+    return 1
+}
+
+# ── Добавить polkit agent в автостарт Niri (как user) ───────────────────────
+_setup_niri_autostart() {
+    local agent=""
+    for _p in \
+        "/usr/libexec/polkit-1/polkit-gnome-authentication-agent-1" \
+        "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1" \
+        "/usr/libexec/polkit-gnome-authentication-agent-1" \
+        "/usr/libexec/xfce-polkit" \
+        "/usr/lib/xfce4/polkit-xfce-authentication-agent-1" \
+        "lxpolkit"
+    do
+        if [[ -x "$_p" ]] || command -v "$_p" >/dev/null 2>&1; then
+            agent="$_p"
+            break
+        fi
+    done
+
+    if [[ -z "$agent" ]]; then
+        echo -e "  ${YELLOW}⚠  Polkit agent не найден — добавьте его в автостарт Niri вручную.${NC}"
+        return
+    fi
+
+    local cfg="$HOME/.config/niri/config.kdl"
+    if [[ -f "$cfg" ]] && grep -qF "$agent" "$cfg"; then
+        echo -e "  ${GREEN}✔${NC} Polkit agent уже в конфиге Niri."
+        return
+    fi
+
+    printf '\n// Polkit authentication agent (добавлен ALT Booster installer)\nspawn-at-startup "%s"\n' "$agent" >> "$cfg"
+    echo -e "  ${GREEN}✔${NC} Polkit agent добавлен в автостарт Niri: ${BOLD}$agent${NC}"
+}
+
 if [[ $EUID -ne 0 ]]; then
     DE="${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-unknown}}"
     if [[ ! "$DE" =~ [Gg][Nn][Oo][Mm][Ee] ]]; then
@@ -21,16 +60,28 @@ if [[ $EUID -ne 0 ]]; then
         [[ "$_confirm" =~ ^[Yy]$ ]] || exit 0
         echo ""
     fi
+
+    # Передаём флаг --niri в root-часть скрипта
+    _extra_args=()
+    _detect_niri && _extra_args+=("--niri")
+
     echo -e "${YELLOW}🔒 Требуются права root...${NC}"
-    # На чистой установке ALT Linux sudo может быть не настроен.
-    # Пробуем использовать pkexec (запросит пароль root).
     if command -v pkexec >/dev/null 2>&1; then
-        pkexec "$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")" "$@"
-        exit $?
+        pkexec "$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")" "$@" "${_extra_args[@]}"
+        _root_exit=$?
     else
-        sudo "$0" "$@"
-        exit $?
+        sudo "$0" "$@" "${_extra_args[@]}"
+        _root_exit=$?
     fi
+
+    # После root-установки настраиваем Niri в user-контексте
+    if [[ $_root_exit -eq 0 ]] && _detect_niri; then
+        echo ""
+        echo -e "  ${YELLOW}▶${NC} Настройка Niri..."
+        _setup_niri_autostart
+    fi
+
+    exit $_root_exit
 fi
 
 echo -e "${BOLD}"
@@ -56,6 +107,23 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
     apt-get install -y "${MISSING[@]}" || fail "Не удалось установить зависимости"
 fi
 ok
+
+# Установка polkit-gnome для Niri
+if [[ " $* " == *" --niri "* ]]; then
+    step "Установка polkit agent для Niri"
+    _agent_found=false
+    for _p in \
+        "/usr/libexec/polkit-1/polkit-gnome-authentication-agent-1" \
+        "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1" \
+        "/usr/libexec/polkit-gnome-authentication-agent-1"
+    do
+        [[ -x "$_p" ]] && { _agent_found=true; break; }
+    done
+    if [[ "$_agent_found" == "false" ]]; then
+        apt-get install -y polkit-gnome 2>/dev/null || true
+    fi
+    ok
+fi
 
 # Файлы приложения
 step "Копирование файлов"
