@@ -21,13 +21,14 @@ from core.sched_ext import has_sched_ext
 from tabs.intel import ScxMeteorTweaksSection
 from tabs.scx_sched_ext import SchedExtSupportSection
 from tabs.system76_scheduler import System76SchedulerTweaksSection
+from tabs.napd import NapdTweaksSection
 
 _ANANICY_RULES_REPO = "https://github.com/CachyOS/ananicy-rules"
 _ANANICY_RULES_DIR  = "/etc/ananicy.d/cachyos-rules"
 _ALT_ZERO_GUIDE_URL = "https://plafon.gitbook.io/alt-zero"
 
 _KERNEL_SCHED_SEARCH_IDS = frozenset({"sched_ext", "scx", "intel_scx_meteor"})
-_USERSPACE_SCHED_SEARCH_IDS = frozenset({"ananicy", "system76_scheduler"})
+_USERSPACE_SCHED_SEARCH_IDS = frozenset({"ananicy", "system76_scheduler", "napd"})
 
 # Pill badge (Sisyphus-only packages, orange) + red emphasis for irreversible migration warning row.
 _tweak_page_css = Gtk.CssProvider()
@@ -190,6 +191,11 @@ class TweaksPage(Gtk.Box):
         self._system76_section = System76SchedulerTweaksSection(self._log, self)
         w_s76 = self._system76_section.append_to(body_prio)
         self._search_focus_widgets["system76_scheduler"] = w_s76
+
+        self._napd_section = NapdTweaksSection(self._log, self)
+        w_napd = self._napd_section.append_to(body_prio)
+        self._search_focus_widgets["napd"] = w_napd
+
         self._sub_stack.add_titled_with_icon(
             scroll_prio, "userspace_prio", "Приоритеты процессов", "system-run-symbolic",
         )

@@ -640,6 +640,11 @@ class FlatpakPage(Gtk.Box):
         group.add(flathub_row)
         self._fp_section_rows["connect"] = flathub_row
 
+        def _check_flathub_row_visibility():
+            if backend.is_flathub_enabled():
+                GLib.idle_add(flathub_row.set_visible, False)
+        threading.Thread(target=_check_flathub_row_visibility, daemon=True).start()
+
         expander = Adw.ExpanderRow()
         expander.set_title("Обслуживание Flatpak")
         expander.set_expanded(False)
@@ -675,6 +680,7 @@ class FlatpakPage(Gtk.Box):
             if hasattr(win, "stop_progress"):
                 win.stop_progress(ok2)
             if ok2:
+                row.set_visible(False)
                 GLib.idle_add(self._ask_restart)
 
         def step2(ok):

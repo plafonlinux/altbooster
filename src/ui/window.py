@@ -59,6 +59,11 @@ class AltBoosterWindow(Adw.ApplicationWindow):
         start_time = time.time()
         super().__init__(**kwargs)
 
+        _desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+        _is_gnome = "gnome" in _desktop
+        if not _is_gnome:
+            self._MAIN_TABS = [t for t in self._MAIN_TABS if t[0] != "extensions"]
+
         icon_theme = "Adwaita"
         if not os.path.exists("/usr/share/icons/Adwaita") and os.path.exists("/usr/share/icons/alt-workstation"):
             icon_theme = "alt-workstation"

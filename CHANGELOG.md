@@ -75,6 +75,7 @@ _Текущая ветка разработки. Изменения уточня
 - **Приложения — Flathub как источник по умолчанию**: при наличии Flathub среди источников он выбирается автоматически вместо первого в списке (`_selected_source_index` инициализируется индексом источника с `"flathub"` в label)
 - **`privileges.py` — авто-запуск polkit agent на Niri и других WM без встроенного агента**: `start_pkexec_shell()` при неудаче первой попытки запускает `try_start_polkit_agent()` — перебирает известные агенты (`polkit-gnome`, `xfce-polkit`, `lxpolkit` и др.) и ждёт регистрации в D-Bus; при невозможности запустить агент показывается `Adw.AlertDialog` с объяснением и подсказкой вместо тихого выхода
 - **`install.sh` — автонастройка Niri**: при обнаружении Niri (`XDG_SESSION_DESKTOP=niri`) устанавливается `polkit-gnome` если агент не найден, а путь к агенту автоматически добавляется в `spawn-at-startup` в `~/.config/niri/config.kdl`
+- **`window.py` — вкладка «Расширения» скрыта на не-GNOME окружениях**: при запуске вне GNOME (`XDG_CURRENT_DESKTOP` не содержит `gnome`) вкладка не добавляется в интерфейс — она не функциональна без GNOME Shell
 - **Приложения — массовая установка без подтверждения на каждый пакет**: при запуске через «Установить выбранные (N)» каждое приложение устанавливается напрямую через `_on_install_batch`, минуя `InstallPreviewDialog`; диалог подтверждения показывается один раз перед всей очередью
 
 ### Добавлено
@@ -82,6 +83,8 @@ _Текущая ветка разработки. Изменения уточня
 - **Вкладка «Расширения»**: в рекомендуемые добавлено **UPower Battery** ([extensions.gnome.org/extension/5165/upower-battery/](https://extensions.gnome.org/extension/5165/upower-battery/)) — индикатор батареи на основе UPower
 - **Вкладка «Приложения» — Программирование**: **Cursor** (`epm play`), **context7 MCP сервер** (скрипт `npx ctx7 setup --cursor` от имени пользователя)
 - **Вкладка «Приложения» — Нейросети и вайбкодинг**: **Gemini CLI** (`npm install -g @google/gemini-cli`), **Claude Code** (скрипт с claude.ai), **Warp** (`epm play warp-terminal`)
+- **Расширения — Zorkiy**: добавлено в рекомендуемые расширения GNOME; UUID `zorkiy@toxblh.ru`, устанавливается напрямую из GitHub ([github.com/Toxblh/gnome-shell-extension-zorkiy](https://github.com/Toxblh/gnome-shell-extension-zorkiy)); следит за активным окном и сообщает об этом system76-scheduler — минимальная замена pop-shell для его интеграции без тайлинга; добавлена поддержка установки расширений с префиксом `github:` в `_on_install_ext` / новый метод `_install_from_github`
+- **Твики → Приоритеты процессов — napd**: новый блок `NapdTweaksSection` рядом с system76-scheduler; аналог macOS App Nap для Linux — снижает приоритет фоновых приложений (CPU nice +19, SCHED_BATCH, I/O idle, cgroup cpu.max), восстанавливает при получении фокуса, обходит аудио-приложения через PipeWire; автор: [@Toxblh](https://github.com/Toxblh); сборка из исходников ([github.com/Toxblh/napd](https://github.com/Toxblh/napd)), бинарник в `/usr/local/bin/napd`, пользовательский systemd-сервис в `~/.config/systemd/user/`; требует Wayland с `zwlr_foreign_toplevel_manager_v1` (Niri, Sway и другие wlroots-композиторы) и cgroup v2
 
 ## [5.6.9] — 2026-03-23
 

@@ -201,14 +201,43 @@ class MirrorPage(Gtk.Box):
 
     def _build_ext4_page(self, fs: str | None = None) -> Gtk.Widget:
         wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        ensure_mirror_warning_styles()
 
         if fs and fs != "ext4":
-            banner = Adw.Banner()
-            banner.set_title(f"Недоступно: корневая файловая система — {fs.upper()}, а не EXT4")
-            banner.add_css_class("ab-mirror-floating-warning")
-            banner.set_revealed(True)
-            wrapper.append(banner)
+            banner_outer = Gtk.Box()
+            banner_outer.set_halign(Gtk.Align.CENTER)
+            banner_outer.set_margin_top(10)
+            banner_outer.set_margin_bottom(4)
+            banner_outer.set_opacity(0.6)
+
+            banner_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            banner_box.add_css_class("ab-float-banner")
+
+            banner_label = Gtk.Label()
+            banner_label.set_text(
+                f"Недоступно: корневая файловая система — {fs.upper()}, а не EXT4"
+            )
+            banner_label.set_wrap(True)
+            banner_label.set_xalign(0.0)
+
+            close_btn = Gtk.Button()
+            close_btn.set_icon_name("window-close-symbolic")
+            close_btn.set_tooltip_text("Закрыть")
+            close_btn.add_css_class("flat")
+            close_btn.add_css_class("circular")
+            close_btn.set_valign(Gtk.Align.CENTER)
+
+            banner_box.append(banner_label)
+            banner_box.append(close_btn)
+            banner_outer.append(banner_box)
+
+            revealer = Gtk.Revealer()
+            revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+            revealer.set_transition_duration(300)
+            revealer.set_child(banner_outer)
+            revealer.set_reveal_child(True)
+
+            close_btn.connect("clicked", lambda _: revealer.set_reveal_child(False))
+            wrapper.append(revealer)
 
         scroll, body = make_scrolled_page()
         wrapper.append(scroll)

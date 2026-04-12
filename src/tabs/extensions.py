@@ -231,6 +231,14 @@ RECOMMENDED = [
         "Добавляет кнопки «Следующий трек» и «Предыдущий» в контекстное меню медиаплеера.",
         "7600",
     ),
+    (
+        "zorkiy@toxblh.ru",
+        "Zorkiy",
+        "Сообщает system76-scheduler об активном окне, чтобы тот мог поднимать приоритет "
+        "сфокусированного приложения. Минимальная замена pop-shell для интеграции с планировщиком "
+        "без тайлинга и прочих функций Pop Shell.",
+        "github:Toxblh/gnome-shell-extension-zorkiy",
+    ),
 ]
 
 _USER_EXT_DIR   = Path.home() / ".local" / "share" / "gnome-shell" / "extensions"
@@ -1108,6 +1116,11 @@ class ExtensionsPage(Gtk.Box):
             backend.run_epm(["epm", "-i", "-y", pkg], self._log, _done)
             return
 
+        if install_id and install_id.startswith("github:"):
+            repo = install_id[7:]
+            self._install_from_github(uuid, repo, btn, status)
+            return
+
         self._log(f"\n▶  Установка {uuid}...\n")
         win = self.get_root()
         if hasattr(win, "start_progress"): win.start_progress(f"Установка расширения...")
@@ -1142,6 +1155,84 @@ class ExtensionsPage(Gtk.Box):
                 GLib.idle_add(btn.set_label, "Повторить")
                 GLib.idle_add(btn.set_sensitive, True)
             GLib.idle_add(lambda: win.stop_progress(ok) if hasattr(win, "stop_progress") else None)
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _install_from_github(self, uuid: str, repo: str, btn, status) -> None:
+        """Установка GNOME-расширения напрямую из GitHub-репозитория."""
+        self._log(f"\n▶  Установка {uuid} из GitHub ({repo})...\n")
+        win = self.get_root()
+        if hasattr(win, "start_progress"):
+            win.start_progress("Установка расширения из GitHub...")
+
+        def _do():
+            import tempfile
+            import zipfile
+            import shutil as _shutil
+
+            zip_url = f"https://github.com/{repo}/archive/refs/heads/main.zip"
+            ok = False
+            try:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    zip_path = os.path.join(tmpdir, "ext.zip")
+                    GLib.idle_add(self._log, f"⬇  Загрузка {zip_url}...\n")
+                    req = urllib.request.Request(zip_url, headers={"User-Agent": "ALTBooster"})
+                    with urllib.request.urlopen(req, timeout=30) as resp:
+                        with open(zip_path, "wb") as f:
+                            f.write(resp.read())
+
+                    with zipfile.ZipFile(zip_path) as zf:
+                        names = zf.namelist()
+                        uuid_prefix = None
+                        for name in names:
+                            parts = name.split("/")
+                            if len(parts) >= 2 and parts[1] == uuid and parts[1]:
+                                uuid_prefix = f"{parts[0]}/{uuid}/"
+                                break
+
+                        if not uuid_prefix:
+                            raise ValueError(f"Директория {uuid} не найдена в архиве")
+
+                        dest = _USER_EXT_DIR / uuid
+                        dest.mkdir(parents=True, exist_ok=True)
+
+                        for member in zf.infolist():
+                            if not member.filename.startswith(uuid_prefix):
+                                continue
+                            rel_path = member.filename[len(uuid_prefix):]
+                            if not rel_path:
+                                continue
+                            target = dest / rel_path
+                            if member.filename.endswith("/"):
+                                target.mkdir(parents=True, exist_ok=True)
+                            else:
+                                target.parent.mkdir(parents=True, exist_ok=True)
+                                with zf.open(member) as src, open(target, "wb") as dst:
+                                    _shutil.copyfileobj(src, dst)
+
+                r = subprocess.run(
+                    ["gnome-extensions", "enable", uuid],
+                    capture_output=True, text=True,
+                )
+                ok = r.returncode == 0
+                if not ok:
+                    GLib.idle_add(self._log, f"✘  gnome-extensions enable: {r.stderr.strip()}\n")
+
+            except Exception as e:
+                GLib.idle_add(self._log, f"✘  Ошибка: {e}\n")
+
+            def _finish():
+                if ok:
+                    self._log("✔  Установлено!\n")
+                    self._refresh_installed()
+                else:
+                    set_status_error(status)
+                    btn.set_label("Повторить")
+                    btn.set_sensitive(True)
+                if hasattr(win, "stop_progress"):
+                    win.stop_progress(ok)
+
+            GLib.idle_add(_finish)
 
         threading.Thread(target=_do, daemon=True).start()
 

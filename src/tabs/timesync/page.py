@@ -124,7 +124,8 @@ class BorgPage(Gtk.Box):
     @staticmethod
     def _filter_entryrow_suffix_icons(row, allowed_icons: set[str]) -> None:
         # На некоторых версиях libadwaita кнопка apply отображается как "карандаш"
-        # и может появляться динамически. Оставляем только явно разрешённые иконки.
+        # и может появляться динамически (в т.ч. при каждом map после re-parent).
+        # Подписываемся на map один раз — это покрывает и первый показ, и перенос виджета.
         def _walk(widget):
             cur = widget.get_first_child() if hasattr(widget, "get_first_child") else None
             while cur is not None:
@@ -132,7 +133,7 @@ class BorgPage(Gtk.Box):
                 yield from _walk(cur)
                 cur = cur.get_next_sibling() if hasattr(cur, "get_next_sibling") else None
 
-        def _apply_filter():
+        def _apply_filter(*_):
             for child in _walk(row):
                 try:
                     if not hasattr(child, "get_icon_name"):
@@ -140,17 +141,39 @@ class BorgPage(Gtk.Box):
                     icon = child.get_icon_name() or ""
                     if not icon:
                         continue
-                    # Разрешаем только нужные иконки, карандаш скрываем принудительно.
                     if icon == "document-edit-symbolic":
-                        child.set_visible(False)
+                        # Находим кнопку-контейнер (Image → Button, через несколько уровней)
+                        target = child
+                        for _ in range(4):
+                            p = target.get_parent() if hasattr(target, "get_parent") else None
+                            if p is None or p is row:
+                                break
+                            target = p
+                            if isinstance(target, Gtk.Button):
+                                break
+                        target.set_visible(False)
+                        # libadwaita сам управляет видимостью кнопки — блокируем это
+                        if not getattr(target, "_ab_hidden_locked", False):
+                            target._ab_hidden_locked = True
+                            target.connect(
+                                "notify::visible",
+                                lambda w, _: w.set_visible(False) if w.get_visible() else None,
+                            )
                     elif icon in allowed_icons:
                         child.set_visible(True)
                 except Exception:
                     continue
             return False
 
+        # Запускаем немедленно и через 250 мс (на случай ленивой инициализации)
         GLib.idle_add(_apply_filter)
         GLib.timeout_add(250, _apply_filter)
+
+        # Подписка на map: libadwaita пересоздаёт кнопку при каждом показе виджета.
+        # Флаг _ab_pencil_filter_connected гарантирует одну подписку на строку.
+        if not getattr(row, "_ab_pencil_filter_connected", False):
+            row._ab_pencil_filter_connected = True
+            row.connect("map", lambda _: GLib.idle_add(_apply_filter))
 
     def _build_info_page(self):
         scroll, self._body = make_scrolled_page()
@@ -407,8 +430,9 @@ class BorgPage(Gtk.Box):
             self._tm_show_placeholder("empty", error)
             return
 
-        total = len(archives)
-        for idx, archive in enumerate(archives, start=1):
+        sorted_archives = list(reversed(archives))
+        total = len(sorted_archives)
+        for idx, archive in enumerate(sorted_archives, start=1):
             card = self._tm_build_archive_card(archive, idx, total)
             self._tm_carousel.append(card)
 
@@ -422,6 +446,9 @@ class BorgPage(Gtk.Box):
         self._tm_create_btn.set_visible(True)
         self._tm_update_backup_actions(True)
         self._tm_update_nav_buttons()
+        if total > 1:
+            last_page = self._tm_carousel.get_nth_page(total - 1)
+            GLib.idle_add(self._tm_carousel.scroll_to, last_page, False)
 
     def _tm_build_archive_card(self, archive: dict, idx: int = 0, total: int = 0) -> Gtk.Widget:
         name = archive.get("name", "")
@@ -508,16 +535,28 @@ class BorgPage(Gtk.Box):
         overlay.add_overlay(badge)
 
         if idx > 0 and total > 0:
+            bottom_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            bottom_box.set_halign(Gtk.Align.END)
+            bottom_box.set_valign(Gtk.Align.END)
+            bottom_box.set_margin_end(12)
+            bottom_box.set_margin_bottom(12)
+            bottom_box.set_hexpand(False)
+            bottom_box.set_vexpand(False)
+
+            if total > 1:
+                type_label = "main" if idx == 1 else "add"
+                type_css = "warning" if idx == 1 else "accent"
+                type_badge = Gtk.Label(label=type_label)
+                type_badge.add_css_class("ab-source-badge")
+                type_badge.add_css_class(type_css)
+                bottom_box.append(type_badge)
+
             num_badge = Gtk.Label(label=f"Архив {idx} из {total}")
             num_badge.add_css_class("ab-source-badge")
             num_badge.add_css_class("accent")
-            num_badge.set_halign(Gtk.Align.END)
-            num_badge.set_valign(Gtk.Align.END)
-            num_badge.set_margin_end(12)
-            num_badge.set_margin_bottom(12)
-            num_badge.set_hexpand(False)
-            num_badge.set_vexpand(False)
-            overlay.add_overlay(num_badge)
+            bottom_box.append(num_badge)
+
+            overlay.add_overlay(bottom_box)
 
         return overlay
 
