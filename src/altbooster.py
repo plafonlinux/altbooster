@@ -130,6 +130,7 @@ def main() -> int:
             self.add_action(quit_action)
             self.set_accels_for_action("app.quit", ["<Primary>q"])
             win = PlafonWindow(application=app)
+            win.present()
 
     try:
         return int(AltBoosterApp().run(sys.argv))
