@@ -39,6 +39,7 @@ _TAB_FLAGS = {
     "-f": "tweaks",
     "-t": "borg",
     "-m": "maintenance",
+    "-n": "niri",
 }
 
 
@@ -53,16 +54,33 @@ def main() -> int:
             "  -f    Открыть вкладку «Твики и фиксы»\n"
             "  -t    Открыть вкладку «TimeSync»\n"
             "  -m    Открыть вкладку «Обслуживание»\n"
+            "  -n    Открыть вкладку «Niri» (только интерфейс Niri, без сайдбара)\n"
+            "          --oboi      открыть сразу на подвкладке «Обои»\n"
+            "          --pakety    открыть сразу на подвкладке «Пакеты»\n"
+            "          --konfigi   открыть сразу на подвкладке «Конфиги»\n"
             "  -h    Показать эту справку\n"
             "  --debug  Режим отладки\n"
         )
         return 0
 
+    niri_standalone = "-n" in sys.argv
     initial_tab = ""
     for flag, tab in _TAB_FLAGS.items():
         if flag in sys.argv:
             sys.argv.remove(flag)
             initial_tab = tab
+            break
+
+    _NIRI_SUBTAB_FLAGS = {
+        "--oboi":    "wallpapers",
+        "--pakety":  "packages",
+        "--konfigi": "configs",
+    }
+    niri_subtab = ""
+    for flag, subtab in _NIRI_SUBTAB_FLAGS.items():
+        if flag in sys.argv:
+            sys.argv.remove(flag)
+            niri_subtab = subtab
             break
 
     debug = "--debug" in sys.argv
@@ -86,15 +104,22 @@ def main() -> int:
 
     from core import config
 
-    config.init_runtime(debug=debug, initial_tab=initial_tab)
+    config.init_runtime(debug=debug, initial_tab=initial_tab, niri_standalone=niri_standalone, niri_subtab=niri_subtab)
 
     from ui import PlafonWindow
 
     class AltBoosterApp(Adw.Application):
         def __init__(self):
+            # NON_UNIQUE при standalone (-n) — всегда новое окно,
+            # иначе FLAGS_NONE — повторный запуск поднимает существующее окно
+            flags = (
+                Gio.ApplicationFlags.NON_UNIQUE
+                if niri_standalone
+                else Gio.ApplicationFlags.FLAGS_NONE
+            )
             super().__init__(
                 application_id="ru.altbooster.app",
-                flags=Gio.ApplicationFlags.FLAGS_NONE,
+                flags=flags,
             )
             self.connect("activate", self._on_activate)
 
@@ -105,7 +130,6 @@ def main() -> int:
             self.add_action(quit_action)
             self.set_accels_for_action("app.quit", ["<Primary>q"])
             win = PlafonWindow(application=app)
-            win.ask_password()
 
     try:
         return int(AltBoosterApp().run(sys.argv))
