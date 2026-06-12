@@ -323,31 +323,18 @@ class SetupPage(Gtk.Box):
 
         pkg_rows = [
             ("system-software-install-symbolic",   "Установить EPM",              "Пакетный менеджер eepm, необходим для утилиты", "Установить", self._on_install_epm, backend.is_epm_installed, "setting_epm_install", "Установлено", self._on_remove_epm, "Удалить", "user-trash-symbolic"),
+            ("software-update-available-symbolic", "Обновить систему",
+             "apm update — атомарное обновление" if backend.is_alt_atomic() else "Выполняет epm update и epm full-upgrade",
+             "Обновить", self._on_apm_update if backend.is_alt_atomic() else self._on_epm,
+             lambda: False, "setting_system_update", "Обновлено"),
         ]
 
-        if backend.is_alt_atomic():
-            pkg_rows.append(
-                ("software-update-available-symbolic", "Обновить систему (Atomic)", "apm update — атомарное обновление всей системы", "Обновить", self._on_apm_update, lambda: False, "setting_apm_system_update", "Обновлено"),
-            )
-        else:
-            pkg_rows.append(
-                ("software-update-available-symbolic", "Обновить систему (EPM)",      "Выполняет epm update и epm full-upgrade",       "Обновить",    self._on_epm,         lambda: False,            "setting_epm_system_update", "Обновлено"),
-            )
-
-        if backend.is_alt_atomic():
-            self._r_epm_install, self._r_apm = [SettingRow(*r) for r in pkg_rows]
-        else:
-            self._r_epm_install, self._r_epm = [SettingRow(*r) for r in pkg_rows]
+        self._r_epm_install, self._r_update = [SettingRow(*r) for r in pkg_rows]
 
         mirror_btn = self._build_mirror_menu()
-        if backend.is_alt_atomic():
-            self._r_apm._suffix_box.insert_child_after(mirror_btn, self._r_apm._status)
-            for r in (self._r_epm_install, self._r_apm):
-                pkg_group.add(r)
-        else:
-            self._r_epm._suffix_box.insert_child_after(mirror_btn, self._r_epm._status)
-            for r in (self._r_epm_install, self._r_epm):
-                pkg_group.add(r)
+        self._r_update._suffix_box.insert_child_after(mirror_btn, self._r_update._status)
+        for r in (self._r_epm_install, self._r_update):
+            pkg_group.add(r)
 
         sys_group = Adw.PreferencesGroup()
         sys_group.set_title("Система")
@@ -659,7 +646,7 @@ class SetupPage(Gtk.Box):
     def _register_setup_search_targets(self):
         self._setup_search_targets = {
             "epm_install": self._r_epm_install,
-            "epm_update": self._r_epm,
+            "epm_update": self._r_update,
             "sudo": self._r_sudo,
             "gnome_sw": self._r_gnome_sw,
             "trim": self._r_trim,
