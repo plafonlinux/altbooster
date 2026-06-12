@@ -47,6 +47,9 @@ _SAFE_CMDS: frozenset[str] = frozenset({
     "fstrim",
     # /usr/sbin/control (ALT): tabs/setup.py run_privileged при отключении sudo
     "control",
+    # ALT Atomic
+    "apm",
+    "bootc",
 })
 
 _INTERNAL_CMDS: frozenset[str] = frozenset({

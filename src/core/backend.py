@@ -28,6 +28,8 @@ from core.checks import (
     is_aac_installed,
     is_fairlight_installed,
     is_epm_installed,
+    is_alt_atomic,
+    get_atomic_status,
 )
 from core.tweaks import (
     apply_vm_dirty,

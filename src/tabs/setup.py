@@ -146,6 +146,25 @@ class SetupPage(Gtk.Box):
                 self._mirror_btn.set_label(name)
                 break
 
+
+    def _on_apm_update(self, row):
+        row.set_working()
+        win = self.get_root()
+        self._log("\n▶  Атомарное обновление системы (apm update)...\n")
+        if hasattr(win, "start_progress"):
+            win.start_progress("Обновление системы...")
+
+        def on_done(ok):
+            def _restore():
+                row.set_done(False)
+                row._btn.set_label("Обновить")
+            GLib.idle_add(_restore)
+            self._log("\n✔  Образ обновлён!\n" if ok else "\n✘  Ошибка обновления\n")
+            if hasattr(win, "stop_progress"):
+                win.stop_progress(ok)
+
+        backend.run_privileged(["apm", "update"], self._log, on_done)
+
     def _on_epm(self, row):
         if not backend.is_epm_installed():
             d = Adw.AlertDialog(
@@ -217,7 +236,6 @@ class SetupPage(Gtk.Box):
                     win.stop_progress(False)
                 return
 
-            # Иначе кнопка вечно «…», а оверлей прогресса остаётся поверх и мешает окну превью.
             def on_confirm():
                 row.set_working()
                 if hasattr(win, "start_progress"):
@@ -249,28 +267,25 @@ class SetupPage(Gtk.Box):
                     on_confirm=on_confirm,
                     on_cancel=on_cancel,
                     on_no_changes=on_no_changes,
-                    runner=backend.run_epm_sync,
                     empty_message="Система и приложения обновлены",
-                    log=self._log,
                     no_changes_message="ℹ  Система актуальна — обновлений нет.\n",
-                    window_title="Обновление системы",
                     confirm_label="Продолжить обновление",
-                ).present()
+                )
 
             GLib.idle_add(_open_preview_after_update)
 
         def _run_epm_update():
             backend.run_epm(["epm", "update"], self._log, on_update_done)
 
-        active_mirror = _detect_active_mirror()
-        selected = getattr(self, "_selected_mirror", active_mirror)
-        if selected != active_mirror:
-            mirror_name = next((n for n, f, _ in _MIRRORS if f == selected), selected)
-            self._log(f"\n▶  Переключение зеркала на {mirror_name}...\n")
+        selected = self._selected_mirror
+        if selected != _detect_active_mirror() and selected:
+            self._log(
+                f"\n▶  Переключение зеркала на {selected}...\n"
+            )
 
             def _after_switch(ok):
                 if ok:
-                    self._log(f"✔  Зеркало переключено на {mirror_name}.\n")
+                    self._log(f"✔  Зеркало переключено на {selected}.\n")
                     _run_epm_update()
                 else:
                     self._log("✘  Ошибка переключения зеркала.\n")
@@ -308,16 +323,31 @@ class SetupPage(Gtk.Box):
 
         pkg_rows = [
             ("system-software-install-symbolic",   "Установить EPM",              "Пакетный менеджер eepm, необходим для утилиты", "Установить", self._on_install_epm, backend.is_epm_installed, "setting_epm_install", "Установлено", self._on_remove_epm, "Удалить", "user-trash-symbolic"),
-            ("software-update-available-symbolic", "Обновить систему (EPM)",      "Выполняет epm update и epm full-upgrade",       "Обновить",    self._on_epm,         lambda: False,            "setting_epm_system_update", "Обновлено"),
         ]
 
-        self._r_epm_install, self._r_epm = [SettingRow(*r) for r in pkg_rows]
+        if backend.is_alt_atomic():
+            pkg_rows.append(
+                ("software-update-available-symbolic", "Обновить систему (Atomic)", "apm update — атомарное обновление всей системы", "Обновить", self._on_apm_update, lambda: False, "setting_apm_system_update", "Обновлено"),
+            )
+        else:
+            pkg_rows.append(
+                ("software-update-available-symbolic", "Обновить систему (EPM)",      "Выполняет epm update и epm full-upgrade",       "Обновить",    self._on_epm,         lambda: False,            "setting_epm_system_update", "Обновлено"),
+            )
+
+        if backend.is_alt_atomic():
+            self._r_epm_install, self._r_apm = [SettingRow(*r) for r in pkg_rows]
+        else:
+            self._r_epm_install, self._r_epm = [SettingRow(*r) for r in pkg_rows]
 
         mirror_btn = self._build_mirror_menu()
-        self._r_epm._suffix_box.insert_child_after(mirror_btn, self._r_epm._status)
-
-        for r in (self._r_epm_install, self._r_epm):
-            pkg_group.add(r)
+        if backend.is_alt_atomic():
+            self._r_apm._suffix_box.insert_child_after(mirror_btn, self._r_apm._status)
+            for r in (self._r_epm_install, self._r_apm):
+                pkg_group.add(r)
+        else:
+            self._r_epm._suffix_box.insert_child_after(mirror_btn, self._r_epm._status)
+            for r in (self._r_epm_install, self._r_epm):
+                pkg_group.add(r)
 
         sys_group = Adw.PreferencesGroup()
         sys_group.set_title("Система")

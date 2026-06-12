@@ -242,3 +242,56 @@ def is_epm_installed() -> bool:
         return subprocess.run(["rpm", "-q", "eepm"], capture_output=True, timeout=10).returncode == 0
     except (subprocess.TimeoutExpired, OSError):
         return False
+
+
+def is_alt_atomic() -> bool:
+    if shutil.which("bootc") is None or shutil.which("apm") is None:
+        return False
+    try:
+        r1 = subprocess.run(["bootc", "-V"], capture_output=True, timeout=2)
+        r2 = subprocess.run(["apm", "-v"], capture_output=True, timeout=2)
+        return r1.returncode == 0 and r2.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def get_atomic_status() -> dict | None:
+    import json
+    try:
+        proc = subprocess.run(
+            ["pkexec", "apm", "s", "i", "status", "-f", "json"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if proc.returncode != 0:
+            return None
+        raw = json.loads(proc.stdout)
+    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError):
+        return None
+
+    data = raw.get("data") if isinstance(raw, dict) else None
+    if not isinstance(data, dict):
+        return None
+
+    try:
+        image = data["bootedImage"]["config"]["image"]
+    except (KeyError, TypeError):
+        return None
+
+    try:
+        timestamp = data["bootedImage"]["image"]["status"]["booted"]["image"]["timestamp"]
+    except (KeyError, TypeError):
+        timestamp = None
+
+    if timestamp and len(timestamp) >= 16:
+        timestamp = timestamp[:16].replace("T", " ")
+
+    try:
+        transport = data["bootedImage"]["image"]["spec"]["image"]["transport"]
+    except (KeyError, TypeError):
+        transport = None
+
+    return {
+        "image": image,
+        "timestamp": timestamp or "",
+        "modified": transport == "containers-storage",
+    }

@@ -124,6 +124,38 @@
       ]
     },
     {
+      "id": "atomic_update",
+      "icon": "software-update-available-symbolic",
+      "label": "Обновить систему (Atomic)",
+      "desc": "apm update — атомарное обновление всей системы",
+      "cmd": [
+        "apm",
+        "update"
+      ]
+    },
+    {
+      "id": "atomic_status",
+      "icon": "dialog-information-symbolic",
+      "label": "Информация об образе",
+      "desc": "Показать текущий образ и дату сборки (атомарная система)",
+      "cmd": [
+        "apm",
+        "s",
+        "i",
+        "status"
+      ]
+    },
+    {
+      "id": "atomic_rollback",
+      "icon": "edit-undo-symbolic",
+      "label": "Откат обновления",
+      "desc": "bootc rollback — вернуться к предыдущему состоянию системы",
+      "cmd": [
+        "bootc",
+        "rollback"
+      ]
+    },
+    {
       "id": "disable_tracker",
       "icon": "system-search-symbolic",
       "label": "Отключить поиск файлов",

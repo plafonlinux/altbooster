@@ -650,12 +650,17 @@ class MaintenancePage(Gtk.Box):
 
         is_btrfs = config.is_btrfs()
         btrfs_ids = {"btrfs_bal", "btrfs_defrag", "btrfs_scrub"}
+        atomic_ids = {"atomic_update", "atomic_status", "atomic_rollback"}
+        is_atomic = backend.is_alt_atomic()
 
         for task in tasks:
             row = TaskRow(task, self._log, self._update_progress)
             if task["id"] in btrfs_ids and not is_btrfs:
                 row.set_sensitive(False)
                 row.set_tooltip_text("Недоступно: не Btrfs")
+            if task["id"] in atomic_ids and not is_atomic:
+                row.set_sensitive(False)
+                row.set_tooltip_text("Недоступно: не ALT Atomic")
             self._rows.append(row)
             tasks_group.add(row)
             self._maint_search_targets[task["id"]] = row
